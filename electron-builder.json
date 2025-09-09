@@ -1,0 +1,16 @@
+{
+  "appId": "com.example.container-browser",
+  "productName": "Container Browser",
+  "directories": {
+    "output": "dist"
+  },
+  "win": {
+    "target": ["nsis"],
+    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+  }
+}
+
+
+
+
+
