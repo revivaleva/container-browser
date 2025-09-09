@@ -1,9 +1,22 @@
-﻿.cursor/
+﻿# --- Node / build ---
+node_modules/
+dist/
+out/
+build/
+*.log
 
-# Ignore local tools
-tools/bfg.jar
+# --- OS ---
+.DS_Store
 
-# Environment files
+# --- Tools / IDE ---
+.vscode/
+.cursor/
+.cache/
+.next/
+
+# --- Env / secrets (never commit) ---
 .env
 .env.*
-\n# Build / dependencies\nnode_modules/\ndist/\nout/\nbuild/\n%TEMP%/\n\.cache/\n\.next/\n# Local rules and secrets\n.cursor/\n.env\n.env.*\n# OS\n.DS_Store\n
+cf_sign_priv.pem
+cf_sign_pub.pem
+cf_create_publickey_output.json
