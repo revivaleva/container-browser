@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>コンテナシェル</title>
+    <style>
+      body { margin: 0; font-family: system-ui; }
+      /* Top bar fixed like browser chrome */
+      /* Keep height aligned with main BAR_HEIGHT (80) and allow wrapping of tabs */
+      /* pull the bar upward to cover the native title/menu area while keeping tabs visible */
+      /* nudge bar slightly higher but less so to avoid overlap with bookmarks */
+      #bar { position: fixed; top: 0px; left: 0; right: 0; height: 150px; display: flex; flex-direction: column; gap: 0; padding: 2px 8px; border-bottom: 1px solid #e6e6e6; background: #fafafa; box-sizing: border-box; z-index: 99999; }
+      /* add top padding so page content is pushed down under the tabs */
+      /* match BAR height */
+      body { padding-top: 150px; }
+      /* pull tabs row to the very top and ensure bookmark row is visible */
+      #tabs { margin-top: 0; padding-top: 2px; }
+      #bookmark-row { margin-top: 0; }
+      /* Single-tab UI: render a single tab area as label only */
+      #tabs { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; overflow:visible; padding:4px 0; min-height:34px; }
+      /* ensure bookmark row sits above any views and is clickable */
+      #bookmark-row { position:relative; z-index:11000; pointer-events:auto; margin-top:4px; display:flex !important; }
+      /* Make each tab a relatively positioned container so the close button can overlay inside the tab */
+      #tabs .tab-wrap { position:relative; display:inline-flex; align-items:center; margin-right:8px; }
+      /* make tabs wider for readability */
+      #tabs .tab-btn { padding:10px 16px; border-radius:8px 8px 0 0; border:1px solid #ddd; background:#f0f0f0; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; min-width:160px; }
+      #tabs .tab-btn.tab-active { background:#fff7e6; border-color:#f0b000; border-bottom-color: transparent; box-shadow: 0 6px 18px rgba(0,0,0,0.12); color:#000; }
+      #tabs .tab-btn { transition: box-shadow 180ms ease, background 180ms ease, transform 120ms ease; }
+      /* Position close button inside the tab (hidden) */
+      /* hide close and plus buttons as requested */
+      #tabs .tab-close { display:none; }
+      #tabs .tab-plus { display:none; }
+      #tabs .tab-plus { margin-left:6px; position:relative; z-index:1; }
+      /* show URL input and bookmarks always */
+      #controls { display:flex; gap:8px; align-items:center; margin-top:8px; }
+      #url { display:block; flex: 1; height: 32px; padding: 6px 10px; border:1px solid #dcdcdc; border-radius:4px; }
+      /* navigation buttons style (back/forward) */
+      .nav-btn { width:34px; height:34px; border-radius:50%; border:1px solid #ccc; background:#fff; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; font-weight:600; }
+      /* hide go button as requested */
+      #go { display:none; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <div id="tabs"></div>
+      <div id="controls">
+        <input id="url" placeholder="URL を入力" />
+      </div>
+      <div id="bookmark-row" style="display:flex; gap:8px; margin-top:6px; position:relative; z-index:10001; pointer-events:auto;">
+        <button id="bm-1" style="padding:6px 10px; border-radius:6px; border:1px solid #d6a500; background:#fff8e1;">Bookmark 1</button>
+        <button id="bm-2" style="padding:6px 10px; border-radius:6px; border:1px solid #d6a500; background:#fff8e1;">Bookmark 2</button>
+      </div>
+    </div>
+    <script type="module" src="./containerShell.ts"></script>
+  </body>
+  </html>
+
+
+
