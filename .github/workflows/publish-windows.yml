@@ -40,18 +40,39 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Build and publish (electron-builder)
+      - name: Build (electron-builder, no publish)
         env:
           CI: true
-        run: npx electron-builder --win --x64 --publish=always
+        run: npx electron-builder --win --x64 --publish=never
 
       - name: List dist output
         run: |
           echo "--- dist tree ---"
           if (Test-Path dist) { Get-ChildItem -Recurse dist | Select-Object FullName,Length | Format-Table -AutoSize } else { echo "dist not found" }
 
-      - name: Show latest.yml if present
+      - name: Upload artifacts to S3 (aws cli)
         run: |
-          if (Test-Path .\latest.yml) { Get-Content .\latest.yml -Raw } elseif (Test-Path dist\latest.yml) { Get-Content dist\latest.yml -Raw } else { echo "latest.yml not found in repo root or dist/" }
+          $ErrorActionPreference = 'Stop'
+          echo "Uploading built artifacts to s3://container-browser-updates/"
+          if (Test-Path dist) {
+            # upload common artifact types produced by electron-builder
+            aws s3 cp --recursive dist s3://container-browser-updates/ --exclude "*" --include "*.exe" --include "*.7z" --include "*.nsis" --include "*.yml" --no-progress
+          }
+          # also upload top-level latest.yml if present
+          if (Test-Path .\latest.yml) { aws s3 cp .\latest.yml s3://container-browser-updates/latest.yml --no-progress }
+
+      - name: Show latest.yml if present (from S3)
+        run: |
+          echo "--- latest.yml from S3 ---"
+          aws s3 cp s3://container-browser-updates/latest.yml ./latest.yml || echo "latest.yml not found on S3"
+          if (Test-Path .\latest.yml) { Get-Content .\latest.yml -Raw } else { echo "latest.yml not found on S3" }
+
+      - name: Invalidate CloudFront cache for latest.yml (optional)
+        run: |
+          if ($env:CLOUDFRONT_DISTRIBUTION_ID) {
+            aws cloudfront create-invalidation --distribution-id $env:CLOUDFRONT_DISTRIBUTION_ID --paths "/latest.yml"
+          } else {
+            echo "CLOUDFRONT_DISTRIBUTION_ID not set; skip invalidation"
+          }
 
 
