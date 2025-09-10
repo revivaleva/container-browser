@@ -123,7 +123,6 @@ app.whenReady().then(async () => {
     // trigger check
     setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { console.error('[auto-updater] check error', e); } }, 3000);
   } catch (e) { console.error('[auto-updater] setup error', e); }
-  } catch (e) { console.error('[auto-updater] setup error', e); }
   await createMainWindow();
 
   app.on('activate', async () => {
