@@ -1,6 +1,8 @@
 {
   "name": "container-browser",
   "version": "0.2.0",
+  "description": "Container Browser",
+  "author": "revivaleva",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
@@ -51,8 +53,7 @@
         "provider": "s3",
         "bucket": "container-browser-updates",
         "region": "ap-northeast-1",
-        "path": "",
-        "acl": "public-read"
+        "path": ""
       }
     ]
   }
