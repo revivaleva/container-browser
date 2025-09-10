@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import logger from '@shared/logger';
 
 contextBridge.exposeInMainWorld('containersAPI', {
   list: () => ipcRenderer.invoke('containers.list'),
@@ -47,7 +48,7 @@ contextBridge.exposeInMainWorld('tabsAPI', {
 
 // forward renderer console messages to main for easier debugging
 ipcRenderer.on('forward-log', (_e, msg) => {
-  try { console.log('[preload-forward]', msg); } catch {}
+  try { logger.debug('[preload-forward]', msg); } catch {}
 });
 
 // DevTools control for renderer: toggle DevTools when requested (e.g. F12)
