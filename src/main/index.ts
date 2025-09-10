@@ -8,6 +8,7 @@ import './ipc';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint } from '@shared/types';
+import logger from '@shared/logger';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -17,7 +18,7 @@ const _pendingOpenNames = new Set<string>();
 
 async function createMainWindow() {
   const preloadPath = path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs');
-  console.log('[main] main preload:', preloadPath, 'exists=', existsSync(preloadPath));
+  logger.debug('[main] main preload:', preloadPath, 'exists=', existsSync(preloadPath));
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -32,7 +33,7 @@ async function createMainWindow() {
   try {
     const iconPath = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
     if (existsSync(iconPath)) mainWindow.setIcon(iconPath as any);
-  } catch (e) { console.error('[main] set main window icon error', e); }
+  } catch (e) { logger.error('[main] set main window icon error', e); }
 
   // When the main window is closed, ensure all container shells are also closed
   try {
@@ -40,7 +41,7 @@ async function createMainWindow() {
       if (isQuitting) return;
       try {
         e.preventDefault();
-        console.log('[main] mainWindow close event triggered -> hiding to tray');
+        logger.info('[main] mainWindow close event triggered -> hiding to tray');
         try { if (closeAllContainers) closeAllContainers(); } catch (err) { console.error('[main] closeAllContainers error', err); }
         try { if (closeAllNonMainWindows) closeAllNonMainWindows(); } catch (err) { console.error('[main] closeAllNonMainWindows error', err); }
         try { mainWindow?.hide(); } catch (err) { console.error('[main] hide mainWindow error', err); }
@@ -72,7 +73,7 @@ async function createMainWindow() {
       if (chosenPath) break;
     }
     let img = nativeImage.createEmpty();
-    console.log('[main] tray bases=', bases, 'chosenPath=', chosenPath);
+    logger.debug('[main] tray bases=', bases, 'chosenPath=', chosenPath);
     if (chosenPath) {
       try {
         // try buffer route then resize to small tray-friendly size
@@ -83,8 +84,8 @@ async function createMainWindow() {
           try { img = img.resize({ width: 16, height: 16 }); } catch {}
         }
       } catch (e) {
-        console.error('[main] tray load error', e);
-        try { img = nativeImage.createFromPath(chosenPath); } catch (e2) { console.error('[main] createFromPath fallback error', e2); }
+        logger.error('[main] tray load error', e);
+        try { img = nativeImage.createFromPath(chosenPath); } catch (e2) { logger.error('[main] createFromPath fallback error', e2); }
       }
     }
     try {
@@ -92,14 +93,14 @@ async function createMainWindow() {
       else if (chosenPath) tray = new Tray(chosenPath as any);
       else tray = new Tray(nativeImage.createEmpty() as any);
     } catch (e) {
-      console.error('[main] tray creation error', e);
+      logger.error('[main] tray creation error', e);
     }
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show', click: () => { try { mainWindow?.show(); } catch {} } },
       { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
     ]);
-    try { tray.setToolTip('Container Browser'); tray.setContextMenu(contextMenu); tray.on('double-click', () => { try { mainWindow?.show(); } catch {} }); } catch (e) { console.error('[main] tray setup error', e); }
-  } catch (e) { console.error('[main] failed to create tray', e); }
+    try { tray.setToolTip('Container Browser'); tray.setContextMenu(contextMenu); tray.on('double-click', () => { try { mainWindow?.show(); } catch {} }); } catch (e) { logger.error('[main] tray setup error', e); }
+  } catch (e) { logger.error('[main] failed to create tray', e); }
 }
 
 app.whenReady().then(async () => {
