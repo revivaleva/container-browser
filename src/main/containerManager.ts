@@ -1,7 +1,7 @@
 import { app, BrowserWindow, BrowserView, ipcMain, session } from 'electron';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Container } from '@shared/types';
+import type { Container } from '../shared/types';
 import { DB } from './db';
 import { existsSync } from 'node:fs';
 
