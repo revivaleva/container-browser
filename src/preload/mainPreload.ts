@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import logger from '@shared/logger';
+import logger from '../shared/logger';
 
 contextBridge.exposeInMainWorld('containersAPI', {
   list: () => ipcRenderer.invoke('containers.list'),

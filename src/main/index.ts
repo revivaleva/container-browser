@@ -7,8 +7,8 @@ import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceC
 import './ipc';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
-import type { Container, Fingerprint } from '@shared/types';
-import logger from '@shared/logger';
+import type { Container, Fingerprint } from '../shared/types';
+import logger from '../shared/logger';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
