@@ -42,7 +42,6 @@
       }
     ],
     "win": {
-      // Use nsis-web to support HTTP(S)/S3 based auto-updates
       "target": ["nsis-web"],
       "icon": "build-resources/icon.ico"
     },
