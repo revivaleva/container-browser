@@ -27,11 +27,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Build and publish (electron-builder)
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+          CI: true
         run: npx electron-builder --win --x64 --publish=always
+
+      - name: List dist output
+        run: |
+          echo "--- dist tree ---"
+          if (Test-Path dist) { Get-ChildItem -Recurse dist | Select-Object FullName,Length | Format-Table -AutoSize } else { echo "dist not found" }
+
+      - name: Show latest.yml if present
+        run: |
+          if (Test-Path .\latest.yml) { Get-Content .\latest.yml -Raw } elseif (Test-Path dist\latest.yml) { Get-Content dist\latest.yml -Raw } else { echo "latest.yml not found in repo root or dist/" }
 
 
