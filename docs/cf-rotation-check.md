@@ -59,3 +59,33 @@ CI / Secrets チェックリスト（人手作業が必要）:
 
 
 
+## Rotation check @ 2025-09-11 20:05:09 +09:00
+
+**Unsigned** (https://updates.threadsbooster.jp/latest.yml)
+```
+curl.exe :   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+At C:\Users\revival\projects\container-browser\scripts\cf-rotation-check.ps1:33 char:18
++ $HeadUnsigned = (curl.exe -I $env:CF_TEST_URL 2>&1 | Out-String)
++                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  % Total    % ...  Time  Current:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (6) Could not resolve host: updates.threadsbooster.jp
+```
+
+**Signed**
+```
+curl.exe :   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+At C:\Users\revival\projects\container-browser\scripts\cf-rotation-check.ps1:37 char:16
++ $HeadSigned = (curl.exe -I "$SignedUrl" 2>&1 | Out-String)
++                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  % Total    % ...  Time  Current:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (6) Could not resolve host: updates.threadsbooster.jp
+```
+
