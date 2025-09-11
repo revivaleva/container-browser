@@ -11,8 +11,12 @@ jobs:
       AWS_REGION: ap-northeast-1
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
+      - name: Install Git LFS
+        run: git lfs install
       - name: Install deps
         run: npm ci
       - name: Build & Publish artifacts
