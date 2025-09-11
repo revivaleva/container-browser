@@ -94,3 +94,10 @@ At C:\Users\revival\projects\container-browser\scripts\cf-rotation-check.ps1:37 
 
 
 
+### 2025-09-11 22:58:32 +09:00
+- Dist: E1Q66ASB5AODYF
+- KG  : c119acbc-8c6f-4fac-b402-c3df3493ca89
+- New : K3OBNT6H3SWSZM
+- Old : K1LGK3C9516OZR
+- CF  : HTTP/1.1 403 Forbidden / HTTP/1.1 200 OK
+- ALIAS: HTTP/1.1 403 Forbidden / HTTP/1.1 200 OK
