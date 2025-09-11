@@ -89,3 +89,8 @@ At C:\Users\revival\projects\container-browser\scripts\cf-rotation-check.ps1:37 
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0curl: (6) Could not resolve host: updates.threadsbooster.jp
 ```
 
+## Detailed 403 diagnosis @ 2025-09-11 20:23:21 +09:00
+
+
+
+
