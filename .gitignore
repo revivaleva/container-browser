@@ -15,3 +15,5 @@ cf_sign_priv.pem
 cf_sign_pub.pem
 
 cf_create_publickey_output.json
+
+tmp_bfg_repo.git.bfg-report/
