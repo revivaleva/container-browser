@@ -11,7 +11,8 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "dist": "electron-builder --win --x64",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "cf:sign:test": "node --input-type=commonjs scripts/cf-sign-test.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",
@@ -19,7 +20,8 @@
     "keytar": "^7.9.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "aws-cloudfront-sign": "^3.0.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",
