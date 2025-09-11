@@ -1,0 +1,113 @@
+name: Build and publish Windows installer
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    env:
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      CLOUDFRONT_DOMAIN: ${{ secrets.CLOUDFRONT_DOMAIN }}
+      CLOUDFRONT_DIST_ID: ${{ secrets.CLOUDFRONT_DIST_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm run build
+
+      - name: Ensure electron-builder deps
+        run: |
+          npx electron-builder install-app-deps
+
+      - name: Build Windows installer (nsis-web)
+        run: |
+          npx electron-builder --win --x64 --publish=never
+        env:
+          CI: true
+
+      - name: Find generated installer
+        run: |
+          echo "Listing dist:\n"
+          dir /b dist
+          for /f "delims=" %%f in ('dir /b "dist\**\*Container*Setup*.exe"') do @echo "FOUND=%%f" & set "ARTIFACT=%%f"
+          echo "::set-output name=artifact::%ARTIFACT%"
+        shell: cmd
+        id: find_artifact
+
+      - name: Compute sha256 and size
+        run: |
+          setlocal enabledelayedexpansion
+          for /f "delims=" %%f in ('dir /b /s dist\*Container*Setup*.exe') do set ART=%%f
+          echo Found artifact: !ART!
+          certutil -hashfile "!ART!" SHA256 > sha.txt
+          for /f "skip=1 tokens=*" %%l in (sha.txt) do ( if not defined sha echo %%l )
+          set /p SHA=<sha.txt
+          rem certutil outputs: SHA256 hash: then the value; get last non-empty line
+          for /f "tokens=* delims=\n" %%L in (sha.txt) do set LAST=%%L
+          rem Extract hex using findstr
+          for /f "tokens=*" %%A in ('findstr /R /C:"[0-9a-fA-F]\{64\}" sha.txt') do set SHAHEX=%%A
+          set SHAHEX=!SHAHEX: =!
+          echo SHA256=!SHAHEX!
+          for %%A in ("!ART!") do set SIZE=%%~zA
+          echo SIZE=!SIZE!
+          echo "sha256=!SHAHEX!" >> $GITHUB_ENV
+          echo "size=!SIZE!" >> $GITHUB_ENV
+          echo "artifact_path=!ART!" >> $GITHUB_ENV
+        shell: cmd
+        id: compute_hash
+
+      - name: Upload artifact to S3
+        run: |
+          echo Uploading %artifact_path% to s3://%S3_BUCKET%/
+          aws s3 cp "%artifact_path%" "s3://%S3_BUCKET%/" --only-show-errors --region %AWS_REGION%
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Create latest.json and upload
+        run: |
+          setlocal enabledelayedexpansion
+          rem build CloudFront URL (URL-encode spaces)
+          set ART_NAME=%~nx%artifact_path%
+          rem find filename only
+          for %%F in (%artifact_path%) do set FNAME=%%~nxF
+          set FNAME_ENC=!FNAME: =%%20!
+          set URL=https://%CLOUDFRONT_DOMAIN%/%FNAME_ENC%
+          echo Creating latest.json
+          echo {>latest.json
+          echo   "version": "${{ github.ref_name }}",>>latest.json
+          echo   "url": "!URL!",>>latest.json
+          echo   "sha256": "${{ env.sha256 }}",>>latest.json
+          echo   "size": ${SIZE},>>latest.json
+          echo   "publishedAt": "${{ steps.compute_hash.outputs }}">>latest.json
+          echo }>>latest.json
+          aws s3 cp latest.json s3://%S3_BUCKET%/latest.json --content-type application/json --region %AWS_REGION% --only-show-errors
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        shell: cmd
+
+      - name: Create CloudFront invalidation (optional)
+        if: ${{ secrets.CLOUDFRONT_DIST_ID != '' }}
+        run: |
+          aws cloudfront create-invalidation --distribution-id %CLOUDFRONT_DIST_ID% --paths /latest.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Show uploaded latest.json URL
+        run: |
+          echo https://%CLOUDFRONT_DOMAIN%/latest.json

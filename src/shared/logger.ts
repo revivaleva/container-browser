@@ -24,3 +24,4 @@ export const error = (...args: any[]) => {
 export default { debug, info, warn, error };
 
 
+

@@ -7,3 +7,5 @@ tools/bfg.jar
 .env
 .env.*
 \n# Build / dependencies\nnode_modules/\ndist/\nout/\nbuild/\n%TEMP%/\n\.cache/\n\.next/\n# Local rules and secrets\n.cursor/\n.env\n.env.*\n# OS\n.DS_Store\n
+
+node_modules/

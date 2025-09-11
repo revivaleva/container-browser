@@ -1,0 +1,41 @@
+{
+  "CallerReference": "cb-dist-$(Get-Date -UFormat %s)",
+  "Comment": "CloudFront distribution for container-browser updates (nsis-web)",
+  "Enabled": true,
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "S3-container-browser-updates",
+        "DomainName": "container-browser-updates.s3.amazonaws.com",
+        "OriginPath": "",
+        "OriginAccessControlId": "EWOOG39GE6ICY",
+        "S3OriginConfig": { }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "S3-container-browser-updates",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": {
+      "Quantity": 2,
+      "Items": ["GET","HEAD"],
+      "CachedMethods": { "Quantity": 2, "Items": ["GET","HEAD"] }
+    },
+    "Compress": true,
+    "ForwardedValues": {
+      "QueryString": false,
+      "Cookies": { "Forward": "none" },
+      "Headers": { "Quantity": 0 }
+    },
+    "MinTTL": 0,
+    "DefaultTTL": 3600,
+    "MaxTTL": 31536000
+  },
+  "Aliases": { "Quantity": 1, "Items": ["updates.threadsbooster.jp"] },
+  "ViewerCertificate": {
+    "ACMCertificateArn": "arn:aws:acm:us-east-1:605822313174:certificate/aee52d99-d779-4006-a07f-b9126ea10bbe",
+    "SSLSupportMethod": "sni-only",
+    "MinimumProtocolVersion": "TLSv1.2_2021"
+  }
+}
