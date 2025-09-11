@@ -9,3 +9,9 @@ tools/bfg.jar
 \n# Build / dependencies\nnode_modules/\ndist/\nout/\nbuild/\n%TEMP%/\n\.cache/\n\.next/\n# Local rules and secrets\n.cursor/\n.env\n.env.*\n# OS\n.DS_Store\n
 
 node_modules/
+
+cf_sign_priv.pem
+
+cf_sign_pub.pem
+
+cf_create_publickey_output.json
