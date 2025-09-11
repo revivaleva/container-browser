@@ -5,8 +5,8 @@
     "output": "dist"
   },
   "win": {
-    "target": ["nsis"],
-    "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    "target": ["nsis-web"],
+    "artifactName": "Container Browser Web Setup ${version}.${ext}"
   }
 }
 
