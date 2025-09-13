@@ -1,9 +1,27 @@
-﻿.cursor/
+﻿# Build / dependencies
+node_modules/
+dist/
+out/
+build/
+*.log
 
-# Ignore local tools
-tools/bfg.jar
+# Framework caches
+.cache/
+.next/
+%TEMP%/
 
-# Environment files
+# Local profiles
+profiles/
+
+# OS
+.DS_Store
+
+# Local tools (do not commit)
+tools/bfg*.jar
+
+# Secrets / env
 .env
 .env.*
-\n# Build / dependencies\nnode_modules/\ndist/\nout/\nbuild/\n%TEMP%/\n\.cache/\n\.next/\n# Local rules and secrets\n.cursor/\n.env\n.env.*\n# OS\n.DS_Store\n
+
+# IDE / local configs
+.cursor/
