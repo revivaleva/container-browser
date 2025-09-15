@@ -1,0 +1,14 @@
+version: 0.2.3
+files:
+  - url: ContainerBrowser-Web-Setup.exe
+    sha512: Nvecybr+vhQhJvdcpzrp8a8Rkoor72pJxeNZCpMjM3F+qGgp7semsHJZXq57rjGg5238Gz0ogUsukGUbVwIfwA==
+path: ContainerBrowser-Web-Setup.exe
+sha512: Nvecybr+vhQhJvdcpzrp8a8Rkoor72pJxeNZCpMjM3F+qGgp7semsHJZXq57rjGg5238Gz0ogUsukGUbVwIfwA==
+packages:
+  x64:
+    size: 82419033
+    sha512: pzWKbD8z2yYrHpyg7X9MKOaOCuJnIvwHNJ9tJZ07wTcrCpO9CBgOVt59WAj9MyknXbHGcRW9DWE0qH/DarUMXA==
+    blockMapSize: 86759
+    path: container-browser-0.2.3-x64.nsis.7z
+    file: container-browser-0.2.3-x64.nsis.7z
+releaseDate: '2025-09-15T04:32:49.148Z'

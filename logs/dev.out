@@ -1,0 +1,42 @@
+
+> container-browser@0.2.3 dev
+> electron-vite dev
+
+[36mvite v5.4.19 [32mbuilding SSR bundle for development...[36m[39m
+transforming...
+[32m✓[39m 419 modules transformed.
+rendering chunks...
+[2mout/main/[22m[36mindex.js  [39m[1m[33m597.01 kB[39m[22m
+[32m✓ built in 1.60s[39m
+[32m
+build the electron main process successfully[39m
+[90m
+-----
+[39m
+[36mvite v5.4.19 [32mbuilding SSR bundle for development...[36m[39m
+transforming...
+[32m✓[39m 3 modules transformed.
+rendering chunks...
+[2mout/preload/[22m[36mmainPreload.cjs       [39m[1m[2m3.06 kB[22m[1m[22m
+[2mout/preload/[22m[36mcontainerPreload.cjs  [39m[1m[2m8.00 kB[22m[1m[22m
+[32m✓ built in 28ms[39m
+[32m
+build the electron preload files successfully[39m
+[90m
+-----
+[39m
+[32mdev server running for the electron renderer process at:
+[39m
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[32m
+start electron app...
+[39m
+
+14:23:40.471 > [autoupdate] skip in dev
+[ipc] containers.list
+[main] mainWindow close event triggered -> hiding to tray
+[main] closeAllContainers: closing 0 containers
+[main] closeAllNonMainWindows: total windows= 1
+[main] closeAllContainers: closing 0 containers
+[main] closeAllNonMainWindows: total windows= 1

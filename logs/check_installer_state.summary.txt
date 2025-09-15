@@ -1,0 +1,12 @@
+﻿== Git 迥ｶ諷・==
+branch: main
+
+== 繝ｭ繝ｼ繧ｫ繝ｫ逕滓・迚ｩ (dist) 縺ｮ遒ｺ隱・==
+dist\latest.yml: NOT FOUND
+nsis-web exe: NOT FOUND
+
+== 蜈ｬ髢偽RL縺ｮHEAD遒ｺ隱・==
+HEAD https://updates.threadsbooster.jp/latest.yml -> 200
+
+== S3 荳隕ｧ・亥庄閭ｽ縺ｪ繧会ｼ・=
+S3: listed (logs\ s3_ls_latest.txt / s3_ls_nsis.txt)

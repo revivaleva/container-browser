@@ -1,0 +1,8 @@
+version: 0.2.2
+files:
+  - url: ContainerBrowser-Setup-0.2.2.exe
+    sha512: tlKzF09r7CwWxBy+JlOb40D8nzCV5gKsYIRiLLJgJbJFgFKAFoYbFF6aCocGfZNCHbbH+7o6RDNqQMSLJmxDHQ==
+    size: 82953477
+path: ContainerBrowser-Setup-0.2.2.exe
+sha512: tlKzF09r7CwWxBy+JlOb40D8nzCV5gKsYIRiLLJgJbJFgFKAFoYbFF6aCocGfZNCHbbH+7o6RDNqQMSLJmxDHQ==
+releaseDate: '2025-09-14T12:09:33.420Z'

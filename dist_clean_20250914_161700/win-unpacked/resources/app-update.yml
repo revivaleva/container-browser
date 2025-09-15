@@ -1,0 +1,6 @@
+provider: generic
+url: https://updates.threadsbooster.jp
+channel: latest
+updaterCacheDirName: container-browser-updater
+publisherName:
+  - threadsbooster

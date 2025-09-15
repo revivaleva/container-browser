@@ -1,0 +1,11 @@
+  • electron-builder  version=24.13.3 os=10.0.26100
+  • loaded configuration  file=package.json ("build" field)
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+  • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+  • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+  • packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist_update_20250915_133224\win-unpacked
+  • building        target=nsis-web file=dist_update_20250915_133224\nsis-web\ContainerBrowser-Web-Setup.exe archs=x64 oneClick=true perMachine=false
+  • building embedded block map  file=dist_update_20250915_133224\nsis-web\container-browser-0.2.3-x64.nsis.7z

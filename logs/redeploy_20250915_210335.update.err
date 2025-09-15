@@ -1,0 +1,15 @@
+発生場所 C:\Users\revival\projects\container-browser\scripts\update-release.ps1:7 文字:29
++   [string]$Bucket         = 'container-browser-updates',
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+代入式が無効です。代入演算子に対する入力には、代入を受け入れることができるオブジェクト (変数やプロパティなど) を指定する必要があります。
+発生場所 C:\Users\revival\projects\container-browser\scripts\update-release.ps1:8 文字:29
++   [string]$DistributionId = 'E1Q66ASB5AODYF',
++                             ~~~~~~~~~~~~~~~~
+代入式が無効です。代入演算子に対する入力には、代入を受け入れることができるオブジェクト (変数やプロパティなど) を指定する必要があります。
+発生場所 C:\Users\revival\projects\container-browser\scripts\update-release.ps1:9 文字:29
++   [string]$Cdn            = 'https://updates.threadsbooster.jp',
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+代入式が無効です。代入演算子に対する入力には、代入を受け入れることができるオブジェクト (変数やプロパティなど) を指定する必要があります。
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : InvalidLeftHandSide
+ 

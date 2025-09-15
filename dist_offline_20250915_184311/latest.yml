@@ -1,0 +1,8 @@
+version: 0.2.4
+files:
+  - url: ContainerBrowser-Offline-Setup.exe
+    sha512: sFDgpprCJxAcDKXSrY0fvIHrmz3Gqyr4kBFbMXm/DV5cUmWi+G2Or5thG5JadZN/TIE2PnGsuugrGPcdXc7F8w==
+    size: 82995572
+path: ContainerBrowser-Offline-Setup.exe
+sha512: sFDgpprCJxAcDKXSrY0fvIHrmz3Gqyr4kBFbMXm/DV5cUmWi+G2Or5thG5JadZN/TIE2PnGsuugrGPcdXc7F8w==
+releaseDate: '2025-09-15T09:43:38.314Z'

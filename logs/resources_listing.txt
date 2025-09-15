@@ -1,0 +1,10 @@
+﻿
+FullName                                                                                          Length   LastWriteTime       
+--------                                                                                          ------   -------------       
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\build-resources                    9/14/2025 2:46:10 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\app-update.yml            126      9/14/2025 2:46:10 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\app.asar                  38033802 9/14/2025 2:46:10 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\build-resources\Icon.ico  70300    9/9/2025 12:24:43 PM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\build-resources\README.md 483      9/8/2025 8:07:51 PM 
+
+

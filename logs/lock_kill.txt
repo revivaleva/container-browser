@@ -1,0 +1,2 @@
+﻿Failed to stop 3956 NVDisplay.Container: 次のエラーのため、プロセス "NVDisplay.Container (3956)" を停止できません: アクセスが拒否されました。
+Failed to stop 8120 NVDisplay.Container: 次のエラーのため、プロセス "NVDisplay.Container (8120)" を停止できません: アクセスが拒否されました。

@@ -1,0 +1,6 @@
+﻿
+FullName                                                                           Length
+--------                                                                           ------
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\app.asar 38033802
+
+

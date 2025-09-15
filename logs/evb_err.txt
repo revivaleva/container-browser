@@ -1,0 +1,3 @@
+[1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+(!) C:/Users/revival/projects/container-browser/src/main/containerManager.ts is dynamically imported by C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts but also statically imported by C:/Users/revival/projects/container-browser/src/main/index.ts, dynamic import will not move module into another chunk.
+[39m

@@ -1,0 +1,24 @@
+
+> container-browser@0.2.3 postinstall
+> electron-builder install-app-deps
+
+  • electron-builder  version=24.13.3
+  • loaded configuration  file=package.json ("build" field)
+  • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+  • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+  • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+
+added 1 package, and audited 491 packages in 5s
+
+69 packages are looking for funding
+  run `npm fund` for details
+
+4 moderate severity vulnerabilities
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.

@@ -11,6 +11,17 @@ contextBridge.exposeInMainWorld('containersAPI', {
   saveCredential: (payload: any) => ipcRenderer.invoke('vault.saveCredential', payload)
 });
 
+// expose update API
+contextBridge.exposeInMainWorld('appAPI', {
+  checkForUpdates: () => ipcRenderer.invoke('app/check-for-updates')
+});
+
+// expose version info
+contextBridge.exposeInMainWorld('appMeta', {
+  name: () => ipcRenderer.invoke('app/get-name'),
+  version: () => ipcRenderer.invoke('app/get-version')
+});
+
 contextBridge.exposeInMainWorld('proxyAPI', {
   test: (payload: any) => ipcRenderer.invoke('proxy.test', payload),
 });

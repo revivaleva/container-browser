@@ -1,0 +1,106 @@
+  • electron-builder  version=24.13.3 os=10.0.26100
+  • loaded configuration  file=package.json ("build" field)
+  • effective config  config=directories:
+  output: dist
+  buildResources: build-resources
+appId: com.example.container-browser
+productName: Container Browser
+extraResources:
+  - from: build-resources/
+    to: build-resources/
+    filter:
+      - '**/*'
+files:
+  - filter:
+      - out/**/*
+      - node_modules/**/*
+      - package.json
+      - build-resources/**/*
+win:
+  target:
+    - nsis-web
+  icon: build-resources/icon.ico
+publish:
+  - provider: s3
+    bucket: container-browser-updates
+    region: ap-northeast-1
+    path: ''
+
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • spawning        command=C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe node-dep-tree --dir C:\Users\revival\projects\container-browser
+  • unresolved deps  unresolved=detect-libcexpand-templatemkdirp-classicrcsimple-gettunnel-agentgithub-from-packageminimistnapi-build-utilspumptar-fs
+                     nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules
+                     round=0
+  • unresolved deps  unresolved=semver nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules round=0
+  • unresolved deps  unresolved=mkdirp-classicpumptar-stream nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules round=0
+  • unresolved deps  unresolved=lodash.isequalsemvertiny-typed-emitterbuilder-util-runtimejs-yamllazy-vallodash.escaperegexp nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules round=0
+  • unresolved deps  unresolved=graceful-fs nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules round=0
+  • unresolved deps  unresolved=universalify nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules round=0
+  • unresolved deps  unresolved=graceful-fs nodeModuleDir=C:\Users\revival\projects\container-browser\node_modules round=0
+  • exited          command=app-builder.exe code=0 pid=16340 out=[{"dir":"C:\\Users\\revival\\projects\\container-browser\\node_modules","deps":[{"name":"argparse","version":"2.0.1"},{"name":"base64-js","version":"1.5.1"},{"name":"better-sqlite3","version":"12.2.0","hasPrebuildInstall":true},{"name":"bindings","version":"1.5.0"},{"name":"bl","version":"4.1.0"},{"name":"buffer","version":"5.7.1"},{"name":"builder-util-runtime","version":"9.3.1"},{"name":"debug","version":"4.4.1"},{"name":"decompress-response","version":"6.0.0"},{"name":"deep-extend","version":"0.6.0"},{"name":"detect-libc","version":"2.0.4"},{"name":"electron-updater","version":"6.6.2"},{"name":"end-of-stream","version":"1.4.5"},{"name":"expand-template","version":"2.0.3"},{"name":"file-uri-to-path","version":"1.0.0"},{"name":"fs-constants","version":"1.0.0"},{"name":"github-from-package","version":"0.0.0"},{"name":"graceful-fs","version":"4.2.11"},{"name":"ieee754","version":"1.2.1"},{"name":"inherits","version":"2.0.4"},{"name":"ini","version":"1.3.8"},{"name":"js-tokens","version":"4.0.0"},{"name":"js-yaml","version":"4.1.0"},{"name":"keytar","version":"7.9.0","hasPrebuildInstall":true,"napiVersions":[3]},{"name":"lazy-val","version":"1.0.5"},{"name":"lodash.escaperegexp","version":"4.1.2"},{"name":"lodash.isequal","version":"4.5.0"},{"name":"loose-envify","version":"1.4.0"},{"name":"minimist","version":"1.2.8"},{"name":"mkdirp-classic","version":"0.5.3"},{"name":"ms","version":"2.1.3"},{"name":"napi-build-utils","version":"2.0.0","napiVersions":[22310]},{"name":"node-addon-api","version":"4.3.0"},{"name":"once","version":"1.4.0"},{"name":"prebuild-install","version":"7.1.3"},{"name":"pump","version":"3.0.3"},{"name":"rc","version":"1.2.8"},{"name":"react","version":"18.3.1"},{"name":"react-dom","version":"18.3.1"},{"name":"readable-stream","version":"3.6.2"},{"name":"safe-buffer","version":"5.2.1"},{"name":"sax","version":"1.4.1"},{"name":"scheduler","version":"0.23.2"},{"name":"semver","version":"7.7.2"},{"name":"simple-concat","version":"1.0.1"},{"name":"simple-get","version":"4.0.1"},{"name":"string_decoder","version":"1.3.0"},{"name":"strip-json-comments","version":"2.0.1"},{"name":"tar-fs","version":"2.1.3"},{"name":"tar-stream","version":"2.2.0"},{"name":"tiny-typed-emitter","version":"2.1.0"},{"name":"tunnel-agent","version":"0.6.0"},{"name":"universalify","version":"0.1.2"},{"name":"util-deprecate","version":"1.0.2"},{"name":"wrappy","version":"1.0.2"},{"name":"zod","version":"3.25.76"}]},{"dir":"C:\\Users\\revival\\projects\\container-browser\\node_modules\\decompress-response\\node_modules","deps":[{"name":"mimic-response","version":"3.1.0"}]},{"dir":"C:\\Users\\revival\\projects\\container-browser\\node_modules\\electron-updater\\node_modules","deps":[{"name":"fs-extra","version":"10.1.0"},{"name":"jsonfile","version":"6.2.0"},{"name":"universalify","version":"2.0.1"}]},{"dir":"C:\\Users\\revival\\projects\\container-browser\\node_modules\\prebuild-install\\node_modules","deps":[{"name":"node-abi","version":"3.77.0"}]},{"dir":"C:\\Users\\revival\\projects\\container-browser\\node_modules\\tar-fs\\node_modules","deps":[{"name":"chownr","version":"1.1.4"}]}]
+  • spawning        command=C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe rebuild-node-modules cwd=C:\Users\revival\projects\container-browser
+  • map async       taskCount=5
+  • map async       taskCount=1
+  • map async       taskCount=1
+  • map async       taskCount=56
+  • map async       taskCount=3
+  • map async       taskCount=1
+  • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+  • map async       taskCount=2
+  • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+  • execute command  command='C:\Program Files\nodejs\node.exe' 'C:\Users\revival\projects\container-browser\node_modules\prebuild-install\bin.js' --platform=win32 --arch=x64 --target=31.7.7 --runtime=electron --verbose --force
+                     workingDirectory=C:\Users\revival\projects\container-browser\node_modules\better-sqlite3
+  • command executed  executable=C:\Program Files\nodejs\node.exe
+                      errorOut=prebuild-install info begin Prebuild-install version 7.1.3
+    prebuild-install warn install prebuilt binaries enforced with --force!
+    prebuild-install warn install prebuilt binaries may be out of date!
+    prebuild-install info looking for local prebuild @ prebuilds\better-sqlite3-v12.2.0-electron-v125-win32-x64.tar.gz
+    prebuild-install info looking for cached prebuild @ C:\Users\revival\AppData\Local\npm-cache\_prebuilds\29079c-better-sqlite3-v12.2.0-electron-v125-win32-x64.tar.gz
+    prebuild-install info found cached prebuild
+    prebuild-install info unpacking @ C:\Users\revival\AppData\Local\npm-cache\_prebuilds\29079c-better-sqlite3-v12.2.0-electron-v125-win32-x64.tar.gz
+    prebuild-install info unpack resolved to C:\Users\revival\projects\container-browser\node_modules\better-sqlite3\build\Release\better_sqlite3.node
+    prebuild-install info install Successfully installed prebuilt binary!
+    
+  • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+  • execute command  command='C:\Program Files\nodejs\node.exe' 'C:\Users\revival\projects\container-browser\node_modules\prebuild-install\bin.js' --platform=win32 --arch=x64 --target=3 --runtime=napi --verbose --force
+                     workingDirectory=C:\Users\revival\projects\container-browser\node_modules\keytar
+  • command executed  executable=C:\Program Files\nodejs\node.exe
+                      errorOut=prebuild-install info begin Prebuild-install version 7.1.3
+    prebuild-install warn install prebuilt binaries enforced with --force!
+    prebuild-install warn install prebuilt binaries may be out of date!
+    prebuild-install info looking for local prebuild @ prebuilds\keytar-v7.9.0-napi-v3-win32-x64.tar.gz
+    prebuild-install info looking for cached prebuild @ C:\Users\revival\AppData\Local\npm-cache\_prebuilds\d32253-keytar-v7.9.0-napi-v3-win32-x64.tar.gz
+    prebuild-install info found cached prebuild
+    prebuild-install info unpacking @ C:\Users\revival\AppData\Local\npm-cache\_prebuilds\d32253-keytar-v7.9.0-napi-v3-win32-x64.tar.gz
+    prebuild-install info unpack resolved to C:\Users\revival\projects\container-browser\node_modules\keytar\build\Release\keytar.node
+    prebuild-install info install Successfully installed prebuilt binary!
+    
+  • all native deps were installed using prebuild-install  
+  • exited          command=app-builder.exe code=0 pid=17156
+  • packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist\win-unpacked
+  • spawning        command=C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe unpack-electron --configuration [{"platform":"win32","arch":"x64","version":"31.7.7"}] --output C:\Users\revival\projects\container-browser\dist\win-unpacked --distMacOsAppName Electron.app
+  • map async       taskCount=2
+  • map async       taskCount=1
+  ⨯ remove C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\app.asar: The process cannot access the file because it is being used by another process.
+github.com/develar/go-fs-util.EnsureEmptyDir
+	/Volumes/data/go/pkg/mod/github.com/develar/go-fs-util@v0.0.0-20190620175131-69a2d4542206/fs.go:98
+github.com/develar/app-builder/pkg/electron.UnpackElectron.func1.1
+	/Volumes/data/Documents/app-builder/pkg/electron/electronUnpack.go:38
+github.com/develar/app-builder/pkg/util.MapAsyncConcurrency.func2
+	/Volumes/data/Documents/app-builder/pkg/util/async.go:68
+runtime.goexit
+	/usr/local/Cellar/go/1.17/libexec/src/runtime/asm_amd64.s:1581  
+  • exited          command=app-builder.exe code=1 pid=12760
+  ⨯ C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE
+Exit code:
+1  failedTask=build stackTrace=Error: C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE
+Exit code:
+1
+    at ChildProcess.<anonymous> (C:\Users\revival\projects\container-browser\node_modules\builder-util\src\util.ts:252:14)
+    at Object.onceWrapper (node:events:633:26)
+    at ChildProcess.emit (node:events:518:28)
+    at ChildProcess.cp.emit (C:\Users\revival\projects\container-browser\node_modules\cross-spawn\lib\enoent.js:34:29)
+    at maybeClose (node:internal/child_process:1101:16)
+    at Process.ChildProcess._handle.onexit (node:internal/child_process:304:5)

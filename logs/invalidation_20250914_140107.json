@@ -1,0 +1,4 @@
+﻿{
+  "Paths": { "Quantity": 2, "Items": ["/latest.yml", "/nsis-web/*"] },
+  "CallerReference": "deploy-20250914_140107"
+}

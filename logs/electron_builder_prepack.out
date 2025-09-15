@@ -1,0 +1,8 @@
+  • electron-builder  version=24.13.3 os=10.0.26100
+  • loaded configuration  file=package.json ("build" field)
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • building        target=nsis-web file=dist\nsis-web\ContainerBrowser-Web-Setup.exe archs=x64 oneClick=true perMachine=false
+  • building embedded block map  file=dist\nsis-web\container-browser-0.2.5-x64.nsis.7z
+  ⨯ allowToChangeInstallationDirectory makes sense only for assisted installer (please set oneClick to false)

@@ -1,0 +1,19 @@
+[1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+(!) C:/Users/revival/projects/container-browser/src/main/containerManager.ts is dynamically imported by C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts, C:/Users/revival/projects/container-browser/src/main/index.ts but also statically imported by C:/Users/revival/projects/container-browser/src/main/index.ts, dynamic import will not move module into another chunk.
+[39m
+[main] will-quit force close error Error: Cannot find module './containerManager'
+Require stack:
+- C:\Users\revival\projects\container-browser\out\main\index.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1232:15)
+    at s._resolveFilename (node:electron/js2c/browser_init:2:120689)
+    at Module._load (node:internal/modules/cjs/loader:1058:27)
+    at c._load (node:electron/js2c/node_init:2:16955)
+    at Module.require (node:internal/modules/cjs/loader:1318:19)
+    at require (node:internal/modules/helpers:179:18)
+    at App.<anonymous> (file:///C:/Users/revival/projects/container-browser/out/main/index.js:17541:16)
+    at App.emit (node:events:519:28) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\revival\\projects\\container-browser\\out\\main\\index.js'
+  ]
+}

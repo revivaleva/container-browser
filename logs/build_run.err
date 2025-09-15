@@ -1,0 +1,7 @@
+electron-builder failed
+î≠ê∂èÍèä C:\Users\revival\projects\container-browser\scripts\build-installer.ps1:14 ï∂éö:24
++ if($p.ExitCode -ne 0){ throw 'electron-builder failed' }
++                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (electron-builder failed:String) [], RuntimeException
+    + FullyQualifiedErrorId : electron-builder failed
+ 

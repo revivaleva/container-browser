@@ -1,0 +1,6 @@
+Inspecting: dist\win-unpacked\resources\app.asar
+handle.exe not found, falling back to module scan
+PID=8272 Name=VRC Friend Connect Module=C:\Users\revival\AppData\Local\Programs\vrc-friend-connect\resources\app.asar.unpacked\node_modules\@img\sharp-win32-x64\lib\sharp-win32-x64.node
+PID=8272 Name=VRC Friend Connect Module=C:\Users\revival\AppData\Local\Programs\vrc-friend-connect\resources\app.asar.unpacked\node_modules\@img\sharp-win32-x64\lib\libvips-cpp.dll
+PID=8272 Name=VRC Friend Connect Module=C:\Users\revival\AppData\Local\Programs\vrc-friend-connect\resources\app.asar.unpacked\node_modules\@img\sharp-win32-x64\lib\libvips-42.dll
+PID=8272 Name=VRC Friend Connect Module=C:\Users\revival\AppData\Local\Programs\vrc-friend-connect\resources\app.asar.unpacked\node_modules\better-sqlite3\build\Release\better_sqlite3.node

@@ -1,0 +1,16 @@
+﻿
+FullName                                                                              Length   LastWriteTime       
+--------                                                                              ------   -------------       
+C:\Users\revival\projects\container-browser\dist\nsis-web                                      9/13/2025 2:54:29 PM
+C:\Users\revival\projects\container-browser\dist\win-unpacked                                  9/14/2025 2:56:57 AM
+C:\Users\revival\projects\container-browser\dist\builder-debug.yml                    745      9/14/2025 2:46:10 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources                        9/14/2025 2:56:57 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources.pak           5547739  9/14/2025 2:46:06 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\snapshot_blob.bin       310242   9/14/2025 2:46:06 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\v8_context_snapshot.bin 662053   9/14/2025 2:46:06 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\vk_swiftshader.dll      5475328  9/14/2025 2:46:06 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\vk_swiftshader_icd.json 106      9/14/2025 2:46:06 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\vulkan-1.dll            961024   9/14/2025 2:46:06 AM
+C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\app.asar      38033802 9/14/2025 2:46:10 AM
+
+

@@ -1,0 +1,5 @@
+  • electron-builder  version=24.13.3
+  • loaded configuration  file=package.json ("build" field)
+  • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+  • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+  • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 

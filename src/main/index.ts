@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import { initAutoUpdate, checkForUpdatesManually } from './autoUpdate';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
@@ -29,6 +30,12 @@ async function createMainWindow() {
       preload: preloadPath
     }
   });
+  // 表示タイトルにアプリ名とバージョンを付与
+  try {
+    const title = `${app.getName()} v${app.getVersion()}`;
+    try { mainWindow.setTitle(title); } catch {}
+    logger.info('[main] window title set to', title);
+  } catch (e) { logger.error('[main] failed to set window title version', e); }
   // set window icon if available
   try {
     const iconPath = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
@@ -106,25 +113,40 @@ async function createMainWindow() {
 app.whenReady().then(async () => {
   initDB();
   registerCustomProtocol();
-  // Setup auto-updater (will check for updates once app is ready)
+  // ensure native modules downloaded before creating windows
   try {
-    autoUpdater.autoDownload = true;
-    autoUpdater.on('checking-for-update', () => console.log('[auto-updater] checking for update'));
-    autoUpdater.on('update-available', (info) => console.log('[auto-updater] update available', info));
-    autoUpdater.on('update-not-available', (info) => console.log('[auto-updater] update not available', info));
-    autoUpdater.on('error', (err) => console.error('[auto-updater] error', err));
-    autoUpdater.on('download-progress', (progress) => console.log('[auto-updater] progress', progress));
-    autoUpdater.on('update-downloaded', (info) => {
-      console.log('[auto-updater] update downloaded', info);
-      // quit and install automatically
-      setTimeout(() => {
-        try { autoUpdater.quitAndInstall(); } catch (e) { console.error('[auto-updater] quitAndInstall error', e); }
-      }, 2000);
-    });
-    // trigger check
-    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { console.error('[auto-updater] check error', e); } }, 3000);
+    const nm = await import('./nativeModules');
+    void nm.ensureNativeModules();
+  } catch (e) { logger.warn('[main] ensureNativeModules failed', e); }
+  // Setup auto-updater via dedicated module (will check for updates once app is ready)
+  try {
+    // initialize our auto-update wiring after mainWindow is created
+    // (initAutoUpdate will return early in dev / if already wired)
   } catch (e) { console.error('[auto-updater] setup error', e); }
   await createMainWindow();
+  // initialize auto-update with the created mainWindow
+  try { if (mainWindow) initAutoUpdate(mainWindow); } catch (e) { console.error('[auto-updater] init error', e); }
+  // Ensure application menu includes a Help -> Check for Updates entry
+  try {
+    const menuTemplate: any[] = [
+      { label: 'File', submenu: [{ role: 'quit', label: '終了' }] },
+      { label: 'View', submenu: [{ role: 'reload', label: '再読み込み' }, { role: 'toggleDevTools', label: '開発者ツール' }] },
+      { label: 'Help', submenu: [
+        {
+          label: 'アップデートを確認…',
+          click: async (_menuItem, browserWindow) => {
+            try {
+              const win = (browserWindow ?? mainWindow) as BrowserWindow | null;
+              if (!win) return;
+              await checkForUpdatesManually(win);
+            } catch (e) { console.error('[menu] check-for-updates click error', e); }
+          }
+        }
+      ] }
+    ];
+    const appMenu = Menu.buildFromTemplate(menuTemplate as any);
+    Menu.setApplicationMenu(appMenu);
+  } catch (e) { console.error('[main] set application menu error', e); }
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createMainWindow();
@@ -165,6 +187,22 @@ ipcMain.handle('devtools.toggle', (_e) => {
     }
     return true;
   } catch (e) { return false; }
+});
+
+// IPC handler to trigger manual update check from renderer
+ipcMain.handle('app/check-for-updates', async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow ?? undefined;
+    if (!win) return;
+    await checkForUpdatesManually(win);
+  } catch (e) { console.error('[ipc] check-for-updates error', e); }
+});
+
+ipcMain.handle('app/get-name', async () => {
+  try { return app.getName(); } catch { return 'Container Browser'; }
+});
+ipcMain.handle('app/get-version', async () => {
+  try { return app.getVersion(); } catch { return '0.0.0'; }
 });
 
 app.on('window-all-closed', () => {

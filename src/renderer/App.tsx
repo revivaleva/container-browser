@@ -102,6 +102,15 @@ export default function App() {
   }
 
   useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ver = await (window as any).appMeta?.version?.();
+        const el = document.getElementById('app-version');
+        if (el && ver) el.textContent = ver;
+      } catch {}
+    })();
+  }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
 
   const localeOptions = ['ja-JP','en-US','en-GB'];
@@ -117,6 +126,13 @@ export default function App() {
   return (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
       <h1>コンテナブラウザー</h1>
+
+      <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+        <button onClick={async () => { try { await (window as any).appAPI?.checkForUpdates?.(); } catch (e) { alert('アップデート確認に失敗しました'); } }}>アップデートを確認</button>
+        <div style={{ marginLeft: 12, color: '#666' }}>
+          バージョン: <span id="app-version">loading...</span>
+        </div>
+      </div>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>

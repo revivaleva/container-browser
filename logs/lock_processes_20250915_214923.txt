@@ -1,0 +1,6 @@
+Inspecting: dist\win-unpacked\resources\app.asar
+handle.exe not found, falling back to module scan
+PID=24252 Name=pwsh Module=C:\Users\revival\.cursor\extensions\ms-vscode.powershell-2025.2.0-universal\modules\PowerShellEditorServices\bin\Common\OmniSharp.Extensions.LanguageServer.dll
+PID=24252 Name=pwsh Module=C:\Users\revival\.cursor\extensions\ms-vscode.powershell-2025.2.0-universal\modules\PowerShellEditorServices\bin\Common\OmniSharp.Extensions.JsonRpc.dll
+PID=24252 Name=pwsh Module=C:\Users\revival\.cursor\extensions\ms-vscode.powershell-2025.2.0-universal\modules\PowerShellEditorServices\bin\Common\OmniSharp.Extensions.LanguageProtocol.dll
+PID=24252 Name=pwsh Module=C:\Users\revival\.cursor\extensions\ms-vscode.powershell-2025.2.0-universal\modules\PowerShellEditorServices\bin\Common\OmniSharp.Extensions.LanguageServer.Shared.dll

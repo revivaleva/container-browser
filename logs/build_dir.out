@@ -1,0 +1,29 @@
+  • electron-builder  version=24.13.3 os=10.0.26100
+  • loaded configuration  file=package.json ("build" field)
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+  • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+  • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+  • packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist\win-unpacked
+  ⨯ remove C:\Users\revival\projects\container-browser\dist\win-unpacked\resources\app.asar: The process cannot access the file because it is being used by another process.
+github.com/develar/go-fs-util.EnsureEmptyDir
+	/Volumes/data/go/pkg/mod/github.com/develar/go-fs-util@v0.0.0-20190620175131-69a2d4542206/fs.go:98
+github.com/develar/app-builder/pkg/electron.UnpackElectron.func1.1
+	/Volumes/data/Documents/app-builder/pkg/electron/electronUnpack.go:38
+github.com/develar/app-builder/pkg/util.MapAsyncConcurrency.func2
+	/Volumes/data/Documents/app-builder/pkg/util/async.go:68
+runtime.goexit
+	/usr/local/Cellar/go/1.17/libexec/src/runtime/asm_amd64.s:1581  
+  ⨯ C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE
+Exit code:
+1  failedTask=build stackTrace=Error: C:\Users\revival\projects\container-browser\node_modules\app-builder-bin\win\x64\app-builder.exe process failed ERR_ELECTRON_BUILDER_CANNOT_EXECUTE
+Exit code:
+1
+    at ChildProcess.<anonymous> (C:\Users\revival\projects\container-browser\node_modules\builder-util\src\util.ts:252:14)
+    at Object.onceWrapper (node:events:633:26)
+    at ChildProcess.emit (node:events:518:28)
+    at ChildProcess.cp.emit (C:\Users\revival\projects\container-browser\node_modules\cross-spawn\lib\enoent.js:34:29)
+    at maybeClose (node:internal/child_process:1101:16)
+    at Process.ChildProcess._handle.onexit (node:internal/child_process:304:5)

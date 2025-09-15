@@ -1,0 +1,7 @@
+  • electron-builder  version=24.13.3 os=10.0.26100
+  ⨯ C:\Users\revival\projects\container-browser\package.json: Expected double-quoted property name in JSON at position 1495 (line 56 column 5)  failedTask=build stackTrace=SyntaxError: C:\Users\revival\projects\container-browser\package.json: Expected double-quoted property name in JSON at position 1495 (line 56 column 5)
+    at JSON.parse (<anonymous>)
+    at _readFile (C:\Users\revival\projects\container-browser\node_modules\app-builder-lib\node_modules\jsonfile\index.js:25:16)
+    at readPackageJson (C:\Users\revival\projects\container-browser\node_modules\app-builder-lib\src\util\packageMetadata.ts:10:16)
+    at Packager.build (C:\Users\revival\projects\container-browser\node_modules\app-builder-lib\src\packager.ts:314:25)
+    at executeFinally (C:\Users\revival\projects\container-browser\node_modules\builder-util\src\promise.ts:12:14)
