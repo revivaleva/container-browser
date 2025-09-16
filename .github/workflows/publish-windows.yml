@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -100,6 +102,10 @@ jobs:
       - name: Publish nsis-web via script
         if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         shell: pwsh
+        env:
+          WIN_CSC_LINK: ''
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
             container-browser-updates `
