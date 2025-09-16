@@ -58,10 +58,16 @@ jobs:
         run: |
           $before='${{ github.event.before }}'
           if (-not $before) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8; exit 0 }
-          git fetch --no-tags --depth=2 origin $before
-          $old = git show $before:package.json | ConvertFrom-Json
-          $new = Get-Content package.json -Raw | ConvertFrom-Json
-          if ($old.version -ne $new.version) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+          git fetch --no-tags --depth=1 origin $before
+          $oldJson = git show "$before:package.json" 2>$null
+          try {
+            $old = $oldJson | ConvertFrom-Json -ErrorAction Stop
+            $new = Get-Content package.json -Raw | ConvertFrom-Json
+            if ($old.version -ne $new.version) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+          } catch {
+            # If detection fails for any reason, publish to be safe
+            "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
 
       - name: Publish nsis-web via script
         if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
