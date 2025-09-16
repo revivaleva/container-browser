@@ -72,7 +72,9 @@ jobs:
           # inspect the package.json at the $before ref for debugging
           $oldJson = ''
           try {
-            $oldJson = git show "$before:package.json" 2>$null
+            # build ref:path safely to avoid PowerShell parsing ':' as variable part
+            $refPath = ('{0}:{1}' -f $before, 'package.json')
+            $oldJson = git show $refPath 2>$null
             if (-not ($oldJson -is [string]) -or $oldJson.Trim().Length -eq 0) {
               Write-Host 'DEBUG: git show returned empty content for package.json'
             } else {
