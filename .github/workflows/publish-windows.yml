@@ -54,49 +54,52 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Detect version change
+      - name: Detect version change (robust)
         id: version
         shell: pwsh
         run: |
-          $before='${{ github.event.before }}'
-          Write-Host "DEBUG: before=[$before]"
-          if (-not $before) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8; exit 0 }
+          # Ensure non-fatal behaviour inside this step
+          $ErrorActionPreference = 'SilentlyContinue'
 
-          # ensure logs dir exists for debug artifacts
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          
-          # try to fetch the ref and capture fetch exit code
-          git fetch --no-tags --depth=1 origin $before 2>&1 | Tee-Object -FilePath "logs/git_fetch_$before.out" -Append
-          Write-Host ("DEBUG: git fetch exitcode=$LASTEXITCODE")
+          $pkg = 'package.json'
+          $prev = $null
+          $curr = $null
+          $changed = $true
 
-          # inspect the package.json at the $before ref for debugging
-          $oldJson = ''
           try {
-            $oldJson = git show "$before:package.json" 2>$null
-            if (-not ($oldJson -is [string]) -or $oldJson.Trim().Length -eq 0) {
-              Write-Host 'DEBUG: git show returned empty content for package.json'
+            # Read current package version
+            $currJson = Get-Content -LiteralPath $pkg -Raw
+            $curr = (ConvertFrom-Json $currJson).version
+
+            $before = '${{ github.event.before }}'
+            Write-Host "DEBUG: before=[$before]"
+
+            if ($before -and $before.Trim().Length -gt 0) {
+              # ensure logs dir exists for debug artifacts
+              New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+              # fetch and inspect previous package.json (stderr discarded)
+              git fetch --no-tags --no-recurse-submodules --depth=1 origin $before 2>$null | Out-Null
+              $file = git show "$before:$pkg" 2>$null
+              if ($LASTEXITCODE -eq 0 -and $file -and ($file -is [string]) -and $file.Trim().Length -gt 0) {
+                try { $prev = (ConvertFrom-Json $file).version } catch { $prev = $null }
+              } else {
+                Write-Host 'DEBUG: git show returned empty or non-string content for package.json'
+              }
             } else {
-              Write-Host ("DEBUG: git show output length={0}" -f ($oldJson | Out-String).Length)
-              Write-Host 'DEBUG: git show head (first 20 lines):'
-              $oldJson | Select-Object -First 20 | ForEach-Object { Write-Host $_ }
-              Write-Host 'DEBUG: git show tail (last 20 lines):'
-              $oldJson | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }
+              Write-Host 'DEBUG: before is empty; treating as changed=true'
             }
-          } catch {
-            Write-Host ("DEBUG: git show threw: {0}" -f $_.Exception.Message)
-          }
 
-          try {
-            $old = $null
-            if ($oldJson -and $oldJson.Trim().Length -gt 0) {
-              $old = $oldJson | ConvertFrom-Json -ErrorAction Stop
-            }
-            $new = Get-Content package.json -Raw | ConvertFrom-Json
-            if ($old -and ($old.version -ne $new.version)) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
+            if ($prev -and $curr) { $changed = ($curr -ne $prev) } else { $changed = $true }
           } catch {
-            Write-Host ('DEBUG: JSON parse or comparison failed: {0}' -f $_.Exception.Message)
-            # If detection fails for any reason, publish to be safe
-            "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Write-Host ('DEBUG: unexpected error in detect step: {0}' -f $_.Exception.Message)
+            $changed = $true
+          } finally {
+            # Always emit outputs and exit cleanly
+            "prev=$prev" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "curr=$curr" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "changed=$changed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
           }
 
       - name: Publish nsis-web via script
