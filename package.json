@@ -1,6 +1,6 @@
 {
   "name": "container-browser",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Container Browser",
   "author": "revivaleva",
   "private": true,
@@ -31,21 +31,26 @@
     "typescript": "^5.5.4",
     "vite": "^5.4.3",
     "electron-builder": "^24.6.0"
-  }
-,
+  },
   "build": {
     "appId": "com.example.container-browser",
     "productName": "Container Browser",
-    "directories": { "buildResources": "build-resources" },
+    "directories": {
+      "buildResources": "build-resources"
+    },
     "extraResources": [
       {
         "from": "build-resources/",
         "to": "build-resources/",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis-web"],
+      "target": [
+        "nsis-web"
+      ],
       "icon": "build-resources/icon.ico"
     },
     "publish": [
