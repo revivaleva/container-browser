@@ -1,0 +1,62 @@
+﻿{
+  "name": "container-browser",
+  "version": "0.2.2",
+  "description": "Container Browser",
+  "author": "revivaleva",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "dist": "electron-builder --win --x64",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "electron-updater": "^6.3.9",
+    "keytar": "^7.9.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "electron": "^31.3.1",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.3",
+    "electron-builder": "^24.6.0"
+  }
+,
+  "build": {
+    "appId": "com.example.container-browser",
+    "productName": "Container Browser",
+    "directories": { "buildResources": "build-resources" },
+    "extraResources": [
+      {
+        "from": "build-resources/",
+        "to": "build-resources/",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis-web"],
+      "icon": "build-resources/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "s3",
+        "bucket": "container-browser-updates",
+        "region": "ap-northeast-1",
+        "path": ""
+      }
+    ]
+  }
+}
+
+
