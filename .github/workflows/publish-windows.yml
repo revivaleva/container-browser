@@ -72,8 +72,8 @@ jobs:
           # inspect the package.json at the $before ref for debugging
           $oldJson = ''
           try {
-            $oldJson = git show "$before:package.json" 2>&1
-            if ($null -eq $oldJson -or $oldJson.Trim().Length -eq 0) {
+            $oldJson = git show "$before:package.json" 2>$null
+            if (-not ($oldJson -is [string]) -or $oldJson.Trim().Length -eq 0) {
               Write-Host 'DEBUG: git show returned empty content for package.json'
             } else {
               Write-Host ("DEBUG: git show output length={0}" -f ($oldJson | Out-String).Length)
