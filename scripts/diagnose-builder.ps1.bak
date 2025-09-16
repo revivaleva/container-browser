@@ -1,0 +1,96 @@
+param(
+  [switch]$ForceClean # 謖・ｮ壽凾縺ｯ node_modules 繧貞炎髯､縺励※繧ｯ繝ｪ繝ｼ繝ｳ蜀阪う繝ｳ繧ｹ繝医・繝ｫ
+)
+
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$ConfirmPreference='None'
+$env:CI = 'true'
+
+New-Item -ItemType Directory -Force -Path logs | Out-Null
+function Log($m){ $ts=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); "$ts $m" | Tee-Object -File logs\diagnose.log -Append }
+
+Log "== START diagnose (pwd=$(Get-Location)) =="
+
+# 0) 莉ｻ諢上・繧ｯ繝ｪ繝ｼ繝ｳ
+if($ForceClean){ 
+  Log "[0] Removing node_modules (ForceClean)"
+  if(Test-Path node_modules){ Remove-Item node_modules -Recurse -Force }
+}
+
+# 1) app-builder.exe 縺ｮ謇蝨ｨ縺ｨ迥ｶ諷・
+$app = Get-ChildItem -Path node_modules -Recurse -Filter 'app-builder.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+if(-not $app){
+  Log "[1] app-builder.exe NOT FOUND. Will reinstall deps."
+  $needReinstall = $true
+}else{
+  Log "[1] app-builder.exe FOUND: $($app.FullName) (Size=$([math]::Round($app.Length/1MB,2)) MB)"
+  try{
+    $zone = Get-Item -Path "$($app.FullName):Zone.Identifier" -ErrorAction SilentlyContinue
+    if($zone){ 
+      Log "[1] Zone.Identifier detected -> Unblock-File"
+      Unblock-File -Path $app.FullName
+    }
+  }catch{}
+  try{
+    Log "[1] Run app-builder --version"
+    $vout = & $app.FullName --version 2>&1
+    $code=$LASTEXITCODE
+    Set-Content -Value ($vout | Out-String) -Path logs\app-builder-version.txt -Encoding utf8
+    Log "[1] app-builder exit=$code output: $vout"
+    if($code -ne 0){ $needReinstall = $true }
+  }catch{
+    Log "[1] app-builder invocation failed: $($_.Exception.Message)"
+    $needReinstall = $true
+  }
+}
+
+# 2) 萓晏ｭ・蜀・繧､繝ｳ繧ｹ繝医・繝ｫ
+if($needReinstall -or $ForceClean){
+  Log "[2] npm ci (clean install)"
+}else{
+  Log "[2] npm ci (safety re-install anyway)"
+}
+try{
+  $npm = "npm"
+  $p = Start-Process -FilePath $npm -ArgumentList @("ci","--foreground-scripts") -NoNewWindow -Wait -PassThru -RedirectStandardOutput logs\npm_ci.out -RedirectStandardError logs\npm_ci.err
+  Log "[2] npm ci exit=$($p.ExitCode)"
+  if($p.ExitCode -ne 0){ throw "npm ci failed (exit=$($p.ExitCode))" }
+}catch{
+  Log "[2] ERROR: $($_.Exception.Message)"
+  Log "[2] HINT: 邂｡逅・・〒螳溯｡・/ 繧ｦ繧､繝ｫ繧ｹ蟇ｾ遲悶・荳譎ら┌蜉ｹ蛹・/ ForceClean 縺ｧ蜀榊ｮ溯｡後ｒ讀懆ｨ・
+  exit 2
+}
+
+# 3) 繝薙Ν繝牙腰菴難ｼ亥・髢九＠縺ｪ縺・ｼ俄・nsis-web 繧堤函謌舌〒縺阪ｋ縺狗｢ｺ隱・
+Log "[3] Build only with electron-builder (no publish)"
+$env:CSC_IDENTITY_AUTO = "false"
+try{
+  $args = @("electron-builder","--win","--x64","--publish","never")
+  $p = Start-Process -FilePath npx -ArgumentList $args -NoNewWindow -Wait -PassThru -RedirectStandardOutput logs\build_only.out -RedirectStandardError logs\build_only.err
+  Log "[3] electron-builder exit=$($p.ExitCode)"
+  if($p.ExitCode -ne 0){ throw "electron-builder failed (exit=$($p.ExitCode))" }
+}catch{
+  Log "[3] ERROR: $($_.Exception.Message)"
+  Log "[3] See logs/build_only.err for details"
+  exit 3
+}
+
+# 4) 逕滓・迚ｩ縺ｮ遒ｺ隱・
+Log "[4] Dist artifacts"
+if(Test-Path dist){
+  Get-ChildItem dist -Recurse | Sort-Object Length -Descending | Select-Object LastWriteTime,Length,FullName | Tee-Object -File logs\dist_listing.txt | Out-Null
+  $exe = Get-ChildItem dist -Recurse -Include *.exe,*.nupkg,*.yml,*.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+  if($exe){
+    Log "[4] Found artifact: $($exe.FullName)"
+    Log "== DONE diagnose SUCCESS =="
+    exit 0
+  }else{
+    Log "[4] No artifacts found under dist/"
+    Log "== DONE diagnose but NO artifacts =="
+    exit 4
+  }
+}else{
+  Log "[4] dist/ not found"
+  exit 4
+}
