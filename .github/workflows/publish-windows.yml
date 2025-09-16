@@ -60,6 +60,8 @@ jobs:
           Write-Host "DEBUG: before=[$before]"
           if (-not $before) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8; exit 0 }
 
+          # ensure logs dir exists for debug artifacts
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
           # try to fetch the ref and capture fetch exit code
           git fetch --no-tags --depth=1 origin $before 2>&1 | Tee-Object -FilePath "logs/git_fetch_$before.out" -Append
           Write-Host ("DEBUG: git fetch exitcode=$LASTEXITCODE")
