@@ -8,6 +8,9 @@ on:
 jobs:
   build_publish_windows:
     runs-on: windows-latest
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,13 +20,21 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Cache node modules
+      - name: Cache npm
         uses: actions/cache@v4
         with:
           path: ~/.npm
           key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+          restore-keys: ${{ runner.os }}-node-
+
+      - name: Cache electron caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
 
       - name: Install dependencies
         run: npm ci
@@ -41,39 +52,31 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Build (electron-builder, no publish)
-        env:
-          CI: true
-        run: npx electron-builder --win --x64 --publish=never
-
-      - name: List dist output
+      - name: Detect version change
+        id: version
+        shell: pwsh
         run: |
-          echo "--- dist tree ---"
-          if (Test-Path dist) { Get-ChildItem -Recurse dist | Select-Object FullName,Length | Format-Table -AutoSize } else { echo "dist not found" }
+          $before='${{ github.event.before }}'
+          if (-not $before) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8; exit 0 }
+          git fetch --no-tags --depth=2 origin $before
+          $old = git show $before:package.json | ConvertFrom-Json
+          $new = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($old.version -ne $new.version) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }
 
-      - name: Upload artifacts to S3 (aws cli)
+      - name: Publish nsis-web via script
+        if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          echo "Uploading built artifacts to s3://container-browser-updates/"
-          if (Test-Path dist) {
-            # upload common artifact types produced by electron-builder
-            aws s3 cp --recursive dist s3://container-browser-updates/ --exclude "*" --include "*.exe" --include "*.7z" --include "*.nsis" --include "*.yml" --no-progress
-          }
-          # also upload top-level latest.yml if present
-          if (Test-Path .\latest.yml) { aws s3 cp .\latest.yml s3://container-browser-updates/latest.yml --no-progress }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
+            container-browser-updates `
+            E1Q66ASB5AODYF `
+            https://updates.threadsbooster.jp
 
-      - name: Show latest.yml if present (from S3)
+      - name: CDN health (HEAD=200 / Range=206)
+        if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
         run: |
-          echo "--- latest.yml from S3 ---"
-          aws s3 cp s3://container-browser-updates/latest.yml ./latest.yml || echo "latest.yml not found on S3"
-          if (Test-Path .\latest.yml) { Get-Content .\latest.yml -Raw } else { echo "latest.yml not found on S3" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-cdn-health.ps1 -CDN 'https://updates.threadsbooster.jp'
 
-      - name: Invalidate CloudFront cache for latest.yml (optional)
-        run: |
-          if ($env:CLOUDFRONT_DISTRIBUTION_ID) {
-            aws cloudfront create-invalidation --distribution-id $env:CLOUDFRONT_DISTRIBUTION_ID --paths "/latest.yml"
-          } else {
-            echo "CLOUDFRONT_DISTRIBUTION_ID not set; skip invalidation"
-          }
 
 

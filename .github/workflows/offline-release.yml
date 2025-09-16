@@ -1,0 +1,44 @@
+name: Manual Offline Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      allowOverwrite:
+        type: boolean
+        description: "Allow overwrite fixed offline EXE"
+        default: false
+
+jobs:
+  offline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Guard: prevent overwrite unless allowed
+        shell: pwsh
+        run: |
+          $exists = $false
+          try { aws s3api head-object --bucket container-browser-updates --key nsis-web/ContainerBrowser-Offline-Setup.exe | Out-Null; $exists = $true } catch {}
+          if ($exists -and '${{ github.event.inputs.allowOverwrite }}' -ne 'true') {
+            Write-Error "Offline EXE already exists. Set allowOverwrite=true to replace."
+          }
+
+      - name: Run offline-release.ps1
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\offline-release.ps1 `
+            container-browser-updates `
+            E1Q66ASB5AODYF `
+            https://updates.threadsbooster.jp
+
+
