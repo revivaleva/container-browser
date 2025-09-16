@@ -1,0 +1,84 @@
+name: Offline Release CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      allowOverwrite:
+        type: boolean
+        description: "Allow overwrite fixed offline EXE"
+        default: false
+
+jobs:
+  offline:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Build offline NSIS (powershell)
+        shell: pwsh
+        run: |
+          $ts = Get-Date -Format yyyyMMdd_HHmmss
+          $out = "dist_offline_$ts"
+          $npx = (Get-Command npx.cmd).Source
+          $arg = @( 'electron-builder','--win','nsis','--x64','--publish','never', ('-c.directories.output=' + $out), '-c.nsis.artifactName=ContainerBrowser-Offline-Setup.exe' )
+          Start-Process -FilePath $npx -ArgumentList $arg -NoNewWindow -Wait -PassThru
+
+      - name: Find built EXE
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist_offline_* -Recurse -Filter ContainerBrowser-Offline-Setup.exe -File | Sort-Object LastWriteTime -Desc | Select-Object -First 1
+          if (-not $exe) { Write-Error 'Offline EXE not found after build'; exit 1 }
+          Write-Host "EXE_PATH=$($exe.FullName)" | Out-File -FilePath "logs/offline_artifact.txt" -Append
+
+      - name: Guard: prevent overwrite unless allowed
+        shell: pwsh
+        run: |
+          $exists = $false
+          try { aws s3api head-object --bucket container-browser-updates --key nsis-web/ContainerBrowser-Offline-Setup.exe | Out-Null; $exists = $true } catch {}
+          if ($exists -and '${{ github.event.inputs.allowOverwrite }}' -ne 'true') { Write-Error 'Offline EXE already exists. Set allowOverwrite=true to replace.'; exit 1 }
+
+      - name: Upload offline EXE to S3
+        shell: pwsh
+        run: |
+          $exe = (Get-Content logs/offline_artifact.txt -Raw) -split "\n" | Select-String -Pattern 'EXE_PATH=' | ForEach-Object { ($_ -split '=')[1].Trim() } | Select-Object -First 1
+          if (-not (Test-Path $exe)) { Write-Error "EXE not found at $exe"; exit 1 }
+          aws s3 cp $exe "s3://container-browser-updates/nsis-web/ContainerBrowser-Offline-Setup.exe" --no-progress --content-type application/octet-stream --metadata-directive REPLACE --cache-control 'public,max-age=31536000' | Out-Null
+          $sha = (Get-FileHash -Path $exe -Algorithm SHA256).Hash
+          $size = (Get-Item -LiteralPath $exe).Length
+          Write-Host "SHA256: $sha"; Write-Host "SIZE: $size"
+
+      - name: CloudFront invalidation
+        shell: pwsh
+        run: |
+          $ts = Get-Date -Format yyyyMMdd_HHmmss
+          $inv = @{ Paths = @{ Quantity = 1; Items = @('/nsis-web/ContainerBrowser-Offline-Setup.exe') }; CallerReference = ('offline-' + $ts) } | ConvertTo-Json -Compress
+          $invPath = "logs/inv_off_$ts.json"
+          [IO.File]::WriteAllText($invPath,$inv,[Text.UTF8Encoding]::new($false))
+          aws cloudfront create-invalidation --distribution-id E1Q66ASB5AODYF --invalidation-batch file://$invPath | Out-Null
+          Write-Host "Invalidation-requested: $invPath"
+
+      - name: Verify fixed URL HEAD
+        shell: pwsh
+        run: |
+          $url = 'https://updates.threadsbooster.jp/nsis-web/ContainerBrowser-Offline-Setup.exe'
+          & "$env:SystemRoot\System32\curl.exe" -I $url | Select-String '^HTTP/' | ForEach-Object { Write-Host $_ }
+
+      - name: Done
+        run: echo "Offline EXE uploaded and invalidation requested"
+
+
