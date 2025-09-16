@@ -51,6 +51,10 @@ if(-not $nsisDir -and -not $SkipBuild){
     ('-c.directories.output=' + $outDir),
     ('-c.win.target=nsis-web')
   )
+  # Short-term: ensure signing env vars are cleared so electron-builder does not attempt code signing
+  $env:WIN_CSC_LINK = ''
+  $env:CSC_LINK = ''
+  $env:CSC_KEY_PASSWORD = ''
   $p = Start-Process -FilePath $npx -ArgumentList $argList -NoNewWindow -Wait -PassThru `
        -RedirectStandardOutput $logBOut -RedirectStandardError $logBErr
   if($p.ExitCode -ne 0){
