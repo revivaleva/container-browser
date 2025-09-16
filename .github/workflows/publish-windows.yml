@@ -102,6 +102,10 @@ jobs:
       - name: Publish nsis-web via script
         if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         shell: pwsh
+        env:
+          WIN_CSC_LINK: ''
+          CSC_LINK: ''
+          CSC_KEY_PASSWORD: ''
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
             container-browser-updates `
