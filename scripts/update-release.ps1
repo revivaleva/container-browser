@@ -41,6 +41,9 @@ $nsisDir = $null
 if($SourceDir){ $nsisDir = $SourceDir }
 
 if(-not $nsisDir -and -not $SkipBuild){
+  # remove any previous dist_update_* directories to avoid stale artifacts
+  Get-ChildItem -Directory -Filter 'dist_update_*' -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue }
+
   $npx = (Get-Command 'npx.cmd').Source
   $outDir = 'dist_update_' + $ts
   $argList = @(
