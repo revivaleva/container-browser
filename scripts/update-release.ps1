@@ -93,10 +93,18 @@ aws s3 cp $nsisDir ('s3://' + $Bucket + '/nsis-web/') --recursive --no-progress 
 
 # 4) CloudFront invalidation
 $invObj = @{ Paths=@{ Quantity=2; Items=@('/latest.yml','/nsis-web/*') }; CallerReference=('autoupd-' + $ts) }
-$invJson = $invObj | ConvertTo-Json -Compress
-$invPath = Join-Path -Path 'logs' -ChildPath ('inv_' + $ts + '.json')
-[IO.File]::WriteAllText($invPath, $invJson, [Text.UTF8Encoding]::new($false))
-aws cloudfront create-invalidation --distribution-id $DistributionId --invalidation-batch ('file://' + $invPath) | Out-Null
+try {
+  $invJson = $invObj | ConvertTo-Json -Compress
+  $invPath = Join-Path -Path 'logs' -ChildPath ('inv_' + $ts + '.json')
+  [IO.File]::WriteAllText($invPath, $invJson, [Text.UTF8Encoding]::new($false))
+  aws cloudfront create-invalidation --distribution-id $DistributionId --invalidation-batch ('file://' + $invPath) | Out-Null
+} catch {
+  # If CloudFront invalidation is not permitted (AccessDenied) or fails for any reason,
+  # log a warning and continue — lack of invalidation should not make the whole release fail.
+  $msg = $_.Exception.Message
+  Write-Host "Warning: CloudFront invalidation failed: $msg"
+  Add-Content -Path $logMOut -Value ("WARNING: CloudFront invalidation failed: {0}" -f $msg)
+}
 
 # 5) CDN verification (200 / 206)
 $cdnLatest = 'logs/cdn_latest.yml'

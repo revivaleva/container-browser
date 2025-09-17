@@ -51,4 +51,9 @@
 
 ※ 追加すべき情報や手順が分かったらこのファイルを追記してください。
 
+7) 追加した緩和策（実装済み）
+- `scripts/update-release.ps1` の CloudFront 無効化処理を try/catch で包み、`cloudfront:CreateInvalidation` の権限がない場合はワーニングを出力して処理を継続するようにしました。これにより、無効化権限の不足でリリース全体が失敗することを防ぎます。
+
+※ 長期的には CI 用の IAM ユーザーに `cloudfront:CreateInvalidation` を付与することを推奨します（再配布の即時性が必要なため）。
+
 
