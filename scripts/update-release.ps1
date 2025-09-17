@@ -88,7 +88,13 @@ Get-ChildItem -LiteralPath $nsisDir | Tee-Object -FilePath $logMOut -Append | Ou
 
 # 3) Upload to S3
 $latestYml = Join-Path $nsisDir 'latest.yml'
-aws s3 cp $latestYml ('s3://' + $Bucket + '/latest.yml') --no-progress | Out-Null
+# Rewrite latest.yml to reference files under nsis-web/ root to match uploaded artifact paths.
+$latestContent = Get-Content -LiteralPath $latestYml -Raw
+# Prefix path/file/url entries that are plain filenames with 'nsis-web/' so clients download the correct S3 key
+$latestContent = [regex]::Replace($latestContent, '^(\s*(?:path|file|url):\s*)([\w\-\.\s]+\.(?:exe|7z))$','${1}nsis-web/${2}', 'Multiline')
+$modifiedLatest = Join-Path $PSScriptRoot 'logs' 'latest_upload.yml'
+[IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
+aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress | Out-Null
 aws s3 cp $nsisDir ('s3://' + $Bucket + '/nsis-web/') --recursive --no-progress --cache-control 'public,max-age=300' | Out-Null
 
 # 4) CloudFront invalidation
