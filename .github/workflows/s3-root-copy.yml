@@ -29,10 +29,17 @@ jobs:
 
       - name: Copy nsis-web objects to root and invalidate
         env:
-          BUCKET: ${{ inputs.bucket }}
-          DIST: ${{ inputs.distribution_id }}
+          BUCKET: ${{ inputs.bucket || 'container-browser-updates' }}
+          DIST: ${{ inputs.distribution_id || 'E1Q66ASB5AODYF' }}
         run: |
           set -euo pipefail
+          # fallback in case env not populated (double safety)
+          if [ -z "${BUCKET:-}" ]; then
+            BUCKET='container-browser-updates'
+          fi
+          if [ -z "${DIST:-}" ]; then
+            DIST='E1Q66ASB5AODYF'
+          fi
           mkdir -p logs
           TS=$(date -u +%Y%m%d_%H%M%S)
           S3LOG=logs/s3-root-copy_${TS}.log
