@@ -51,10 +51,10 @@ if(-not $nsisDir -and -not $SkipBuild){
     ('-c.directories.output=' + $outDir),
     ('-c.win.target=nsis-web')
   )
-  # Short-term: disable code signing by clearing signing env vars so electron-builder won't try to sign
-  $env:WIN_CSC_LINK = ''
-  $env:CSC_LINK = ''
-  $env:CSC_KEY_PASSWORD = ''
+  # Short-term: disable code signing by removing signing env vars so electron-builder won't try to sign
+  Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+  Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+  Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
   # Also explicitly tell electron-builder to not sign on Windows
   $argList += '-c.win.sign=false'
   $p = Start-Process -FilePath $npx -ArgumentList $argList -NoNewWindow -Wait -PassThru `
