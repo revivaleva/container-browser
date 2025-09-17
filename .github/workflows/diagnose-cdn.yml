@@ -10,15 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Create basic log
+      - name: Run full diagnostic script
         run: |
-          mkdir -p logs
-          echo "diagnose-smoke: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > logs/diagnose.txt
-          echo "ok" > logs/status.txt
+          chmod +x scripts/diagnose-cdn.sh
+          scripts/diagnose-cdn.sh "${{ inputs.cdn || 'https://updates.threadsbooster.jp' }}" "${{ inputs.bucket || 'container-browser-updates' }}"
       - name: Upload logs
         uses: actions/upload-artifact@v4
         with:
-          name: diagnose-smoke-logs
+          name: diagnose-logs
           path: logs
 
 
