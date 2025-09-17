@@ -6,8 +6,15 @@ $env:AWS_PAGER=''
 # Accept CDN via environment variable, first positional argument, or default
 if ($env:CDN -and -not [string]::IsNullOrWhiteSpace($env:CDN)){
   $CDN = $env:CDN
-} elseif ($args.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($args[0])){
-  $CDN = $args[0]
+} elseif ($args.Count -gt 0) {
+  # Support both: positional URL, and named-style invocation where args may be ('-CDN','https://...')
+  if ($args[0] -match '^(?:-+)?CDN$' -and $args.Count -gt 1) {
+    $CDN = $args[1]
+  } else {
+    # try to find the first arg that looks like a URL
+    $found = $args | Where-Object { $_ -match 'https?://'} | Select-Object -First 1
+    if ($found) { $CDN = $found } else { $CDN = $args[0] }
+  }
 } else {
   $CDN = 'https://updates.threadsbooster.jp'
 }
