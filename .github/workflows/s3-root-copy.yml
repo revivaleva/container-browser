@@ -63,13 +63,16 @@ jobs:
           if [ ${#copied[@]} -gt 0 ]; then
             copied+=("/latest.yml")
             echo "Creating invalidation for: ${copied[*]}" | tee -a $CFLOG
-            # build invalidation JSON
-            python3 - <<PY > inv.json
-import json, time
-items = %s
-obj = {"Paths": {"Quantity": len(items), "Items": items}, "CallerReference": "root-copy-%d" % int(time.time()) }
-print(json.dumps(obj))
-PY
+            # build invalidation JSON without requiring python/jq
+            items_json=""
+            for it in "${copied[@]}"; do
+              if [ -z "$items_json" ]; then
+                items_json=\"$it\"
+              else
+                items_json=$items_json,\"$it\"
+              fi
+            done
+            printf '{"Paths":{"Quantity":%d,"Items":[%s]},"CallerReference":"root-copy-%d"}' "${#copied[@]}" "$items_json" "$(date +%s)" > inv.json
             aws cloudfront create-invalidation --distribution-id "$DIST" --invalidation-batch file://inv.json >>$CFLOG 2>&1 || true
           else
             echo "No files copied; skipping invalidation" | tee -a $CFLOG
