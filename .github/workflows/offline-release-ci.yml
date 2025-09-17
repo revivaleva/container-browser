@@ -45,7 +45,7 @@ jobs:
           if (-not $exe) { Write-Error 'Offline EXE not found after build'; exit 1 }
           Write-Host "EXE_PATH=$($exe.FullName)" | Out-File -FilePath "logs/offline_artifact.txt" -Append
 
-      - name: Guard: prevent overwrite unless allowed
+      - name: "Guard: prevent overwrite unless allowed"
         shell: pwsh
         run: |
           $exists = $false
