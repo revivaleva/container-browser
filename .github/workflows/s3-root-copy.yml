@@ -45,10 +45,24 @@ jobs:
           S3LOG=logs/s3-root-copy_${TS}.log
           CFLOG=logs/cf-inv_${TS}.log
 
-          keys=(
-            "nsis-web/container-browser-0.2.4-x64.nsis.7z"
-            "nsis-web/ContainerBrowser-Web-Setup.exe"
-          )
+          # Determine package filename from latest.yml (try nsis-web/latest.yml then root latest.yml)
+          pkg=""
+          if content=$(aws s3 cp "s3://$BUCKET/nsis-web/latest.yml" - 2>/dev/null); then
+            pkg=$(printf "%s" "$content" | grep -m1 '^[[:space:]]*file:' | sed 's/.*file:[[:space:]]*//') || true
+          fi
+          if [ -z "$pkg" ]; then
+            if content=$(aws s3 cp "s3://$BUCKET/latest.yml" - 2>/dev/null); then
+              pkg=$(printf "%s" "$content" | grep -m1 '^[[:space:]]*file:' | sed 's/.*file:[[:space:]]*//') || true
+            fi
+          fi
+
+          # Fallbacks if pkg not found
+          keys=()
+          if [ -n "$pkg" ]; then
+            keys+=("nsis-web/$pkg" "$pkg")
+          fi
+          # Always also try common exe names
+          keys+=("nsis-web/ContainerBrowser-Web-Setup.exe" "ContainerBrowser-Web-Setup.exe")
 
           copied=()
           for k in "${keys[@]}"; do
