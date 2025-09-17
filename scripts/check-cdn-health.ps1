@@ -2,9 +2,15 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $ConfirmPreference='None'
 $env:AWS_PAGER=''
-param(
-  [string]$CDN = 'https://updates.threadsbooster.jp'
-)
+
+# Accept CDN via environment variable, first positional argument, or default
+if ($env:CDN -and -not [string]::IsNullOrWhiteSpace($env:CDN)){
+  $CDN = $env:CDN
+} elseif ($args.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($args[0])){
+  $CDN = $args[0]
+} else {
+  $CDN = 'https://updates.threadsbooster.jp'
+}
 New-Item -ItemType Directory -Force logs | Out-Null
 $yPath = Join-Path $PWD 'logs\cdn_latest.yml'
 & "$env:SystemRoot\System32\curl.exe" -sSLo $yPath "$CDN/latest.yml"
