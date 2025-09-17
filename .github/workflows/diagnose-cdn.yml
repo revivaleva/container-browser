@@ -1,73 +1,24 @@
-name: Diagnose CDN and S3 for nsis-web
+name: Diagnose CDN (basic smoke test)
 on:
   workflow_dispatch:
-    inputs:
-      cdn:
-        description: "CDN base URL"
-        required: false
-        default: "https://updates.threadsbooster.jp"
-      bucket:
-        description: "S3 bucket"
-        required: false
-        default: "container-browser-updates"
   push:
     branches:
       - 'ci/diagnose-cdn'
 
 jobs:
-  diagnose:
+  smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Fetch latest.yml from CDN
+      - name: Create basic log
         run: |
-          set -e
           mkdir -p logs
-          echo "CDN=${{ inputs.cdn }}" > logs/params.txt
-          curl -sS "${{ inputs.cdn }}/latest.yml" -o latest.yml || true
-          echo "--- latest.yml ---" > logs/latest.out
-          cat latest.yml >> logs/latest.out || true
-          # extract nsis-web candidate paths
-          grep -Eo 'nsis-web/[^"\'"\s]+' latest.yml | sort -u > logs/candidates.txt || true
-          if [ ! -s logs/candidates.txt ]; then
-            grep -Eo '/nsis-web/[^"\'"\s]+' latest.yml | sed 's%^/%%' | sort -u > logs/candidates.txt || true
-          fi
-          echo "CANDIDATES:" 
-          cat logs/candidates.txt || true
-
-      - name: Test candidates (HEAD and Range) and optional S3 head-object
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-        run: |
-          set -e
-          mkdir -p logs/tests
-          echo "Diagnosis run at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > logs/tests/summary.txt
-          while IFS= read -r key; do
-            [ -z "$key" ] && continue
-            echo "=== $key ===" | tee -a logs/tests/summary.txt
-            url="${{ inputs.cdn }}/$key"
-            echo "URL: $url" | tee -a logs/tests/summary.txt
-            echo "HEAD response code:" >> logs/tests/summary.txt
-            curl -IsS -o /dev/null -w "%{http_code}\n" "$url" | tee -a logs/tests/summary.txt || true
-            echo "Range 0-1023 response headers:" >> logs/tests/summary.txt
-            curl -sS -r 0-1023 -D - "$url" -o /dev/null | sed -n '1,10p' >> logs/tests/summary.txt || true
-            if command -v aws >/dev/null 2>&1; then
-              echo "S3 head-object for: $key" >> logs/tests/summary.txt
-              aws s3api head-object --bucket "${{ inputs.bucket }}" --key "$key" 2>&1 | sed -n '1,20p' >> logs/tests/summary.txt || echo "head-object failed or missing" >> logs/tests/summary.txt
-            else
-              echo "aws cli not available" >> logs/tests/summary.txt
-            fi
-            echo "" >> logs/tests/summary.txt
-          done < logs/candidates.txt || true
-          echo "Logs saved to logs/tests/summary.txt"
-
-      - name: Upload diagnose logs
+          echo "diagnose-smoke: $(date -u +%Y-%m-%dT%H:%M:%SZ)" > logs/diagnose.txt
+          echo "ok" > logs/status.txt
+      - name: Upload logs
         uses: actions/upload-artifact@v4
         with:
-          name: diagnose-logs
+          name: diagnose-smoke-logs
           path: logs
 
 
