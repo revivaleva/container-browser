@@ -55,8 +55,7 @@ if(-not $nsisDir -and -not $SkipBuild){
   Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
   Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
   Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
-  # Also explicitly tell electron-builder to not sign on Windows
-  $argList += '-c.win.sign=false'
+  # Do not pass explicit -c.win.sign=false to avoid boolean/module path issues; rely on removing signing env vars instead
   $p = Start-Process -FilePath $npx -ArgumentList $argList -NoNewWindow -Wait -PassThru `
        -RedirectStandardOutput $logBOut -RedirectStandardError $logBErr
   if($p.ExitCode -ne 0){
