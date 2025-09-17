@@ -13,10 +13,10 @@ curl -sS "$CDN_URL/latest.yml" -o latest.yml || true
 echo "--- latest.yml ---" > logs/latest.out
 cat latest.yml >> logs/latest.out || true
 
-# extract candidate keys
-grep -Eo 'nsis-web/[^"\'"\s]+' latest.yml | sort -u > logs/candidates.txt || true
+# extract candidate keys (avoid complex nested quoting)
+grep -Eo 'nsis-web/[^[:space:]\"]+' latest.yml | sort -u > logs/candidates.txt || true
 if [ ! -s logs/candidates.txt ]; then
-  grep -Eo '/nsis-web/[^"\'"\s]+' latest.yml | sed 's%^/%%' | sort -u > logs/candidates.txt || true
+  grep -Eo '/nsis-web/[^[:space:]\"]+' latest.yml | sed 's%^/%%' | sort -u > logs/candidates.txt || true
 fi
 
 echo "Candidates:" >> logs/summary.txt
