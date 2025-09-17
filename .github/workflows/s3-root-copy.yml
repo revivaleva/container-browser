@@ -1,0 +1,88 @@
+name: S3 Root Copy and CloudFront Invalidate
+on:
+  workflow_dispatch:
+    inputs:
+      bucket:
+        description: 'S3 bucket'
+        required: false
+        default: 'container-browser-updates'
+      distribution_id:
+        description: 'CloudFront distribution id'
+        required: false
+        default: 'E1Q66ASB5AODYF'
+  push:
+    branches:
+      - 'ci/s3-root-copy'
+
+jobs:
+  copy_and_invalidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Copy nsis-web objects to root and invalidate
+        env:
+          BUCKET: ${{ inputs.bucket }}
+          DIST: ${{ inputs.distribution_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          TS=$(date -u +%Y%m%d_%H%M%S)
+          S3LOG=logs/s3-root-copy_${TS}.log
+          CFLOG=logs/cf-inv_${TS}.log
+
+          keys=(
+            "nsis-web/container-browser-0.2.4-x64.nsis.7z"
+            "nsis-web/ContainerBrowser-Web-Setup.exe"
+          )
+
+          copied=()
+          for k in "${keys[@]}"; do
+            echo "Checking s3://$BUCKET/$k" | tee -a $S3LOG
+            if aws s3api head-object --bucket "$BUCKET" --key "$k" >/dev/null 2>&1; then
+              leaf=$(basename "$k")
+              echo "Copying $k -> $leaf" | tee -a $S3LOG
+              if aws s3 cp "s3://$BUCKET/$k" "s3://$BUCKET/$leaf" --metadata-directive REPLACE --cache-control 'public,max-age=31536000' >>$S3LOG 2>&1; then
+                echo "COPIED: $leaf" | tee -a $S3LOG
+                copied+=("/$leaf")
+              else
+                echo "COPY_FAILED: $k" | tee -a $S3LOG
+              fi
+            else
+              echo "MISSING_OR_FORBIDDEN: $k" | tee -a $S3LOG
+            fi
+          done
+
+          if [ ${#copied[@]} -gt 0 ]; then
+            copied+=("/latest.yml")
+            echo "Creating invalidation for: ${copied[*]}" | tee -a $CFLOG
+            # build invalidation JSON
+            python3 - <<PY > inv.json
+import json, time
+items = %s
+obj = {"Paths": {"Quantity": len(items), "Items": items}, "CallerReference": "root-copy-%d" % int(time.time()) }
+print(json.dumps(obj))
+PY
+            aws cloudfront create-invalidation --distribution-id "$DIST" --invalidation-batch file://inv.json >>$CFLOG 2>&1 || true
+          else
+            echo "No files copied; skipping invalidation" | tee -a $CFLOG
+          fi
+
+          echo "Uploading logs"
+          ls -l logs | tee -a $S3LOG
+          echo "S3 log: $S3LOG"; echo "CF log: $CFLOG"
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-root-copy-logs
+          path: logs
+
+
