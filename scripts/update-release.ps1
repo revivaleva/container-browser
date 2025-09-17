@@ -92,7 +92,8 @@ $latestYml = Join-Path $nsisDir 'latest.yml'
 $latestContent = Get-Content -LiteralPath $latestYml -Raw
 # Prefix path/file/url entries that are plain filenames with 'nsis-web/' so clients download the correct S3 key
 $latestContent = [regex]::Replace($latestContent, '^(\s*(?:path|file|url):\s*)([\w\-\.\s]+\.(?:exe|7z))$','${1}nsis-web/${2}', 'Multiline')
-$modifiedLatest = Join-Path $PSScriptRoot 'logs' 'latest_upload.yml'
+  $modifiedLatestDir = Join-Path $PSScriptRoot 'logs'
+  $modifiedLatest = Join-Path $modifiedLatestDir 'latest_upload.yml'
 [IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
 aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress | Out-Null
 aws s3 cp $nsisDir ('s3://' + $Bucket + '/nsis-web/') --recursive --no-progress --cache-control 'public,max-age=300' | Out-Null
