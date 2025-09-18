@@ -54,7 +54,7 @@ if(-not $nsisDir -and -not $SkipBuild){
     'electron-builder',
     '--win','nsis-web',
     '--x64',
-    '-c.win.sign=false',
+    # do not pass explicit sign flag; rely on removing signing env vars instead
     '--publish','never',
     ('-c.directories.output=' + $outDir),
     ('-c.win.target=nsis-web')
