@@ -131,8 +131,8 @@ jobs:
         if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
-          # Invoke the PowerShell script under the same pwsh process to avoid cross-shell quoting issues
-          & .\scripts\check-cdn-health.ps1 -CDN 'https://updates.threadsbooster.jp'
+          # Run the script with -File to ensure the param block is parsed correctly by pwsh
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts\check-cdn-health.ps1 -CDN 'https://updates.threadsbooster.jp'
 
 
 
