@@ -1,10 +1,11 @@
+param(
+  [string]$CDN = 'https://updates.threadsbooster.jp'
+)
+
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $ConfirmPreference='None'
 $env:AWS_PAGER=''
-param(
-  [string]$CDN = 'https://updates.threadsbooster.jp'
-)
 New-Item -ItemType Directory -Force logs | Out-Null
 $yPath = Join-Path $PWD 'logs\cdn_latest.yml'
 & "$env:SystemRoot\System32\curl.exe" -sSLo $yPath "$CDN/latest.yml"
