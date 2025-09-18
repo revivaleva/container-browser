@@ -1,0 +1,81 @@
+﻿2025-09-17T08:47:28.2413761Z ##[group]Run powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
+2025-09-17T08:47:28.2414484Z [36;1mpowershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `[0m
+2025-09-17T08:47:28.2414921Z [36;1m  container-browser-updates `[0m
+2025-09-17T08:47:28.2415169Z [36;1m  E1Q66ASB5AODYF `[0m
+2025-09-17T08:47:28.2415438Z [36;1m  https://updates.threadsbooster.jp[0m
+2025-09-17T08:47:28.2506137Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-17T08:47:28.2506446Z env:
+2025-09-17T08:47:28.2506768Z   AWS_DEFAULT_REGION: ***
+2025-09-17T08:47:28.2507201Z   AWS_REGION: ***
+2025-09-17T08:47:28.2507401Z   AWS_ACCESS_KEY_ID: ***
+2025-09-17T08:47:28.2507674Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-17T08:47:28.2507869Z   WIN_CSC_LINK: 
+2025-09-17T08:47:28.2508024Z   CSC_LINK: 
+2025-09-17T08:47:28.2508181Z   CSC_KEY_PASSWORD: 
+2025-09-17T08:47:28.2508356Z ##[endgroup]
+2025-09-17T08:47:29.1014614Z package.json version: 0.2.9
+2025-09-17T08:47:36.1698454Z 
+2025-09-17T08:47:36.1706988Z == BUILD OUT (tail) ==
+2025-09-17T08:47:36.1743431Z   â€¢ electron-builder  version=24.13.3 os=10.0.26100
+2025-09-17T08:47:36.1744232Z   â€¢ loaded configuration  file=package.json ("build" field)
+2025-09-17T08:47:36.1746366Z   â€¢ @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+2025-09-17T08:47:36.1747127Z 
+2025-09-17T08:47:36.1748558Z To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+2025-09-17T08:47:36.1750335Z   â€¢ rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-17T08:47:36.1751698Z   â€¢ install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-17T08:47:36.1752818Z   â€¢ install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-17T08:47:36.1754113Z   â€¢ packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist_update_20250917_084728\win-unpacked
+2025-09-17T08:47:36.1755693Z   â€¢ downloading     url=https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip size=111 MB parts=8
+2025-09-17T08:47:36.1757757Z   â€¢ downloaded      url=https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip duration=627ms
+2025-09-17T08:47:36.1759940Z   â€¢ downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+2025-09-17T08:47:36.1762310Z   â€¢ downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=227ms
+2025-09-17T08:47:36.1763750Z   â¨¯ Cannot find module 'D:\a\container-browser\container-browser\false'
+2025-09-17T08:47:36.1764139Z Require stack:
+2025-09-17T08:47:36.1764795Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\platformPackager.js
+2025-09-17T08:47:36.1766052Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\electronMac.js
+2025-09-17T08:47:36.1767012Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\ElectronFramework.js
+2025-09-17T08:47:36.1768117Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\packager.js
+2025-09-17T08:47:36.1769128Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\index.js
+2025-09-17T08:47:36.1770186Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\builder.js
+2025-09-17T08:47:36.1771174Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\cli\cli.js
+2025-09-17T08:47:36.1772386Z - D:\a\container-browser\container-browser\node_modules\electron-builder\cli.js  failedTask=build stackTrace=Error: Cannot find module 'D:\a\container-browser\container-browser\false'
+2025-09-17T08:47:36.1775740Z Require stack:
+2025-09-17T08:47:36.1776527Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\platformPackager.js
+2025-09-17T08:47:36.1777990Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\electronMac.js
+2025-09-17T08:47:36.1779119Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\ElectronFramework.js
+2025-09-17T08:47:36.1780055Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\packager.js
+2025-09-17T08:47:36.1781523Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\index.js
+2025-09-17T08:47:36.1782651Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\builder.js
+2025-09-17T08:47:36.1783417Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\cli\cli.js
+2025-09-17T08:47:36.1784444Z - D:\a\container-browser\container-browser\node_modules\electron-builder\cli.js
+2025-09-17T08:47:36.1785336Z     at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1140:15)
+2025-09-17T08:47:36.1785857Z     at Function.Module._load (node:internal/modules/cjs/loader:981:27)
+2025-09-17T08:47:36.1786651Z     at Module.require (node:internal/modules/cjs/loader:1231:19)
+2025-09-17T08:47:36.1787398Z     at require (node:internal/modules/helpers:177:18)
+2025-09-17T08:47:36.1788671Z     at resolveModule (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:771:10)
+2025-09-17T08:47:36.1790330Z     at resolveFunction (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:791:24)
+2025-09-17T08:47:36.1791889Z     at sign (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\codeSign\windowsCodeSign.ts:55:42)
+2025-09-17T08:47:36.1793300Z     at WinPackager.sign (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:213:20)
+2025-09-17T08:47:36.1794548Z     at WinPackager.signAndEditResources (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:348:5)
+2025-09-17T08:47:36.1795631Z From previous event:
+2025-09-17T08:47:36.1796176Z     at processImmediate (node:internal/timers:476:21)
+2025-09-17T08:47:36.1796546Z From previous event:
+2025-09-17T08:47:36.1798286Z     at WinPackager.signApp (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:384:27)
+2025-09-17T08:47:36.1800080Z     at WinPackager.doSignAfterPack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:336:32)
+2025-09-17T08:47:36.1801414Z     at WinPackager.doPack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:321:7)
+2025-09-17T08:47:36.1802558Z     at WinPackager.pack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:140:5)
+2025-09-17T08:47:36.1803771Z     at Packager.doBuild (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:445:9)
+2025-09-17T08:47:36.1804788Z     at executeFinally (D:\a\container-browser\container-browser\node_modules\builder-util\src\promise.ts:12:14)
+2025-09-17T08:47:36.1805956Z     at Packager._build (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:379:31)
+2025-09-17T08:47:36.1806869Z     at Packager.build (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:340:12)
+2025-09-17T08:47:36.1808102Z     at executeFinally (D:\a\container-browser\container-browser\node_modules\builder-util\src\promise.ts:12:14)
+2025-09-17T08:47:36.1811410Z 
+2025-09-17T08:47:36.1819319Z == BUILD ERR (tail) ==
+2025-09-17T08:47:36.2975932Z nsis-web build failed: ExitCode=1
+2025-09-17T08:47:36.2977232Z At D:\a\container-browser\container-browser\scripts\update-release.ps1:69 char:5
+2025-09-17T08:47:36.2978328Z +     throw ('nsis-web build failed: ExitCode={0}' -f $p.ExitCode)
+2025-09-17T08:47:36.2980148Z +     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2025-09-17T08:47:36.2980888Z     + CategoryInfo          : OperationStopped: (nsis-web build failed: ExitCode=1:String) [], RuntimeException
+2025-09-17T08:47:36.2981647Z     + FullyQualifiedErrorId : nsis-web build failed: ExitCode=1
+2025-09-17T08:47:36.2982068Z  
+2025-09-17T08:47:36.4199100Z ##[error]Process completed with exit code 1.

@@ -1,5 +1,9 @@
 name: Build & Publish Windows (nsis-web)
 
+concurrency:
+  group: publish-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main ]
@@ -8,9 +12,6 @@ on:
 jobs:
   build_publish_windows:
     runs-on: windows-latest
-    env:
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,6 +44,12 @@ jobs:
 
       - name: Build app (renderer + main)
         run: npm run build
+
+      - name: Cancel other publish-windows runs after build
+        shell: pwsh
+        run: |
+          # Cancel other in-progress or queued publish-windows runs, keep this run
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cancel_other_runs.ps1 -Workflow 'publish-windows.yml' -Keep $env:GITHUB_RUN_ID
 
       - name: Install native app dependencies
         run: npx electron-builder install-app-deps
@@ -104,11 +111,12 @@ jobs:
       - name: Publish nsis-web via script
         if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         shell: pwsh
-        env:
-          WIN_CSC_LINK: ''
-          CSC_LINK: ''
-          CSC_KEY_PASSWORD: ''
         run: |
+          # Ensure signing env vars are removed from the step environment before running the release script
+          Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+          # Run the release script
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
             container-browser-updates `
             E1Q66ASB5AODYF `
@@ -118,7 +126,8 @@ jobs:
         if: steps.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-cdn-health.ps1 -CDN 'https://updates.threadsbooster.jp'
+          # Invoke the PowerShell script under the same pwsh process to avoid cross-shell quoting issues
+          & .\scripts\check-cdn-health.ps1 -CDN 'https://updates.threadsbooster.jp'
 
 
 

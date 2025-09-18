@@ -1,0 +1,5 @@
+2025-09-17T08:42:22.2880000Z Requested labels: windows-latest
+2025-09-17T08:42:22.2880000Z Job defined at: revivaleva/container-browser/.github/workflows/publish-windows.yml@refs/heads/ci/s3-root-copy
+2025-09-17T08:42:22.2880000Z Waiting for a runner to pick up this job...
+2025-09-17T08:42:22.7750000Z Job is waiting for a hosted runner to come online.
+2025-09-17T08:42:22.7760000Z Job is about to start running on the hosted runner: GitHub Actions 1000000172

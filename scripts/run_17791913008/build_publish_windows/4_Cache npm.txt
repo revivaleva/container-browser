@@ -1,0 +1,11 @@
+﻿2025-09-17T08:42:45.4102105Z ##[group]Run actions/cache@v4
+2025-09-17T08:42:45.4102398Z with:
+2025-09-17T08:42:45.4102562Z   path: ~/.npm
+2025-09-17T08:42:45.4102912Z   key: Windows-node-8fd2d373a9bce4861fa30a202b65493a590201ff32ad9354d9ea88e493e1cb47
+2025-09-17T08:42:45.4103316Z   restore-keys: Windows-node-
+2025-09-17T08:42:45.4103543Z   enableCrossOsArchive: false
+2025-09-17T08:42:45.4103753Z   fail-on-cache-miss: false
+2025-09-17T08:42:45.4103952Z   lookup-only: false
+2025-09-17T08:42:45.4104375Z   save-always: false
+2025-09-17T08:42:45.4104553Z ##[endgroup]
+2025-09-17T08:42:45.8802294Z Cache not found for input keys: Windows-node-8fd2d373a9bce4861fa30a202b65493a590201ff32ad9354d9ea88e493e1cb47, Windows-node-
