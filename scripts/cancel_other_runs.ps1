@@ -3,11 +3,17 @@ param(
   [int64]$Keep = 0
 )
 
-try {
-  $token = (Get-Content -Raw 'scripts/.github_token').Trim()
-} catch {
-  Write-Error 'Failed to read scripts/.github_token'
-  exit 1
+# Resolve token: prefer GITHUB_TOKEN (provided by Actions), fallback to local scripts/.github_token
+# Prefer GITHUB_TOKEN in Actions environment. If missing, try local scripts/.github_token.
+$token = $env:GITHUB_TOKEN
+if (-not $token) {
+  try {
+    $token = (Get-Content -Raw 'scripts/.github_token').Trim()
+  } catch {
+    Write-Warning 'GITHUB_TOKEN not set and scripts/.github_token missing; skipping cancel step.'
+    # Do not fail the job if token isn't available; cancellation is best-effort.
+    exit 0
+  }
 }
 
 $owner = 'revivaleva'
