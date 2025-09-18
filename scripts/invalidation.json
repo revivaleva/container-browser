@@ -1,0 +1,13 @@
+{
+    "Paths":  {
+                  "Quantity":  5,
+                  "Items":  [
+                                "/latest.yml",
+                                "/ContainerBrowser-Web-Setup.exe",
+                                "/container-browser-0.2.4-x64.nsis.7z",
+                                "/nsis-web/container-browser-0.2.9-x64.nsis.7z",
+                                "/nsis-web/ContainerBrowser-Web-Setup.exe"
+                            ]
+              },
+    "CallerReference":  "invalidate-20250917161518"
+}

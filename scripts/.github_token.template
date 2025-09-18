@@ -1,0 +1,4 @@
+<YOUR_GITHUB_PAT_HERE>
+
+# Save your PAT into scripts/.github_token (or .secrets/github_token) and do NOT commit that file.
+

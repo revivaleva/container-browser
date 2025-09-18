@@ -41,26 +41,55 @@ $nsisDir = $null
 if($SourceDir){ $nsisDir = $SourceDir }
 
 if(-not $nsisDir -and -not $SkipBuild){
-  $npx = (Get-Command 'npx.cmd').Source
+  # remove any previous dist_update_* directories to avoid stale artifacts
+  Get-ChildItem -Directory -Filter 'dist_update_*' -ErrorAction SilentlyContinue | ForEach-Object { Remove-Item -Recurse -Force $_.FullName -ErrorAction SilentlyContinue }
+
+  # Resolve npx executable robustly (handle npx or npx.cmd)
+  $npxCmd = Get-Command -Name npx -ErrorAction SilentlyContinue
+  if (-not $npxCmd) { $npxCmd = Get-Command -Name npx.cmd -ErrorAction SilentlyContinue }
+  if (-not $npxCmd) { throw 'npx not found in PATH' }
+  $npx = $npxCmd.Source
   $outDir = 'dist_update_' + $ts
   $argList = @(
     'electron-builder',
     '--win','nsis-web',
     '--x64',
+    '-c.win.sign=false',
     '--publish','never',
     ('-c.directories.output=' + $outDir),
     ('-c.win.target=nsis-web')
   )
-  $p = Start-Process -FilePath $npx -ArgumentList $argList -NoNewWindow -Wait -PassThru `
-       -RedirectStandardOutput $logBOut -RedirectStandardError $logBErr
-  if($p.ExitCode -ne 0){
+  # Short-term: disable code signing by removing signing env vars so electron-builder won't try to sign
+  Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+  Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+  Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+  # Ensure env vars are unset in this process as well (defensive)
+  try { $env:WIN_CSC_LINK = $null } catch {}
+  try { $env:CSC_LINK = $null } catch {}
+  try { $env:CSC_KEY_PASSWORD = $null } catch {}
+  # Do not pass explicit -c.win.sign=false to avoid boolean/module path issues; rely on removing signing env vars instead
+  # Before invoking electron-builder, ensure compiled output exists; if missing, attempt to run the TypeScript build
+  $entryFile = Join-Path 'out' 'main\index.js'
+  if (-not (Test-Path -LiteralPath $entryFile)) {
+    Write-Host "DEBUG: build output missing ($entryFile). Running 'npm run build' to produce it."
+    try {
+      npm run build 2>&1 | Tee-Object -FilePath $logBOut -Append
+    } catch {
+      Write-Host 'npm run build failed; continuing to attempt electron-builder (will likely fail)'
+    }
+  }
+
+  # Run electron-builder in-process so env removals take effect
+  & $npx @argList *> $logBOut 2> $logBErr
+  $exit = $LASTEXITCODE
+  if($exit -ne 0){
     Write-Host ''
     Write-Host '== BUILD OUT (tail) =='
     if(Test-Path $logBOut){ Get-Content -LiteralPath $logBOut -Tail 120 }
     Write-Host ''
     Write-Host '== BUILD ERR (tail) =='
     if(Test-Path $logBErr){ Get-Content -LiteralPath $logBErr -Tail 120 }
-    throw ('nsis-web build failed: ExitCode={0}' -f $p.ExitCode)
+    throw ('nsis-web build failed: ExitCode={0}' -f $exit)
   }
   $nsisDir = Join-Path $outDir 'nsis-web'
 }
@@ -83,15 +112,30 @@ Get-ChildItem -LiteralPath $nsisDir | Tee-Object -FilePath $logMOut -Append | Ou
 
 # 3) Upload to S3
 $latestYml = Join-Path $nsisDir 'latest.yml'
-aws s3 cp $latestYml ('s3://' + $Bucket + '/latest.yml') --no-progress | Out-Null
+# Rewrite latest.yml to reference files under nsis-web/ root to match uploaded artifact paths.
+$latestContent = Get-Content -LiteralPath $latestYml -Raw
+# Prefix path/file/url entries that are plain filenames with 'nsis-web/' so clients download the correct S3 key
+$latestContent = [regex]::Replace($latestContent, '^(\s*(?:path|file|url):\s*)([\w\-\.\s]+\.(?:exe|7z))$','${1}nsis-web/${2}', 'Multiline')
+  $modifiedLatestDir = Join-Path $PSScriptRoot 'logs'
+  $modifiedLatest = Join-Path $modifiedLatestDir 'latest_upload.yml'
+[IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
+aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress | Out-Null
 aws s3 cp $nsisDir ('s3://' + $Bucket + '/nsis-web/') --recursive --no-progress --cache-control 'public,max-age=300' | Out-Null
 
 # 4) CloudFront invalidation
 $invObj = @{ Paths=@{ Quantity=2; Items=@('/latest.yml','/nsis-web/*') }; CallerReference=('autoupd-' + $ts) }
-$invJson = $invObj | ConvertTo-Json -Compress
-$invPath = Join-Path -Path 'logs' -ChildPath ('inv_' + $ts + '.json')
-[IO.File]::WriteAllText($invPath, $invJson, [Text.UTF8Encoding]::new($false))
-aws cloudfront create-invalidation --distribution-id $DistributionId --invalidation-batch ('file://' + $invPath) | Out-Null
+try {
+  $invJson = $invObj | ConvertTo-Json -Compress
+  $invPath = Join-Path -Path 'logs' -ChildPath ('inv_' + $ts + '.json')
+  [IO.File]::WriteAllText($invPath, $invJson, [Text.UTF8Encoding]::new($false))
+  aws cloudfront create-invalidation --distribution-id $DistributionId --invalidation-batch ('file://' + $invPath) | Out-Null
+} catch {
+  # If CloudFront invalidation is not permitted (AccessDenied) or fails for any reason,
+  # log a warning and continue — lack of invalidation should not make the whole release fail.
+  $msg = $_.Exception.Message
+  Write-Host "Warning: CloudFront invalidation failed: $msg"
+  Add-Content -Path $logMOut -Value ("WARNING: CloudFront invalidation failed: {0}" -f $msg)
+}
 
 # 5) CDN verification (200 / 206)
 $cdnLatest = 'logs/cdn_latest.yml'

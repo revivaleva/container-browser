@@ -1,0 +1,401 @@
+﻿2025-09-17T08:42:24.5237602Z Current runner version: '2.328.0'
+2025-09-17T08:42:24.5272245Z ##[group]Runner Image Provisioner
+2025-09-17T08:42:24.5273430Z Hosted Compute Agent
+2025-09-17T08:42:24.5274280Z Version: 20250912.392
+2025-09-17T08:42:24.5275176Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+2025-09-17T08:42:24.5276325Z Build Date: 2025-09-12T15:23:14Z
+2025-09-17T08:42:24.5277316Z ##[endgroup]
+2025-09-17T08:42:24.5278153Z ##[group]Operating System
+2025-09-17T08:42:24.5279057Z Microsoft Windows Server 2025
+2025-09-17T08:42:24.5280086Z 10.0.26100
+2025-09-17T08:42:24.5280857Z Datacenter
+2025-09-17T08:42:24.5281712Z ##[endgroup]
+2025-09-17T08:42:24.5282488Z ##[group]Runner Image
+2025-09-17T08:42:24.5283472Z Image: windows-2025
+2025-09-17T08:42:24.5284335Z Version: 20250915.28.1
+2025-09-17T08:42:24.5286007Z Included Software: https://github.com/actions/runner-images/blob/win25/20250915.28/images/windows/Windows2025-Readme.md
+2025-09-17T08:42:24.5289075Z Image Release: https://github.com/actions/runner-images/releases/tag/win25%2F20250915.28
+2025-09-17T08:42:24.5290705Z ##[endgroup]
+2025-09-17T08:42:24.5295309Z ##[group]GITHUB_TOKEN Permissions
+2025-09-17T08:42:24.5297961Z Actions: write
+2025-09-17T08:42:24.5298914Z Attestations: write
+2025-09-17T08:42:24.5299826Z Checks: write
+2025-09-17T08:42:24.5300624Z Contents: write
+2025-09-17T08:42:24.5301362Z Deployments: write
+2025-09-17T08:42:24.5302084Z Discussions: write
+2025-09-17T08:42:24.5302850Z Issues: write
+2025-09-17T08:42:24.5303648Z Metadata: read
+2025-09-17T08:42:24.5304390Z Models: read
+2025-09-17T08:42:24.5305131Z Packages: write
+2025-09-17T08:42:24.5305952Z Pages: write
+2025-09-17T08:42:24.5306851Z PullRequests: write
+2025-09-17T08:42:24.5307713Z RepositoryProjects: write
+2025-09-17T08:42:24.5308665Z SecurityEvents: write
+2025-09-17T08:42:24.5309643Z Statuses: write
+2025-09-17T08:42:24.5310394Z ##[endgroup]
+2025-09-17T08:42:24.5314023Z Secret source: Actions
+2025-09-17T08:42:24.5315064Z Prepare workflow directory
+2025-09-17T08:42:24.5659579Z Prepare all required actions
+2025-09-17T08:42:24.5696749Z Getting action download info
+2025-09-17T08:42:24.8453974Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-09-17T08:42:24.9693503Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2025-09-17T08:42:25.1862187Z Download action repository 'actions/cache@v4' (SHA:0400d5f644dc74513175e3cd8d07132dd4860809)
+2025-09-17T08:42:25.3707720Z Download action repository 'aws-actions/configure-aws-credentials@v2' (SHA:5fd3084fc36e372ff1fff382a39b10d03659f355)
+2025-09-17T08:42:25.8407415Z Complete job name: build_publish_windows
+2025-09-17T08:42:25.9666490Z ##[group]Run actions/checkout@v4
+2025-09-17T08:42:25.9667804Z with:
+2025-09-17T08:42:25.9668425Z   fetch-depth: 0
+2025-09-17T08:42:25.9669188Z   repository: revivaleva/container-browser
+2025-09-17T08:42:25.9670347Z   token: ***
+2025-09-17T08:42:25.9670981Z   ssh-strict: true
+2025-09-17T08:42:25.9671679Z   ssh-user: git
+2025-09-17T08:42:25.9672370Z   persist-credentials: true
+2025-09-17T08:42:25.9673119Z   clean: true
+2025-09-17T08:42:25.9673788Z   sparse-checkout-cone-mode: true
+2025-09-17T08:42:25.9674623Z   fetch-tags: false
+2025-09-17T08:42:25.9675306Z   show-progress: true
+2025-09-17T08:42:25.9676013Z   lfs: false
+2025-09-17T08:42:25.9676656Z   submodules: false
+2025-09-17T08:42:25.9677358Z   set-safe-directory: true
+2025-09-17T08:42:25.9678314Z ##[endgroup]
+2025-09-17T08:42:26.1279746Z Syncing repository: revivaleva/container-browser
+2025-09-17T08:42:26.1282160Z ##[group]Getting Git version info
+2025-09-17T08:42:26.1283400Z Working directory is 'D:\a\container-browser\container-browser'
+2025-09-17T08:42:26.2354708Z [command]"C:\Program Files\Git\bin\git.exe" version
+2025-09-17T08:42:26.5299584Z git version 2.51.0.windows.1
+2025-09-17T08:42:26.5350054Z ##[endgroup]
+2025-09-17T08:42:26.5375409Z Temporarily overriding HOME='D:\a\_temp\29f56c61-9683-4dec-97a5-1611624b7083' before making global git config changes
+2025-09-17T08:42:26.5381490Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-17T08:42:26.5390332Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\container-browser\container-browser
+2025-09-17T08:42:26.5889673Z Deleting the contents of 'D:\a\container-browser\container-browser'
+2025-09-17T08:42:26.5898529Z ##[group]Initializing the repository
+2025-09-17T08:42:26.5913447Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\container-browser\container-browser
+2025-09-17T08:42:26.6590792Z Initialized empty Git repository in D:/a/container-browser/container-browser/.git/
+2025-09-17T08:42:26.6633564Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/revivaleva/container-browser
+2025-09-17T08:42:26.7087529Z ##[endgroup]
+2025-09-17T08:42:26.7088708Z ##[group]Disabling automatic garbage collection
+2025-09-17T08:42:26.7096234Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2025-09-17T08:42:26.7378766Z ##[endgroup]
+2025-09-17T08:42:26.7379852Z ##[group]Setting up auth
+2025-09-17T08:42:26.7391858Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2025-09-17T08:42:26.7694028Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2025-09-17T08:42:27.9281263Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-17T08:42:27.9561281Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2025-09-17T08:42:28.4756373Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2025-09-17T08:42:28.5051516Z ##[endgroup]
+2025-09-17T08:42:28.5052377Z ##[group]Fetching the repository
+2025-09-17T08:42:28.5066797Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2025-09-17T08:42:31.7873774Z From https://github.com/revivaleva/container-browser
+2025-09-17T08:42:31.7874900Z  * [new branch]      chore/cf-key-rotation-finalize -> origin/chore/cf-key-rotation-finalize
+2025-09-17T08:42:31.7878285Z  * [new branch]      chore/update-release-clean -> origin/chore/update-release-clean
+2025-09-17T08:42:31.7879280Z  * [new branch]      ci/diagnose-cdn       -> origin/ci/diagnose-cdn
+2025-09-17T08:42:31.7880061Z  * [new branch]      ci/offline-release-ci -> origin/ci/offline-release-ci
+2025-09-17T08:42:31.7880816Z  * [new branch]      ci/s3-root-copy       -> origin/ci/s3-root-copy
+2025-09-17T08:42:31.7882048Z  * [new branch]      ci/workflow-manual-20250916 -> origin/ci/workflow-manual-20250916
+2025-09-17T08:42:31.7883153Z  * [new branch]      ci/workflow-manual-20250916-mainbase -> origin/ci/workflow-manual-20250916-mainbase
+2025-09-17T08:42:31.7884199Z  * [new branch]      feat/web-installer-switch -> origin/feat/web-installer-switch
+2025-09-17T08:42:31.7884999Z  * [new branch]      main                  -> origin/main
+2025-09-17T08:42:31.8067153Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/ci/s3-root-copy
+2025-09-17T08:42:31.8434676Z   origin/ci/s3-root-copy
+2025-09-17T08:42:31.8475229Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/ci/s3-root-copy
+2025-09-17T08:42:31.8753216Z 32c49805ce652e832d7bdc6a6af8d8da865a9339
+2025-09-17T08:42:31.8781065Z ##[endgroup]
+2025-09-17T08:42:31.8781629Z ##[group]Determining the checkout info
+2025-09-17T08:42:31.8782939Z ##[endgroup]
+2025-09-17T08:42:31.8792405Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2025-09-17T08:42:31.9136063Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2025-09-17T08:42:31.9406724Z ##[group]Checking out the ref
+2025-09-17T08:42:31.9416777Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B ci/s3-root-copy refs/remotes/origin/ci/s3-root-copy
+2025-09-17T08:42:32.0088616Z branch 'ci/s3-root-copy' set up to track 'origin/ci/s3-root-copy'.
+2025-09-17T08:42:32.0095747Z Switched to a new branch 'ci/s3-root-copy'
+2025-09-17T08:42:32.0126627Z ##[endgroup]
+2025-09-17T08:42:32.0466258Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2025-09-17T08:42:32.0727695Z 32c49805ce652e832d7bdc6a6af8d8da865a9339
+2025-09-17T08:42:32.1139040Z ##[group]Run actions/setup-node@v4
+2025-09-17T08:42:32.1139353Z with:
+2025-09-17T08:42:32.1139510Z   node-version: 18
+2025-09-17T08:42:32.1139707Z   always-auth: false
+2025-09-17T08:42:32.1139895Z   check-latest: false
+2025-09-17T08:42:32.1140204Z   token: ***
+2025-09-17T08:42:32.1140387Z ##[endgroup]
+2025-09-17T08:42:32.3613795Z Found in cache @ C:\hostedtoolcache\windows\node\18.20.8\x64
+2025-09-17T08:42:32.3628108Z ##[group]Environment details
+2025-09-17T08:42:45.2519442Z node: v18.20.8
+2025-09-17T08:42:45.2519673Z npm: 10.8.2
+2025-09-17T08:42:45.2519823Z yarn: 1.22.22
+2025-09-17T08:42:45.2521906Z ##[endgroup]
+2025-09-17T08:42:45.4102125Z ##[group]Run actions/cache@v4
+2025-09-17T08:42:45.4102401Z with:
+2025-09-17T08:42:45.4102564Z   path: ~/.npm
+2025-09-17T08:42:45.4102915Z   key: Windows-node-8fd2d373a9bce4861fa30a202b65493a590201ff32ad9354d9ea88e493e1cb47
+2025-09-17T08:42:45.4103318Z   restore-keys: Windows-node-
+2025-09-17T08:42:45.4103545Z   enableCrossOsArchive: false
+2025-09-17T08:42:45.4103756Z   fail-on-cache-miss: false
+2025-09-17T08:42:45.4103954Z   lookup-only: false
+2025-09-17T08:42:45.4104379Z   save-always: false
+2025-09-17T08:42:45.4104555Z ##[endgroup]
+2025-09-17T08:42:45.8802316Z Cache not found for input keys: Windows-node-8fd2d373a9bce4861fa30a202b65493a590201ff32ad9354d9ea88e493e1cb47, Windows-node-
+2025-09-17T08:42:46.0309252Z ##[group]Run actions/cache@v4
+2025-09-17T08:42:46.0309533Z with:
+2025-09-17T08:42:46.0309756Z   path: ~/.cache/electron
+~/.cache/electron-builder
+
+2025-09-17T08:42:46.0310205Z   key: Windows-electron-8fd2d373a9bce4861fa30a202b65493a590201ff32ad9354d9ea88e493e1cb47
+2025-09-17T08:42:46.0310618Z   restore-keys: Windows-electron-
+2025-09-17T08:42:46.0310850Z   enableCrossOsArchive: false
+2025-09-17T08:42:46.0311062Z   fail-on-cache-miss: false
+2025-09-17T08:42:46.0311261Z   lookup-only: false
+2025-09-17T08:42:46.0311438Z   save-always: false
+2025-09-17T08:42:46.0311606Z ##[endgroup]
+2025-09-17T08:42:46.4171928Z Cache not found for input keys: Windows-electron-8fd2d373a9bce4861fa30a202b65493a590201ff32ad9354d9ea88e493e1cb47, Windows-electron-
+2025-09-17T08:42:46.4443520Z ##[group]Run npm ci
+2025-09-17T08:42:46.4443835Z [36;1mnpm ci[0m
+2025-09-17T08:42:46.6040440Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-17T08:42:46.6040869Z ##[endgroup]
+2025-09-17T08:42:58.0512452Z npm warn EBADENGINE Unsupported engine {
+2025-09-17T08:42:58.0513155Z npm warn EBADENGINE   package: '@electron/rebuild@4.0.1',
+2025-09-17T08:42:58.0513797Z npm warn EBADENGINE   required: { node: '>=22.12.0' },
+2025-09-17T08:42:58.0514493Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-17T08:42:58.0515000Z npm warn EBADENGINE }
+2025-09-17T08:42:58.0524581Z npm warn EBADENGINE Unsupported engine {
+2025-09-17T08:42:58.0525499Z npm warn EBADENGINE   package: 'better-sqlite3@12.2.0',
+2025-09-17T08:42:58.0526344Z npm warn EBADENGINE   required: { node: '20.x || 22.x || 23.x || 24.x' },
+2025-09-17T08:42:58.0527204Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-17T08:42:58.0527941Z npm warn EBADENGINE }
+2025-09-17T08:42:58.0548285Z npm warn EBADENGINE Unsupported engine {
+2025-09-17T08:42:58.0548839Z npm warn EBADENGINE   package: 'node-abi@4.14.0',
+2025-09-17T08:42:58.0549673Z npm warn EBADENGINE   required: { node: '>=22.12.0' },
+2025-09-17T08:42:58.0550084Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-17T08:42:58.0550408Z npm warn EBADENGINE }
+2025-09-17T08:43:00.9745175Z npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+2025-09-17T08:43:01.0849772Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+2025-09-17T08:43:03.1832046Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-17T08:43:03.1838399Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-17T08:43:03.1859060Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-17T08:43:03.6068511Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+2025-09-17T08:47:18.2144357Z 
+2025-09-17T08:47:18.2145647Z > container-browser@0.2.9 postinstall
+2025-09-17T08:47:18.2146340Z > electron-builder install-app-deps
+2025-09-17T08:47:18.2146658Z 
+2025-09-17T08:47:19.0357959Z   • electron-builder  version=24.13.3
+2025-09-17T08:47:19.0379629Z   • loaded configuration  file=package.json ("build" field)
+2025-09-17T08:47:19.1015433Z   • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-17T08:47:19.1016919Z   • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-17T08:47:19.4851335Z   • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-17T08:47:19.6939801Z 
+2025-09-17T08:47:19.6941319Z added 489 packages, and audited 490 packages in 4m
+2025-09-17T08:47:19.6941789Z 
+2025-09-17T08:47:19.6942137Z 69 packages are looking for funding
+2025-09-17T08:47:19.6942694Z   run `npm fund` for details
+2025-09-17T08:47:19.7190153Z 
+2025-09-17T08:47:19.7190751Z 4 moderate severity vulnerabilities
+2025-09-17T08:47:19.7191085Z 
+2025-09-17T08:47:19.7191412Z To address issues that do not require attention, run:
+2025-09-17T08:47:19.7191885Z   npm audit fix
+2025-09-17T08:47:19.7192051Z 
+2025-09-17T08:47:19.7192270Z To address all issues (including breaking changes), run:
+2025-09-17T08:47:19.7192639Z   npm audit fix --force
+2025-09-17T08:47:19.7192786Z 
+2025-09-17T08:47:19.7192939Z Run `npm audit` for details.
+2025-09-17T08:47:20.1404638Z ##[group]Run npm run build
+2025-09-17T08:47:20.1405035Z [36;1mnpm run build[0m
+2025-09-17T08:47:20.1505802Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-17T08:47:20.1506183Z ##[endgroup]
+2025-09-17T08:47:20.7679414Z 
+2025-09-17T08:47:20.7680044Z > container-browser@0.2.9 build
+2025-09-17T08:47:20.7680669Z > electron-vite build
+2025-09-17T08:47:20.7680985Z 
+2025-09-17T08:47:21.2862124Z [36mvite v5.4.19 [32mbuilding SSR bundle for production...[36m[39m
+2025-09-17T08:47:21.3676607Z transforming...
+2025-09-17T08:47:22.9871310Z [32m✓[39m 384 modules transformed.
+2025-09-17T08:47:23.2022394Z [1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+2025-09-17T08:47:23.2027622Z (!) D:/a/container-browser/container-browser/src/main/containerManager.ts is dynamically imported by D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts but also statically imported by D:/a/container-browser/container-browser/src/main/index.ts, dynamic import will not move module into another chunk.
+2025-09-17T08:47:23.2031710Z [39m
+2025-09-17T08:47:23.2032120Z rendering chunks...
+2025-09-17T08:47:23.2098075Z [2mout/main/[22m[36mindex.js  [39m[1m[33m519.37 kB[39m[22m
+2025-09-17T08:47:23.2101203Z [32m✓ built in 1.89s[39m
+2025-09-17T08:47:23.2143438Z [36mvite v5.4.19 [32mbuilding SSR bundle for production...[36m[39m
+2025-09-17T08:47:23.2198668Z transforming...
+2025-09-17T08:47:23.2360698Z [32m✓[39m 3 modules transformed.
+2025-09-17T08:47:23.2425673Z rendering chunks...
+2025-09-17T08:47:23.2452056Z [2mout/preload/[22m[36mmainPreload.cjs       [39m[1m[2m2.93 kB[22m[1m[22m
+2025-09-17T08:47:23.2453557Z [2mout/preload/[22m[36mcontainerPreload.cjs  [39m[1m[2m8.00 kB[22m[1m[22m
+2025-09-17T08:47:23.2455384Z [32m✓ built in 30ms[39m
+2025-09-17T08:47:23.2493635Z [36mvite v5.4.19 [32mbuilding for production...[36m[39m
+2025-09-17T08:47:23.2765815Z transforming...
+2025-09-17T08:47:23.8325078Z [32m✓[39m 33 modules transformed.
+2025-09-17T08:47:23.8737948Z rendering chunks...
+2025-09-17T08:47:23.9081090Z [2m../../out/renderer/[22m[32mindex.html                         [39m[1m[2m  0.55 kB[22m[1m[22m
+2025-09-17T08:47:23.9083014Z [2m../../out/renderer/[22m[32mcontainerShell.html                [39m[1m[2m  3.91 kB[22m[1m[22m
+2025-09-17T08:47:23.9084418Z [2m../../out/renderer/[22m[35massets/index-D_34ibqy.css          [39m[1m[2m  1.23 kB[22m[1m[22m
+2025-09-17T08:47:23.9085858Z [2m../../out/renderer/[22m[36massets/containerShell-TrgT6HbI.js  [39m[1m[2m  9.69 kB[22m[1m[22m
+2025-09-17T08:47:23.9087405Z [2m../../out/renderer/[22m[36massets/index-ClCjK89A.js           [39m[1m[2m239.20 kB[22m[1m[22m
+2025-09-17T08:47:23.9088456Z [32m✓ built in 658ms[39m
+2025-09-17T08:47:24.0803113Z ##[group]Run npx electron-builder install-app-deps
+2025-09-17T08:47:24.0803657Z [36;1mnpx electron-builder install-app-deps[0m
+2025-09-17T08:47:24.0934671Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-17T08:47:24.0935069Z ##[endgroup]
+2025-09-17T08:47:26.0634157Z   • electron-builder  version=24.13.3
+2025-09-17T08:47:26.0655206Z   • loaded configuration  file=package.json ("build" field)
+2025-09-17T08:47:26.1114989Z   • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-17T08:47:26.1116875Z   • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-17T08:47:26.3158391Z   • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-17T08:47:26.6547745Z ##[group]Run aws-actions/configure-aws-credentials@v2
+2025-09-17T08:47:26.6548361Z with:
+2025-09-17T08:47:26.6549075Z   aws-access-key-id: ***
+2025-09-17T08:47:26.6549692Z   aws-secret-access-key: ***
+2025-09-17T08:47:26.6550166Z   aws-region: ***
+2025-09-17T08:47:26.6550510Z   audience: sts.amazonaws.com
+2025-09-17T08:47:26.6550935Z ##[endgroup]
+2025-09-17T08:47:26.9435416Z (node:8068) NOTE: We are formalizing our plans to enter AWS SDK for JavaScript (v2) into maintenance mode in 2023.
+2025-09-17T08:47:26.9435913Z 
+2025-09-17T08:47:26.9436156Z Please migrate your code to use AWS SDK for JavaScript (v3).
+2025-09-17T08:47:26.9436701Z For more information, check the migration guide at https://a.co/7PzMCcy
+2025-09-17T08:47:26.9437512Z (Use `node --trace-warnings ...` to show where the warning was created)
+2025-09-17T08:47:27.6447669Z ##[group]Run $before=''
+2025-09-17T08:47:27.6447989Z [36;1m$before=''[0m
+2025-09-17T08:47:27.6448210Z [36;1mWrite-Host "DEBUG: before=[$before]"[0m
+2025-09-17T08:47:27.6448668Z [36;1mif (-not $before) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8; exit 0 }[0m
+2025-09-17T08:47:27.6449073Z [36;1m[0m
+2025-09-17T08:47:27.6449269Z [36;1m# ensure logs dir exists for debug artifacts[0m
+2025-09-17T08:47:27.6449619Z [36;1mNew-Item -ItemType Directory -Force -Path logs | Out-Null[0m
+2025-09-17T08:47:27.6449919Z [36;1m[0m
+2025-09-17T08:47:27.6450137Z [36;1m# try to fetch the ref and capture fetch exit code[0m
+2025-09-17T08:47:27.6450630Z [36;1mgit fetch --no-tags --depth=1 origin $before 2>&1 | Tee-Object -FilePath "logs/git_fetch_$before.out" -Append[0m
+2025-09-17T08:47:27.6451852Z [36;1mWrite-Host ("DEBUG: git fetch exitcode=$LASTEXITCODE")[0m
+2025-09-17T08:47:27.6452130Z [36;1m[0m
+2025-09-17T08:47:27.6452421Z [36;1m# inspect the package.json at the $before ref for debugging[0m
+2025-09-17T08:47:27.6452728Z [36;1m$oldJson = ''[0m
+2025-09-17T08:47:27.6452905Z [36;1mtry {[0m
+2025-09-17T08:47:27.6453185Z [36;1m  # build ref:path safely to avoid PowerShell parsing ':' as variable part[0m
+2025-09-17T08:47:27.6453568Z [36;1m  $refPath = ('{0}:{1}' -f $before, 'package.json')[0m
+2025-09-17T08:47:27.6453855Z [36;1m  $oldJson = git show $refPath 2>$null[0m
+2025-09-17T08:47:27.6454177Z [36;1m  if (-not ($oldJson -is [string]) -or $oldJson.Trim().Length -eq 0) {[0m
+2025-09-17T08:47:27.6454587Z [36;1m    Write-Host 'DEBUG: git show returned empty content for package.json'[0m
+2025-09-17T08:47:27.6454896Z [36;1m  } else {[0m
+2025-09-17T08:47:27.6455201Z [36;1m    Write-Host ("DEBUG: git show output length={0}" -f ($oldJson | Out-String).Length)[0m
+2025-09-17T08:47:27.6455606Z [36;1m    Write-Host 'DEBUG: git show head (first 20 lines):'[0m
+2025-09-17T08:47:27.6455983Z [36;1m    $oldJson | Select-Object -First 20 | ForEach-Object { Write-Host $_ }[0m
+2025-09-17T08:47:27.6456360Z [36;1m    Write-Host 'DEBUG: git show tail (last 20 lines):'[0m
+2025-09-17T08:47:27.6456741Z [36;1m    $oldJson | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }[0m
+2025-09-17T08:47:27.6457053Z [36;1m  }[0m
+2025-09-17T08:47:27.6457206Z [36;1m} catch {[0m
+2025-09-17T08:47:27.6457470Z [36;1m  Write-Host ("DEBUG: git show threw: {0}" -f $_.Exception.Message)[0m
+2025-09-17T08:47:27.6457765Z [36;1m}[0m
+2025-09-17T08:47:27.6457908Z [36;1m[0m
+2025-09-17T08:47:27.6458052Z [36;1mtry {[0m
+2025-09-17T08:47:27.6458210Z [36;1m  $old = $null[0m
+2025-09-17T08:47:27.6458442Z [36;1m  if ($oldJson -and $oldJson.Trim().Length -gt 0) {[0m
+2025-09-17T08:47:27.6458773Z [36;1m    $old = $oldJson | ConvertFrom-Json -ErrorAction Stop[0m
+2025-09-17T08:47:27.6459047Z [36;1m  }[0m
+2025-09-17T08:47:27.6459281Z [36;1m  $new = Get-Content package.json -Raw | ConvertFrom-Json[0m
+2025-09-17T08:47:27.6460044Z [36;1m  if ($old -and ($old.version -ne $new.version)) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }[0m
+2025-09-17T08:47:27.6460730Z [36;1m} catch {[0m
+2025-09-17T08:47:27.6461037Z [36;1m  Write-Host ('DEBUG: JSON parse or comparison failed: {0}' -f $_.Exception.Message)[0m
+2025-09-17T08:47:27.6461448Z [36;1m  # If detection fails for any reason, publish to be safe[0m
+2025-09-17T08:47:27.6461844Z [36;1m  "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8[0m
+2025-09-17T08:47:27.6462170Z [36;1m}[0m
+2025-09-17T08:47:27.6591928Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-17T08:47:27.6592446Z env:
+2025-09-17T08:47:27.6593045Z   AWS_DEFAULT_REGION: ***
+2025-09-17T08:47:27.6593404Z   AWS_REGION: ***
+2025-09-17T08:47:27.6593726Z   AWS_ACCESS_KEY_ID: ***
+2025-09-17T08:47:27.6594192Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-17T08:47:27.6596460Z ##[endgroup]
+2025-09-17T08:47:28.1556591Z DEBUG: before=[]
+2025-09-17T08:47:28.2413780Z ##[group]Run powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
+2025-09-17T08:47:28.2414488Z [36;1mpowershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `[0m
+2025-09-17T08:47:28.2414923Z [36;1m  container-browser-updates `[0m
+2025-09-17T08:47:28.2415172Z [36;1m  E1Q66ASB5AODYF `[0m
+2025-09-17T08:47:28.2415440Z [36;1m  https://updates.threadsbooster.jp[0m
+2025-09-17T08:47:28.2506147Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-17T08:47:28.2506449Z env:
+2025-09-17T08:47:28.2506771Z   AWS_DEFAULT_REGION: ***
+2025-09-17T08:47:28.2507204Z   AWS_REGION: ***
+2025-09-17T08:47:28.2507403Z   AWS_ACCESS_KEY_ID: ***
+2025-09-17T08:47:28.2507677Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-17T08:47:28.2507871Z   WIN_CSC_LINK: 
+2025-09-17T08:47:28.2508027Z   CSC_LINK: 
+2025-09-17T08:47:28.2508183Z   CSC_KEY_PASSWORD: 
+2025-09-17T08:47:28.2508357Z ##[endgroup]
+2025-09-17T08:47:29.1014725Z package.json version: 0.2.9
+2025-09-17T08:47:36.1698498Z 
+2025-09-17T08:47:36.1707002Z == BUILD OUT (tail) ==
+2025-09-17T08:47:36.1743447Z   â€¢ electron-builder  version=24.13.3 os=10.0.26100
+2025-09-17T08:47:36.1744239Z   â€¢ loaded configuration  file=package.json ("build" field)
+2025-09-17T08:47:36.1746377Z   â€¢ @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+2025-09-17T08:47:36.1747134Z 
+2025-09-17T08:47:36.1748567Z To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+2025-09-17T08:47:36.1750348Z   â€¢ rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-17T08:47:36.1751710Z   â€¢ install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-17T08:47:36.1752852Z   â€¢ install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-17T08:47:36.1754122Z   â€¢ packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist_update_20250917_084728\win-unpacked
+2025-09-17T08:47:36.1755703Z   â€¢ downloading     url=https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip size=111 MB parts=8
+2025-09-17T08:47:36.1757770Z   â€¢ downloaded      url=https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip duration=627ms
+2025-09-17T08:47:36.1759953Z   â€¢ downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+2025-09-17T08:47:36.1762324Z   â€¢ downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=227ms
+2025-09-17T08:47:36.1763758Z   â¨¯ Cannot find module 'D:\a\container-browser\container-browser\false'
+2025-09-17T08:47:36.1764157Z Require stack:
+2025-09-17T08:47:36.1764802Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\platformPackager.js
+2025-09-17T08:47:36.1766061Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\electronMac.js
+2025-09-17T08:47:36.1767017Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\ElectronFramework.js
+2025-09-17T08:47:36.1768125Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\packager.js
+2025-09-17T08:47:36.1769135Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\index.js
+2025-09-17T08:47:36.1770194Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\builder.js
+2025-09-17T08:47:36.1771180Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\cli\cli.js
+2025-09-17T08:47:36.1774752Z - D:\a\container-browser\container-browser\node_modules\electron-builder\cli.js  failedTask=build stackTrace=Error: Cannot find module 'D:\a\container-browser\container-browser\false'
+2025-09-17T08:47:36.1775746Z Require stack:
+2025-09-17T08:47:36.1776535Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\platformPackager.js
+2025-09-17T08:47:36.1778011Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\electronMac.js
+2025-09-17T08:47:36.1779123Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\ElectronFramework.js
+2025-09-17T08:47:36.1780060Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\packager.js
+2025-09-17T08:47:36.1781532Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\index.js
+2025-09-17T08:47:36.1782658Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\builder.js
+2025-09-17T08:47:36.1783424Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\cli\cli.js
+2025-09-17T08:47:36.1784463Z - D:\a\container-browser\container-browser\node_modules\electron-builder\cli.js
+2025-09-17T08:47:36.1785342Z     at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1140:15)
+2025-09-17T08:47:36.1785901Z     at Function.Module._load (node:internal/modules/cjs/loader:981:27)
+2025-09-17T08:47:36.1786657Z     at Module.require (node:internal/modules/cjs/loader:1231:19)
+2025-09-17T08:47:36.1787405Z     at require (node:internal/modules/helpers:177:18)
+2025-09-17T08:47:36.1788682Z     at resolveModule (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:771:10)
+2025-09-17T08:47:36.1790342Z     at resolveFunction (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:791:24)
+2025-09-17T08:47:36.1791903Z     at sign (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\codeSign\windowsCodeSign.ts:55:42)
+2025-09-17T08:47:36.1793317Z     at WinPackager.sign (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:213:20)
+2025-09-17T08:47:36.1794555Z     at WinPackager.signAndEditResources (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:348:5)
+2025-09-17T08:47:36.1795638Z From previous event:
+2025-09-17T08:47:36.1796179Z     at processImmediate (node:internal/timers:476:21)
+2025-09-17T08:47:36.1796548Z From previous event:
+2025-09-17T08:47:36.1798294Z     at WinPackager.signApp (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:384:27)
+2025-09-17T08:47:36.1800091Z     at WinPackager.doSignAfterPack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:336:32)
+2025-09-17T08:47:36.1801419Z     at WinPackager.doPack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:321:7)
+2025-09-17T08:47:36.1802567Z     at WinPackager.pack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:140:5)
+2025-09-17T08:47:36.1803776Z     at Packager.doBuild (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:445:9)
+2025-09-17T08:47:36.1804795Z     at executeFinally (D:\a\container-browser\container-browser\node_modules\builder-util\src\promise.ts:12:14)
+2025-09-17T08:47:36.1805961Z     at Packager._build (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:379:31)
+2025-09-17T08:47:36.1806875Z     at Packager.build (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:340:12)
+2025-09-17T08:47:36.1808107Z     at executeFinally (D:\a\container-browser\container-browser\node_modules\builder-util\src\promise.ts:12:14)
+2025-09-17T08:47:36.1811420Z 
+2025-09-17T08:47:36.1819333Z == BUILD ERR (tail) ==
+2025-09-17T08:47:36.2975981Z nsis-web build failed: ExitCode=1
+2025-09-17T08:47:36.2977243Z At D:\a\container-browser\container-browser\scripts\update-release.ps1:69 char:5
+2025-09-17T08:47:36.2979507Z +     throw ('nsis-web build failed: ExitCode={0}' -f $p.ExitCode)
+2025-09-17T08:47:36.2980152Z +     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2025-09-17T08:47:36.2980892Z     + CategoryInfo          : OperationStopped: (nsis-web build failed: ExitCode=1:String) [], RuntimeException
+2025-09-17T08:47:36.2981650Z     + FullyQualifiedErrorId : nsis-web build failed: ExitCode=1
+2025-09-17T08:47:36.2982108Z  
+2025-09-17T08:47:36.4199121Z ##[error]Process completed with exit code 1.
+2025-09-17T08:47:36.4381344Z Post job cleanup.
+2025-09-17T08:47:36.5204309Z Post job cleanup.
+2025-09-17T08:47:36.7491610Z [command]"C:\Program Files\Git\bin\git.exe" version
+2025-09-17T08:47:36.7754257Z git version 2.51.0.windows.1
+2025-09-17T08:47:36.7824133Z Temporarily overriding HOME='D:\a\_temp\98c92c4f-6201-4f41-bb43-168a365b4b21' before making global git config changes
+2025-09-17T08:47:36.7825450Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-17T08:47:36.7836412Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\container-browser\container-browser
+2025-09-17T08:47:36.8126995Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2025-09-17T08:47:36.8409733Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2025-09-17T08:47:37.3778602Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-17T08:47:37.4022416Z http.https://github.com/.extraheader
+2025-09-17T08:47:37.4066586Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2025-09-17T08:47:37.4350272Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2025-09-17T08:47:37.9603305Z Cleaning up orphan processes
+2025-09-17T08:47:38.0097073Z Terminate orphan process: pid (5488) (vctip)

@@ -22,6 +22,8 @@ tools/bfg*.jar
 # Secrets / env
 .env
 .env.*
+/.secrets/
+scripts/.github_token
 
 # IDE / local configs
 .cursor/

@@ -1,0 +1,69 @@
+﻿2025-09-17T08:42:25.9666447Z ##[group]Run actions/checkout@v4
+2025-09-17T08:42:25.9667796Z with:
+2025-09-17T08:42:25.9668420Z   fetch-depth: 0
+2025-09-17T08:42:25.9669184Z   repository: revivaleva/container-browser
+2025-09-17T08:42:25.9670342Z   token: ***
+2025-09-17T08:42:25.9670977Z   ssh-strict: true
+2025-09-17T08:42:25.9671674Z   ssh-user: git
+2025-09-17T08:42:25.9672366Z   persist-credentials: true
+2025-09-17T08:42:25.9673115Z   clean: true
+2025-09-17T08:42:25.9673783Z   sparse-checkout-cone-mode: true
+2025-09-17T08:42:25.9674619Z   fetch-tags: false
+2025-09-17T08:42:25.9675302Z   show-progress: true
+2025-09-17T08:42:25.9676005Z   lfs: false
+2025-09-17T08:42:25.9676652Z   submodules: false
+2025-09-17T08:42:25.9677354Z   set-safe-directory: true
+2025-09-17T08:42:25.9678307Z ##[endgroup]
+2025-09-17T08:42:26.1279682Z Syncing repository: revivaleva/container-browser
+2025-09-17T08:42:26.1282143Z ##[group]Getting Git version info
+2025-09-17T08:42:26.1283318Z Working directory is 'D:\a\container-browser\container-browser'
+2025-09-17T08:42:26.2354628Z [command]"C:\Program Files\Git\bin\git.exe" version
+2025-09-17T08:42:26.5299530Z git version 2.51.0.windows.1
+2025-09-17T08:42:26.5350028Z ##[endgroup]
+2025-09-17T08:42:26.5375374Z Temporarily overriding HOME='D:\a\_temp\29f56c61-9683-4dec-97a5-1611624b7083' before making global git config changes
+2025-09-17T08:42:26.5381464Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-17T08:42:26.5390299Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\container-browser\container-browser
+2025-09-17T08:42:26.5889625Z Deleting the contents of 'D:\a\container-browser\container-browser'
+2025-09-17T08:42:26.5898503Z ##[group]Initializing the repository
+2025-09-17T08:42:26.5913411Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\container-browser\container-browser
+2025-09-17T08:42:26.6590701Z Initialized empty Git repository in D:/a/container-browser/container-browser/.git/
+2025-09-17T08:42:26.6633535Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/revivaleva/container-browser
+2025-09-17T08:42:26.7087488Z ##[endgroup]
+2025-09-17T08:42:26.7088702Z ##[group]Disabling automatic garbage collection
+2025-09-17T08:42:26.7096207Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2025-09-17T08:42:26.7378719Z ##[endgroup]
+2025-09-17T08:42:26.7379847Z ##[group]Setting up auth
+2025-09-17T08:42:26.7391826Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2025-09-17T08:42:26.7693983Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2025-09-17T08:42:27.9281202Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-17T08:42:27.9561190Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2025-09-17T08:42:28.4756305Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2025-09-17T08:42:28.5051473Z ##[endgroup]
+2025-09-17T08:42:28.5052364Z ##[group]Fetching the repository
+2025-09-17T08:42:28.5066770Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2025-09-17T08:42:31.7873691Z From https://github.com/revivaleva/container-browser
+2025-09-17T08:42:31.7874886Z  * [new branch]      chore/cf-key-rotation-finalize -> origin/chore/cf-key-rotation-finalize
+2025-09-17T08:42:31.7876019Z  * [new branch]      chore/update-release-clean -> origin/chore/update-release-clean
+2025-09-17T08:42:31.7879270Z  * [new branch]      ci/diagnose-cdn       -> origin/ci/diagnose-cdn
+2025-09-17T08:42:31.7880037Z  * [new branch]      ci/offline-release-ci -> origin/ci/offline-release-ci
+2025-09-17T08:42:31.7880808Z  * [new branch]      ci/s3-root-copy       -> origin/ci/s3-root-copy
+2025-09-17T08:42:31.7882033Z  * [new branch]      ci/workflow-manual-20250916 -> origin/ci/workflow-manual-20250916
+2025-09-17T08:42:31.7883124Z  * [new branch]      ci/workflow-manual-20250916-mainbase -> origin/ci/workflow-manual-20250916-mainbase
+2025-09-17T08:42:31.7884169Z  * [new branch]      feat/web-installer-switch -> origin/feat/web-installer-switch
+2025-09-17T08:42:31.7884987Z  * [new branch]      main                  -> origin/main
+2025-09-17T08:42:31.8067134Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/ci/s3-root-copy
+2025-09-17T08:42:31.8434658Z   origin/ci/s3-root-copy
+2025-09-17T08:42:31.8475186Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/ci/s3-root-copy
+2025-09-17T08:42:31.8753201Z 32c49805ce652e832d7bdc6a6af8d8da865a9339
+2025-09-17T08:42:31.8781051Z ##[endgroup]
+2025-09-17T08:42:31.8781622Z ##[group]Determining the checkout info
+2025-09-17T08:42:31.8782928Z ##[endgroup]
+2025-09-17T08:42:31.8792394Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2025-09-17T08:42:31.9136044Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2025-09-17T08:42:31.9406708Z ##[group]Checking out the ref
+2025-09-17T08:42:31.9416765Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B ci/s3-root-copy refs/remotes/origin/ci/s3-root-copy
+2025-09-17T08:42:32.0088587Z branch 'ci/s3-root-copy' set up to track 'origin/ci/s3-root-copy'.
+2025-09-17T08:42:32.0095730Z Switched to a new branch 'ci/s3-root-copy'
+2025-09-17T08:42:32.0126605Z ##[endgroup]
+2025-09-17T08:42:32.0466241Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2025-09-17T08:42:32.0727610Z 32c49805ce652e832d7bdc6a6af8d8da865a9339

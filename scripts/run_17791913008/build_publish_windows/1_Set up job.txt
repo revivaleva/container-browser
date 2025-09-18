@@ -1,0 +1,44 @@
+﻿2025-09-17T08:42:24.5214546Z Current runner version: '2.328.0'
+2025-09-17T08:42:24.5272214Z ##[group]Runner Image Provisioner
+2025-09-17T08:42:24.5273419Z Hosted Compute Agent
+2025-09-17T08:42:24.5274268Z Version: 20250912.392
+2025-09-17T08:42:24.5275163Z Commit: d921fda672a98b64f4f82364647e2f10b2267d0b
+2025-09-17T08:42:24.5276307Z Build Date: 2025-09-12T15:23:14Z
+2025-09-17T08:42:24.5277300Z ##[endgroup]
+2025-09-17T08:42:24.5278135Z ##[group]Operating System
+2025-09-17T08:42:24.5279045Z Microsoft Windows Server 2025
+2025-09-17T08:42:24.5280063Z 10.0.26100
+2025-09-17T08:42:24.5280843Z Datacenter
+2025-09-17T08:42:24.5281693Z ##[endgroup]
+2025-09-17T08:42:24.5282476Z ##[group]Runner Image
+2025-09-17T08:42:24.5283448Z Image: windows-2025
+2025-09-17T08:42:24.5284323Z Version: 20250915.28.1
+2025-09-17T08:42:24.5285983Z Included Software: https://github.com/actions/runner-images/blob/win25/20250915.28/images/windows/Windows2025-Readme.md
+2025-09-17T08:42:24.5288433Z Image Release: https://github.com/actions/runner-images/releases/tag/win25%2F20250915.28
+2025-09-17T08:42:24.5290694Z ##[endgroup]
+2025-09-17T08:42:24.5295285Z ##[group]GITHUB_TOKEN Permissions
+2025-09-17T08:42:24.5297933Z Actions: write
+2025-09-17T08:42:24.5298896Z Attestations: write
+2025-09-17T08:42:24.5299810Z Checks: write
+2025-09-17T08:42:24.5300613Z Contents: write
+2025-09-17T08:42:24.5301354Z Deployments: write
+2025-09-17T08:42:24.5302076Z Discussions: write
+2025-09-17T08:42:24.5302840Z Issues: write
+2025-09-17T08:42:24.5303630Z Metadata: read
+2025-09-17T08:42:24.5304380Z Models: read
+2025-09-17T08:42:24.5305124Z Packages: write
+2025-09-17T08:42:24.5305939Z Pages: write
+2025-09-17T08:42:24.5306831Z PullRequests: write
+2025-09-17T08:42:24.5307700Z RepositoryProjects: write
+2025-09-17T08:42:24.5308651Z SecurityEvents: write
+2025-09-17T08:42:24.5309631Z Statuses: write
+2025-09-17T08:42:24.5310386Z ##[endgroup]
+2025-09-17T08:42:24.5313993Z Secret source: Actions
+2025-09-17T08:42:24.5315029Z Prepare workflow directory
+2025-09-17T08:42:24.5659545Z Prepare all required actions
+2025-09-17T08:42:24.5696721Z Getting action download info
+2025-09-17T08:42:24.8453927Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-09-17T08:42:24.9693470Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2025-09-17T08:42:25.1862152Z Download action repository 'actions/cache@v4' (SHA:0400d5f644dc74513175e3cd8d07132dd4860809)
+2025-09-17T08:42:25.3707678Z Download action repository 'aws-actions/configure-aws-credentials@v2' (SHA:5fd3084fc36e372ff1fff382a39b10d03659f355)
+2025-09-17T08:42:25.8407388Z Complete job name: build_publish_windows
