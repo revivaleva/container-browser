@@ -1,5 +1,10 @@
 name: Build & Publish Windows (nsis-web)
 
+# Require explicit permissions so GITHUB_TOKEN can cancel/rerun workflows
+permissions:
+  contents: read
+  actions: write
+
 concurrency:
   group: publish-windows-${{ github.ref }}
   cancel-in-progress: true
