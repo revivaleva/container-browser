@@ -130,6 +130,36 @@ $latestContent = [regex]::Replace(
   '${1}' + $cdnBase + '/nsis-web/${2}',
   'Multiline'
 )
+
+# Also rewrite any 'path' or 'file' entries (including those already prefixed with nsis-web/)
+# to absolute CDN URLs so clients will always fetch via the CDN origin.
+$latestContent = [regex]::Replace(
+  $latestContent,
+  '^(\s*(?:path|file):\s*)(?:"?)(?!https?://)(?:nsis-web/)?([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
+  '${1}' + $cdnBase + '/nsis-web/${2}',
+  'Multiline'
+)
+
+# Ensure a stable (non-versioned) Web-Setup filename is available on the CDN so a fixed URL
+# like /nsis-web/ContainerBrowser-Web-Setup.exe always points to the latest installer.
+try {
+  $webSetup = Get-ChildItem -LiteralPath $nsisDir -Filter '*Web-Setup*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($webSetup) {
+    $fixedWebName = 'ContainerBrowser-Web-Setup.exe'
+    Write-Host ("DEBUG: Found web setup: {0} -> copying as fixed name: {1}" -f $webSetup.Name, $fixedWebName)
+    # Upload the fixed-name copy to S3 under nsis-web/
+    aws s3 cp (Join-Path $nsisDir $webSetup.Name) ("s3://$Bucket/nsis-web/" + $fixedWebName) --no-progress --content-type 'application/x-msdownload' | Out-Null
+
+    # Also update latestContent so the manifest's url points to the fixed CDN URL
+    $fixedUrl = ($Cdn.TrimEnd('/') + '/nsis-web/' + $fixedWebName)
+    # Replace the first '- url:' entry with the fixed absolute URL
+    $latestContent = [regex]::Replace($latestContent, '(^\s*-\s*url:\s*).*', '${1}' + $fixedUrl, 'Singleline')
+  } else {
+    Write-Host 'DEBUG: web setup exe not found in nsisDir; skipping fixed-name copy.'
+  }
+} catch {
+  Write-Host ('WARNING: failed to create fixed web-setup copy: {0}' -f $_.Exception.Message)
+}
   $modifiedLatestDir = Join-Path $PSScriptRoot 'logs'
   $modifiedLatest = Join-Path $modifiedLatestDir 'latest_upload.yml'
 [IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
