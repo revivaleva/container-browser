@@ -120,6 +120,16 @@ $latestContent = [regex]::Replace($latestContent,
   '^(\s*(?:path|file|url):\s*)(?:"?)(?!nsis-web/)([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
   '${1}nsis-web/${2}',
   'Multiline')
+
+# Rewrite any '- url:' entries that are plain filenames to full CDN absolute URLs so clients
+# download via the CDN rather than attempting an S3 root direct fetch.
+$cdnBase = $Cdn.TrimEnd('/')
+$latestContent = [regex]::Replace(
+  $latestContent,
+  '^(\s*-\s*url:\s*)(?!https?://)([\w\-\.\s]+\.(?:exe|7z))$',
+  '${1}' + $cdnBase + '/nsis-web/${2}',
+  'Multiline'
+)
   $modifiedLatestDir = Join-Path $PSScriptRoot 'logs'
   $modifiedLatest = Join-Path $modifiedLatestDir 'latest_upload.yml'
 [IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
