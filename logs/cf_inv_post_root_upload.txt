@@ -1,0 +1,17 @@
+{
+    "Location": "https://cloudfront.amazonaws.com/2020-05-31/distribution/E1Q66ASB5AODYF/invalidation/I4WLQI9SO60MY9L5JX0WFPVYFE",
+    "Invalidation": {
+        "Id": "I4WLQI9SO60MY9L5JX0WFPVYFE",
+        "Status": "InProgress",
+        "CreateTime": "2025-09-20T12:35:44.001000+00:00",
+        "InvalidationBatch": {
+            "Paths": {
+                "Quantity": 1,
+                "Items": [
+                    "/latest.yml"
+                ]
+            },
+            "CallerReference": "cli-1758371744-572900"
+        }
+    }
+}

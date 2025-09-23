@@ -1,0 +1,230 @@
+﻿{
+    "ETag": "EVHBVMATHBI03",
+    "Distribution": {
+        "Id": "E1Q66ASB5AODYF",
+        "ARN": "arn:aws:cloudfront::605822313174:distribution/E1Q66ASB5AODYF",
+        "Status": "Deployed",
+        "LastModifiedTime": "2025-09-12T09:08:55.548000+00:00",
+        "InProgressInvalidationBatches": 0,
+        "DomainName": "d3w2fyzevxqz5r.cloudfront.net",
+        "ActiveTrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
+        },
+        "ActiveTrustedKeyGroups": {
+            "Enabled": true,
+            "Quantity": 1,
+            "Items": [
+                {
+                    "KeyGroupId": "c119acbc-8c6f-4fac-b402-c3df3493ca89",
+                    "KeyPairIds": {
+                        "Quantity": 1,
+                        "Items": [
+                            "K3OBNT6H3SWSZM"
+                        ]
+                    }
+                }
+            ]
+        },
+        "DistributionConfig": {
+            "CallerReference": "e14e8a76-4ab0-495c-bab7-134b11d46c9b",
+            "Aliases": {
+                "Quantity": 1,
+                "Items": [
+                    "updates.threadsbooster.jp"
+                ]
+            },
+            "DefaultRootObject": "",
+            "Origins": {
+                "Quantity": 1,
+                "Items": [
+                    {
+                        "Id": "container-browser-updates.s3.amazonaws.com-mfdwdc458j6",
+                        "DomainName": "container-browser-updates.s3.amazonaws.com",
+                        "OriginPath": "",
+                        "CustomHeaders": {
+                            "Quantity": 0
+                        },
+                        "S3OriginConfig": {
+                            "OriginAccessIdentity": "",
+                            "OriginReadTimeout": 30
+                        },
+                        "ConnectionAttempts": 3,
+                        "ConnectionTimeout": 10,
+                        "OriginShield": {
+                            "Enabled": false
+                        },
+                        "OriginAccessControlId": "ESPO431R32K22"
+                    }
+                ]
+            },
+            "OriginGroups": {
+                "Quantity": 0
+            },
+            "DefaultCacheBehavior": {
+                "TargetOriginId": "container-browser-updates.s3.amazonaws.com-mfdwdc458j6",
+                "TrustedSigners": {
+                    "Enabled": false,
+                    "Quantity": 0
+                },
+                "TrustedKeyGroups": {
+                    "Enabled": true,
+                    "Quantity": 1,
+                    "Items": [
+                        "c119acbc-8c6f-4fac-b402-c3df3493ca89"
+                    ]
+                },
+                "ViewerProtocolPolicy": "redirect-to-https",
+                "AllowedMethods": {
+                    "Quantity": 2,
+                    "Items": [
+                        "HEAD",
+                        "GET"
+                    ],
+                    "CachedMethods": {
+                        "Quantity": 2,
+                        "Items": [
+                            "HEAD",
+                            "GET"
+                        ]
+                    }
+                },
+                "SmoothStreaming": false,
+                "Compress": true,
+                "LambdaFunctionAssociations": {
+                    "Quantity": 0
+                },
+                "FunctionAssociations": {
+                    "Quantity": 0
+                },
+                "FieldLevelEncryptionId": "",
+                "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+                "GrpcConfig": {
+                    "Enabled": false
+                }
+            },
+            "CacheBehaviors": {
+                "Quantity": 2,
+                "Items": [
+                    {
+                        "PathPattern": "latest.yml",
+                        "TargetOriginId": "container-browser-updates.s3.amazonaws.com-mfdwdc458j6",
+                        "TrustedSigners": {
+                            "Enabled": false,
+                            "Quantity": 0
+                        },
+                        "TrustedKeyGroups": {
+                            "Enabled": false,
+                            "Quantity": 0
+                        },
+                        "ViewerProtocolPolicy": "redirect-to-https",
+                        "AllowedMethods": {
+                            "Quantity": 2,
+                            "Items": [
+                                "HEAD",
+                                "GET"
+                            ],
+                            "CachedMethods": {
+                                "Quantity": 2,
+                                "Items": [
+                                    "HEAD",
+                                    "GET"
+                                ]
+                            }
+                        },
+                        "SmoothStreaming": false,
+                        "Compress": true,
+                        "LambdaFunctionAssociations": {
+                            "Quantity": 0
+                        },
+                        "FunctionAssociations": {
+                            "Quantity": 0
+                        },
+                        "FieldLevelEncryptionId": "",
+                        "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+                        "GrpcConfig": {
+                            "Enabled": false
+                        }
+                    },
+                    {
+                        "PathPattern": "nsis-web/*",
+                        "TargetOriginId": "container-browser-updates.s3.amazonaws.com-mfdwdc458j6",
+                        "TrustedSigners": {
+                            "Enabled": false,
+                            "Quantity": 0
+                        },
+                        "TrustedKeyGroups": {
+                            "Enabled": false,
+                            "Quantity": 0
+                        },
+                        "ViewerProtocolPolicy": "redirect-to-https",
+                        "AllowedMethods": {
+                            "Quantity": 2,
+                            "Items": [
+                                "HEAD",
+                                "GET"
+                            ],
+                            "CachedMethods": {
+                                "Quantity": 2,
+                                "Items": [
+                                    "HEAD",
+                                    "GET"
+                                ]
+                            }
+                        },
+                        "SmoothStreaming": false,
+                        "Compress": true,
+                        "LambdaFunctionAssociations": {
+                            "Quantity": 0
+                        },
+                        "FunctionAssociations": {
+                            "Quantity": 0
+                        },
+                        "FieldLevelEncryptionId": "",
+                        "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+                        "GrpcConfig": {
+                            "Enabled": false
+                        }
+                    }
+                ]
+            },
+            "CustomErrorResponses": {
+                "Quantity": 0
+            },
+            "Comment": "",
+            "Logging": {
+                "Enabled": false,
+                "IncludeCookies": false,
+                "Bucket": "",
+                "Prefix": ""
+            },
+            "PriceClass": "PriceClass_All",
+            "Enabled": true,
+            "ViewerCertificate": {
+                "CloudFrontDefaultCertificate": false,
+                "ACMCertificateArn": "arn:aws:acm:us-east-1:605822313174:certificate/aee52d99-d779-4006-a07f-b9126ea10bbe",
+                "SSLSupportMethod": "sni-only",
+                "MinimumProtocolVersion": "TLSv1.2_2021",
+                "Certificate": "arn:aws:acm:us-east-1:605822313174:certificate/aee52d99-d779-4006-a07f-b9126ea10bbe",
+                "CertificateSource": "acm"
+            },
+            "Restrictions": {
+                "GeoRestriction": {
+                    "RestrictionType": "none",
+                    "Quantity": 0
+                }
+            },
+            "WebACLId": "arn:aws:wafv2:us-east-1:605822313174:global/webacl/CreatedByCloudFront-e6f9573e/ce497c84-4e32-4ce3-91a9-0b5b07abb97f",
+            "HttpVersion": "http2",
+            "IsIPV6Enabled": true,
+            "ContinuousDeploymentPolicyId": "",
+            "Staging": false
+        },
+        "AliasICPRecordals": [
+            {
+                "CNAME": "updates.threadsbooster.jp",
+                "ICPRecordalStatus": "APPROVED"
+            }
+        ]
+    }
+}

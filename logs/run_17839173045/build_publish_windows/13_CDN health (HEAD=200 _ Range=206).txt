@@ -1,0 +1,22 @@
+﻿2025-09-18T19:26:05.8382898Z ##[group]Run # Run the script with -File to ensure the param block is parsed correctly by pwsh
+2025-09-18T19:26:05.8383671Z [36;1m# Run the script with -File to ensure the param block is parsed correctly by pwsh[0m
+2025-09-18T19:26:05.8384452Z [36;1mpwsh -NoProfile -ExecutionPolicy Bypass -File scripts\check-cdn-health.ps1 -CDN 'https://updates.threadsbooster.jp'[0m
+2025-09-18T19:26:05.8451158Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T19:26:05.8451562Z env:
+2025-09-18T19:26:05.8451945Z   AWS_DEFAULT_REGION: ***
+2025-09-18T19:26:05.8452247Z   AWS_REGION: ***
+2025-09-18T19:26:05.8452511Z   AWS_ACCESS_KEY_ID: ***
+2025-09-18T19:26:05.8452850Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-18T19:26:05.8453093Z ##[endgroup]
+2025-09-18T19:26:07.0378245Z PKG: container-browser-0.2.10-x64.nsis.7z
+2025-09-18T19:26:07.0541328Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2025-09-18T19:26:07.0542481Z                                  Dload  Upload   Total   Spent    Left  Speed
+2025-09-18T19:26:07.0543104Z 
+2025-09-18T19:26:07.5671821Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2025-09-18T19:26:07.5673059Z   0 85.2M    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2025-09-18T19:26:07.5885632Z 
+2025-09-18T19:26:07.6161013Z [7mHTTP/[0m1.1 200 OK
+2025-09-18T19:26:07.6169642Z 
+2025-09-18T19:26:07.8525479Z 
+2025-09-18T19:26:07.8528491Z [7mHTTP/[0m1.1 206 Partial Content
+2025-09-18T19:26:08.5783618Z 

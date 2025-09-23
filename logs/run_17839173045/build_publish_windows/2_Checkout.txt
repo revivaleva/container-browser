@@ -1,0 +1,71 @@
+﻿2025-09-18T19:22:51.8866444Z ##[group]Run actions/checkout@v4
+2025-09-18T19:22:51.8867414Z with:
+2025-09-18T19:22:51.8867758Z   fetch-depth: 0
+2025-09-18T19:22:51.8868165Z   repository: revivaleva/container-browser
+2025-09-18T19:22:51.8868814Z   token: ***
+2025-09-18T19:22:51.8869159Z   ssh-strict: true
+2025-09-18T19:22:51.8869513Z   ssh-user: git
+2025-09-18T19:22:51.8869876Z   persist-credentials: true
+2025-09-18T19:22:51.8870281Z   clean: true
+2025-09-18T19:22:51.8870648Z   sparse-checkout-cone-mode: true
+2025-09-18T19:22:51.8871085Z   fetch-tags: false
+2025-09-18T19:22:51.8871439Z   show-progress: true
+2025-09-18T19:22:51.8871802Z   lfs: false
+2025-09-18T19:22:51.8872135Z   submodules: false
+2025-09-18T19:22:51.8872498Z   set-safe-directory: true
+2025-09-18T19:22:51.8873085Z ##[endgroup]
+2025-09-18T19:22:52.0456868Z Syncing repository: revivaleva/container-browser
+2025-09-18T19:22:52.0458590Z ##[group]Getting Git version info
+2025-09-18T19:22:52.0459272Z Working directory is 'D:\a\container-browser\container-browser'
+2025-09-18T19:22:52.1324537Z [command]"C:\Program Files\Git\bin\git.exe" version
+2025-09-18T19:22:52.2761641Z git version 2.51.0.windows.1
+2025-09-18T19:22:52.2833365Z ##[endgroup]
+2025-09-18T19:22:52.2861960Z Temporarily overriding HOME='D:\a\_temp\97bd8bc0-1424-45eb-b1fe-9c25365b024c' before making global git config changes
+2025-09-18T19:22:52.2864832Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-18T19:22:52.2877691Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\container-browser\container-browser
+2025-09-18T19:22:52.3281982Z Deleting the contents of 'D:\a\container-browser\container-browser'
+2025-09-18T19:22:52.3290120Z ##[group]Initializing the repository
+2025-09-18T19:22:52.3303717Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\container-browser\container-browser
+2025-09-18T19:22:52.3869849Z Initialized empty Git repository in D:/a/container-browser/container-browser/.git/
+2025-09-18T19:22:52.3918976Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/revivaleva/container-browser
+2025-09-18T19:22:52.4265713Z ##[endgroup]
+2025-09-18T19:22:52.4267545Z ##[group]Disabling automatic garbage collection
+2025-09-18T19:22:52.4278227Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2025-09-18T19:22:52.4715165Z ##[endgroup]
+2025-09-18T19:22:52.4716431Z ##[group]Setting up auth
+2025-09-18T19:22:52.4730748Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2025-09-18T19:22:52.5058277Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2025-09-18T19:22:53.3976353Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-18T19:22:53.4287362Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2025-09-18T19:22:53.9888509Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2025-09-18T19:22:54.0220014Z ##[endgroup]
+2025-09-18T19:22:54.0221285Z ##[group]Fetching the repository
+2025-09-18T19:22:54.0236849Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2025-09-18T19:22:57.1407091Z From https://github.com/revivaleva/container-browser
+2025-09-18T19:22:57.1407975Z  * [new branch]      chore/cf-key-rotation-finalize -> origin/chore/cf-key-rotation-finalize
+2025-09-18T19:22:57.1408665Z  * [new branch]      chore/update-release-clean -> origin/chore/update-release-clean
+2025-09-18T19:22:57.1411992Z  * [new branch]      ci/clean-ci-fixes     -> origin/ci/clean-ci-fixes
+2025-09-18T19:22:57.1412446Z  * [new branch]      ci/diagnose-cdn       -> origin/ci/diagnose-cdn
+2025-09-18T19:22:57.1414380Z  * [new branch]      ci/offline-release-ci -> origin/ci/offline-release-ci
+2025-09-18T19:22:57.1414864Z  * [new branch]      ci/remove-signing-env -> origin/ci/remove-signing-env
+2025-09-18T19:22:57.1415488Z  * [new branch]      ci/s3-root-copy       -> origin/ci/s3-root-copy
+2025-09-18T19:22:57.1416180Z  * [new branch]      ci/workflow-manual-20250916 -> origin/ci/workflow-manual-20250916
+2025-09-18T19:22:57.1416778Z  * [new branch]      ci/workflow-manual-20250916-mainbase -> origin/ci/workflow-manual-20250916-mainbase
+2025-09-18T19:22:57.1417387Z  * [new branch]      feat/web-installer-switch -> origin/feat/web-installer-switch
+2025-09-18T19:22:57.1417805Z  * [new branch]      main                  -> origin/main
+2025-09-18T19:22:57.1631888Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/main
+2025-09-18T19:22:57.1920098Z   origin/main
+2025-09-18T19:22:57.1966610Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/main
+2025-09-18T19:22:57.2263781Z 610bb636a20cf5c909f050f49815b15bde94cdcc
+2025-09-18T19:22:57.2300178Z ##[endgroup]
+2025-09-18T19:22:57.2300655Z ##[group]Determining the checkout info
+2025-09-18T19:22:57.2301081Z ##[endgroup]
+2025-09-18T19:22:57.2311727Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2025-09-18T19:22:57.2655333Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2025-09-18T19:22:57.2986387Z ##[group]Checking out the ref
+2025-09-18T19:22:57.2998112Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B main refs/remotes/origin/main
+2025-09-18T19:22:57.3798889Z branch 'main' set up to track 'origin/main'.
+2025-09-18T19:22:57.3806301Z Switched to a new branch 'main'
+2025-09-18T19:22:57.3840523Z ##[endgroup]
+2025-09-18T19:22:57.4176813Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2025-09-18T19:22:57.4481423Z 610bb636a20cf5c909f050f49815b15bde94cdcc

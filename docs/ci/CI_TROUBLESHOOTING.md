@@ -77,6 +77,19 @@
 7) 追加した緩和策（実装済み）
 - `scripts/update-release.ps1` の CloudFront 無効化処理を try/catch で包み、`cloudfront:CreateInvalidation` の権限がない場合はワーニングを出力して処理を継続するようにしました。これにより、無効化権限の不足でリリース全体が失敗することを防ぎます。
 
+10) 2025-09-20 - 手動対応と追加の検証スクリプト
+
+- **手動 root latest.yml 上書きと CloudFront invalidation**
+  - 問題が発生しているルート直下の 403 を即時回避するため、`nsis-web` に含まれる v0.3.0 の `latest.yml` を手動で S3 ルートに上書きし、CloudFront invalidation を発行しました。これにより CDN 上の `/latest.yml` は v0.3.0 に更新されました。
+
+- **CloudFront CacheBehavior 追加の試行**
+  - ルート直下へ未署名でアクセスできるように `PathPattern=*.nsis.7z` のキャッシュビヘイビアを追加する試行をスクリプト `scripts/cf_add_behavior.ps1` で実施しましたが、IAM 権限不足（`cloudfront:UpdateDistribution`）のため適用されませんでした。権限を持つアカウントでの適用が必要です。
+
+- **Web Setup のバイナリ検査**
+  - `scripts/inspect_web_setup.ps1` を追加し Web Setup (`Container Browser Web Setup 0.3.0.exe`) をダウンロードして内部の文字列を検査しました。結果、`latest.yml` や CDN の直接 URL（`updates.threadsbooster.jp`）や `.nsis.7z` 参照は実行ファイル内に埋め込まれておらず、インストーラはランタイムで `latest.yml` を参照してパッケージを決定することを確認しました。
+
+注: 今後はこのような手動修正・検証を行った際に必ずこのドキュメントを更新してください。
+
 ※ 長期的には CI 用の IAM ユーザーに `cloudfront:CreateInvalidation` を付与することを推奨します（再配布の即時性が必要なため）。
 
 

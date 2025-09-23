@@ -1,0 +1,62 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* Host updates.threadsbooster.jp:443 was resolved.
+* IPv6: (none)
+* IPv4: 18.65.207.102, 18.65.207.5, 18.65.207.89, 18.65.207.77
+*   Trying 18.65.207.102:443...
+* schannel: disabled automatic use of client certificate
+* ALPN: curl offers http/1.1
+* ALPN: server accepted http/1.1
+* Connected to updates.threadsbooster.jp (18.65.207.102) port 443
+* using HTTP/1.x
+> HEAD /container-browser-0.3.0-x64.nsis.7z HTTP/1.1
+
+> Host: updates.threadsbooster.jp
+
+> User-Agent: curl/8.14.1
+
+> Accept: */*
+
+> 
+
+* Request completely sent off
+* schannel: remote party requests renegotiation
+* schannel: renegotiating SSL/TLS connection
+* schannel: SSL/TLS connection renegotiated
+< HTTP/1.1 403 Forbidden
+
+< Server: CloudFront
+
+< Date: Sat, 20 Sep 2025 08:26:46 GMT
+
+< Content-Type: text/xml
+
+< Content-Length: 146
+
+< Connection: keep-alive
+
+< X-Cache: Error from cloudfront
+
+< Via: 1.1 6bf7139ab1260e393b31dd78c4c70c42.cloudfront.net (CloudFront)
+
+< X-Amz-Cf-Pop: NRT57-P3
+
+< X-Amz-Cf-Id: 9laeNu0UjgM37halmke7svtg4vJL8ENgUNhtGyoGn3Oe7SScNOxQUA==
+
+< 
+
+
+  0   146    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+* Connection #0 to host updates.threadsbooster.jp left intact
+HTTP/1.1 403 Forbidden
+Server: CloudFront
+Date: Sat, 20 Sep 2025 08:26:46 GMT
+Content-Type: text/xml
+Content-Length: 146
+Connection: keep-alive
+X-Cache: Error from cloudfront
+Via: 1.1 6bf7139ab1260e393b31dd78c4c70c42.cloudfront.net (CloudFront)
+X-Amz-Cf-Pop: NRT57-P3
+X-Amz-Cf-Id: 9laeNu0UjgM37halmke7svtg4vJL8ENgUNhtGyoGn3Oe7SScNOxQUA==
+

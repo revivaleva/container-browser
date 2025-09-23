@@ -1,0 +1,14 @@
+version: 0.2.10
+files:
+  - url: Container Browser Web Setup 0.2.10.exe
+    sha512: Cwy8I9gEFeP+i9DokDht8YOvYCdaBwokwxymspfG1f9wICj3IWZv4WGRJEVQmdZ964LtlVKj7cd1RCA0vnC9Jg==
+path: nsis-web/Container Browser Web Setup 0.2.10.exe
+sha512: Cwy8I9gEFeP+i9DokDht8YOvYCdaBwokwxymspfG1f9wICj3IWZv4WGRJEVQmdZ964LtlVKj7cd1RCA0vnC9Jg==
+packages:
+  x64:
+    size: 89353977
+    sha512: MaraqcLUrPQu/NVR4MlczuC+jLlNO17kql3bFA6NcFy3X1HnyhVqsrre/iJBBd9wpO3TNIzUeskg3/Z1cWoMlA==
+    blockMapSize: 92905
+    path: nsis-web/container-browser-0.2.10-x64.nsis.7z
+    file: nsis-web/container-browser-0.2.10-x64.nsis.7z
+releaseDate: '2025-09-20T08:41:10.849Z'

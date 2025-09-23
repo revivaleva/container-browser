@@ -114,12 +114,17 @@ Get-ChildItem -LiteralPath $nsisDir | Tee-Object -FilePath $logMOut -Append | Ou
 $latestYml = Join-Path $nsisDir 'latest.yml'
 # Rewrite latest.yml to reference files under nsis-web/ root to match uploaded artifact paths.
 $latestContent = Get-Content -LiteralPath $latestYml -Raw
-# Prefix path/file/url entries that are plain filenames with 'nsis-web/' so clients download the correct S3 key
-$latestContent = [regex]::Replace($latestContent, '^(\s*(?:path|file|url):\s*)([\w\-\.\s]+\.(?:exe|7z))$','${1}nsis-web/${2}', 'Multiline')
+# Prefix path/file/url entries that are plain filenames with 'nsis-web/' so clients download the correct S3 key.
+# Be conservative: handle optional quotes, spaces and avoid re-prefixing entries that already contain 'nsis-web/'.
+$latestContent = [regex]::Replace($latestContent,
+  '^(\s*(?:path|file|url):\s*)(?:"?)(?!nsis-web/)([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
+  '${1}nsis-web/${2}',
+  'Multiline')
   $modifiedLatestDir = Join-Path $PSScriptRoot 'logs'
   $modifiedLatest = Join-Path $modifiedLatestDir 'latest_upload.yml'
 [IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
-aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress | Out-Null
+# Upload latest.yml with no-cache to encourage CDN refresh
+aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress --content-type 'text/yaml' --cache-control 'no-cache, max-age=0' | Out-Null
 aws s3 cp $nsisDir ('s3://' + $Bucket + '/nsis-web/') --recursive --no-progress --cache-control 'public,max-age=300' | Out-Null
 
 # 4) CloudFront invalidation

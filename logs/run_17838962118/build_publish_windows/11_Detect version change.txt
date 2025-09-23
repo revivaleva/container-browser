@@ -1,0 +1,51 @@
+﻿2025-09-18T19:16:15.5728699Z ##[group]Run $before=''
+2025-09-18T19:16:15.5729044Z [36;1m$before=''[0m
+2025-09-18T19:16:15.5729270Z [36;1mWrite-Host "DEBUG: before=[$before]"[0m
+2025-09-18T19:16:15.5729737Z [36;1mif (-not $before) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8; exit 0 }[0m
+2025-09-18T19:16:15.5730156Z [36;1m[0m
+2025-09-18T19:16:15.5730354Z [36;1m# ensure logs dir exists for debug artifacts[0m
+2025-09-18T19:16:15.5730700Z [36;1mNew-Item -ItemType Directory -Force -Path logs | Out-Null[0m
+2025-09-18T19:16:15.5730994Z [36;1m[0m
+2025-09-18T19:16:15.5731201Z [36;1m# try to fetch the ref and capture fetch exit code[0m
+2025-09-18T19:16:15.5731703Z [36;1mgit fetch --no-tags --depth=1 origin $before 2>&1 | Tee-Object -FilePath "logs/git_fetch_$before.out" -Append[0m
+2025-09-18T19:16:15.5732202Z [36;1mWrite-Host ("DEBUG: git fetch exitcode=$LASTEXITCODE")[0m
+2025-09-18T19:16:15.5732474Z [36;1m[0m
+2025-09-18T19:16:15.5732700Z [36;1m# inspect the package.json at the $before ref for debugging[0m
+2025-09-18T19:16:15.5733029Z [36;1m$oldJson = ''[0m
+2025-09-18T19:16:15.5733203Z [36;1mtry {[0m
+2025-09-18T19:16:15.5733476Z [36;1m  # build ref:path safely to avoid PowerShell parsing ':' as variable part[0m
+2025-09-18T19:16:15.5733860Z [36;1m  $refPath = ('{0}:{1}' -f $before, 'package.json')[0m
+2025-09-18T19:16:15.5734149Z [36;1m  $oldJson = git show $refPath 2>$null[0m
+2025-09-18T19:16:15.5734472Z [36;1m  if (-not ($oldJson -is [string]) -or $oldJson.Trim().Length -eq 0) {[0m
+2025-09-18T19:16:15.5734884Z [36;1m    Write-Host 'DEBUG: git show returned empty content for package.json'[0m
+2025-09-18T19:16:15.5735451Z [36;1m  } else {[0m
+2025-09-18T19:16:15.5735949Z [36;1m    Write-Host ("DEBUG: git show output length={0}" -f ($oldJson | Out-String).Length)[0m
+2025-09-18T19:16:15.5736366Z [36;1m    Write-Host 'DEBUG: git show head (first 20 lines):'[0m
+2025-09-18T19:16:15.5736746Z [36;1m    $oldJson | Select-Object -First 20 | ForEach-Object { Write-Host $_ }[0m
+2025-09-18T19:16:15.5737502Z [36;1m    Write-Host 'DEBUG: git show tail (last 20 lines):'[0m
+2025-09-18T19:16:15.5737902Z [36;1m    $oldJson | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }[0m
+2025-09-18T19:16:15.5738218Z [36;1m  }[0m
+2025-09-18T19:16:15.5738378Z [36;1m} catch {[0m
+2025-09-18T19:16:15.5738648Z [36;1m  Write-Host ("DEBUG: git show threw: {0}" -f $_.Exception.Message)[0m
+2025-09-18T19:16:15.5738970Z [36;1m}[0m
+2025-09-18T19:16:15.5739122Z [36;1m[0m
+2025-09-18T19:16:15.5739265Z [36;1mtry {[0m
+2025-09-18T19:16:15.5739426Z [36;1m  $old = $null[0m
+2025-09-18T19:16:15.5739770Z [36;1m  if ($oldJson -and $oldJson.Trim().Length -gt 0) {[0m
+2025-09-18T19:16:15.5740132Z [36;1m    $old = $oldJson | ConvertFrom-Json -ErrorAction Stop[0m
+2025-09-18T19:16:15.5740403Z [36;1m  }[0m
+2025-09-18T19:16:15.5740625Z [36;1m  $new = Get-Content package.json -Raw | ConvertFrom-Json[0m
+2025-09-18T19:16:15.5741386Z [36;1m  if ($old -and ($old.version -ne $new.version)) { "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 } else { "changed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8 }[0m
+2025-09-18T19:16:15.5742081Z [36;1m} catch {[0m
+2025-09-18T19:16:15.5742390Z [36;1m  Write-Host ('DEBUG: JSON parse or comparison failed: {0}' -f $_.Exception.Message)[0m
+2025-09-18T19:16:15.5742813Z [36;1m  # If detection fails for any reason, publish to be safe[0m
+2025-09-18T19:16:15.5743215Z [36;1m  "changed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8[0m
+2025-09-18T19:16:15.5743545Z [36;1m}[0m
+2025-09-18T19:16:15.5800105Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T19:16:15.5800628Z env:
+2025-09-18T19:16:15.5800909Z   AWS_DEFAULT_REGION: ***
+2025-09-18T19:16:15.5801127Z   AWS_REGION: ***
+2025-09-18T19:16:15.5801325Z   AWS_ACCESS_KEY_ID: ***
+2025-09-18T19:16:15.5801608Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-18T19:16:15.5801801Z ##[endgroup]
+2025-09-18T19:16:16.1126529Z DEBUG: before=[]

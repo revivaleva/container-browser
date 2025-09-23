@@ -1,0 +1,32 @@
+﻿2025-09-18T19:03:19.1585279Z Current runner version: '2.328.0'
+2025-09-18T19:03:19.1618580Z ##[group]Runner Image Provisioner
+2025-09-18T19:03:19.1619831Z Hosted Compute Agent
+2025-09-18T19:03:19.1620733Z Version: 20250829.383
+2025-09-18T19:03:19.1621677Z Commit: 27cb235aab5b0e52e153a26cd86b4742e89dac5d
+2025-09-18T19:03:19.1622795Z Build Date: 2025-08-29T13:48:48Z
+2025-09-18T19:03:19.1623683Z ##[endgroup]
+2025-09-18T19:03:19.1624480Z ##[group]Operating System
+2025-09-18T19:03:19.1625344Z Microsoft Windows Server 2025
+2025-09-18T19:03:19.1626214Z 10.0.26100
+2025-09-18T19:03:19.1626966Z Datacenter
+2025-09-18T19:03:19.1627729Z ##[endgroup]
+2025-09-18T19:03:19.1628467Z ##[group]Runner Image
+2025-09-18T19:03:19.1629403Z Image: windows-2025
+2025-09-18T19:03:19.1630314Z Version: 20250907.19.1
+2025-09-18T19:03:19.1632037Z Included Software: https://github.com/actions/runner-images/blob/win25/20250907.19/images/windows/Windows2025-Readme.md
+2025-09-18T19:03:19.1635303Z Image Release: https://github.com/actions/runner-images/releases/tag/win25%2F20250907.19
+2025-09-18T19:03:19.1636968Z ##[endgroup]
+2025-09-18T19:03:19.1638796Z ##[group]GITHUB_TOKEN Permissions
+2025-09-18T19:03:19.1641168Z Actions: write
+2025-09-18T19:03:19.1642099Z Contents: read
+2025-09-18T19:03:19.1642938Z Metadata: read
+2025-09-18T19:03:19.1644052Z ##[endgroup]
+2025-09-18T19:03:19.1647133Z Secret source: Actions
+2025-09-18T19:03:19.1648239Z Prepare workflow directory
+2025-09-18T19:03:19.2077364Z Prepare all required actions
+2025-09-18T19:03:19.2131279Z Getting action download info
+2025-09-18T19:03:19.5825860Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-09-18T19:03:19.7365690Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2025-09-18T19:03:19.9231313Z Download action repository 'actions/cache@v4' (SHA:0400d5f644dc74513175e3cd8d07132dd4860809)
+2025-09-18T19:03:20.0786339Z Download action repository 'aws-actions/configure-aws-credentials@v2' (SHA:5fd3084fc36e372ff1fff382a39b10d03659f355)
+2025-09-18T19:03:20.5739234Z ##[error]A task was canceled.

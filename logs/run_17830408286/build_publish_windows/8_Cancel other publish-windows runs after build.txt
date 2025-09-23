@@ -1,0 +1,19 @@
+﻿2025-09-18T13:36:29.6926580Z ##[group]Run # Cancel other in-progress or queued publish-windows runs, keep this run
+2025-09-18T13:36:29.6927235Z [36;1m# Cancel other in-progress or queued publish-windows runs, keep this run[0m
+2025-09-18T13:36:29.6927948Z [36;1mpowershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cancel_other_runs.ps1 -Workflow 'publish-windows.yml' -Keep $env:GITHUB_RUN_ID[0m
+2025-09-18T13:36:29.6988661Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T13:36:29.6988991Z ##[endgroup]
+2025-09-18T13:36:30.3047374Z Get-Content : Cannot find path 'D:\a\container-browser\container-browser\scripts\.github_token' because it does not 
+2025-09-18T13:36:30.3048303Z exist.
+2025-09-18T13:36:30.3048977Z At D:\a\container-browser\container-browser\scripts\cancel_other_runs.ps1:7 char:13
+2025-09-18T13:36:30.3050163Z +   $token = (Get-Content -Raw 'scripts/.github_token').Trim()
+2025-09-18T13:36:30.3050703Z +             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2025-09-18T13:36:30.3051294Z     + CategoryInfo          : ObjectNotFound: (D:\a\container-...s\.github_token:String) [Get-Content], ItemNotFoundEx 
+2025-09-18T13:36:30.3051725Z    ception
+2025-09-18T13:36:30.3052128Z     + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetContentCommand
+2025-09-18T13:36:30.3052544Z  
+2025-09-18T13:36:30.4295618Z D:\a\container-browser\container-browser\scripts\cancel_other_runs.ps1 : Failed to read scripts/.github_token
+2025-09-18T13:36:30.4296625Z     + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+2025-09-18T13:36:30.4297261Z     + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,cancel_other_runs.ps1
+2025-09-18T13:36:30.4297705Z  
+2025-09-18T13:36:30.5507558Z ##[error]Process completed with exit code 1.

@@ -1,0 +1,49 @@
+﻿2025-09-18T19:23:01.9665142Z ##[group]Run npm ci
+2025-09-18T19:23:01.9665445Z [36;1mnpm ci[0m
+2025-09-18T19:23:01.9793978Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T19:23:01.9794319Z ##[endgroup]
+2025-09-18T19:23:08.6330116Z npm warn EBADENGINE Unsupported engine {
+2025-09-18T19:23:08.6331158Z npm warn EBADENGINE   package: '@electron/rebuild@4.0.1',
+2025-09-18T19:23:08.6331993Z npm warn EBADENGINE   required: { node: '>=22.12.0' },
+2025-09-18T19:23:08.6332892Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-18T19:23:08.6333529Z npm warn EBADENGINE }
+2025-09-18T19:23:08.6340881Z npm warn EBADENGINE Unsupported engine {
+2025-09-18T19:23:08.6341625Z npm warn EBADENGINE   package: 'better-sqlite3@12.2.0',
+2025-09-18T19:23:08.6342497Z npm warn EBADENGINE   required: { node: '20.x || 22.x || 23.x || 24.x' },
+2025-09-18T19:23:08.6343364Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-18T19:23:08.6344310Z npm warn EBADENGINE }
+2025-09-18T19:23:08.6368283Z npm warn EBADENGINE Unsupported engine {
+2025-09-18T19:23:08.6368695Z npm warn EBADENGINE   package: 'node-abi@4.14.0',
+2025-09-18T19:23:08.6369100Z npm warn EBADENGINE   required: { node: '>=22.12.0' },
+2025-09-18T19:23:08.6369806Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-18T19:23:08.6370427Z npm warn EBADENGINE }
+2025-09-18T19:23:11.3346096Z npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+2025-09-18T19:23:11.4506326Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+2025-09-18T19:23:13.1915405Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-18T19:23:13.4250122Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-18T19:23:13.4598667Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-18T19:23:13.5697645Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+2025-09-18T19:25:00.1056365Z 
+2025-09-18T19:25:00.1056965Z > container-browser@0.2.10 postinstall
+2025-09-18T19:25:00.1057356Z > electron-builder install-app-deps
+2025-09-18T19:25:00.1057539Z 
+2025-09-18T19:25:00.9388035Z   • electron-builder  version=24.13.3
+2025-09-18T19:25:00.9409279Z   • loaded configuration  file=package.json ("build" field)
+2025-09-18T19:25:00.9957882Z   • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-18T19:25:00.9959040Z   • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-18T19:25:01.4412237Z   • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-18T19:25:01.6533566Z 
+2025-09-18T19:25:01.6534533Z added 489 packages, and audited 490 packages in 2m
+2025-09-18T19:25:01.6535356Z 
+2025-09-18T19:25:01.6535950Z 69 packages are looking for funding
+2025-09-18T19:25:01.6536246Z   run `npm fund` for details
+2025-09-18T19:25:01.6834944Z 
+2025-09-18T19:25:01.6835354Z 4 moderate severity vulnerabilities
+2025-09-18T19:25:01.6835576Z 
+2025-09-18T19:25:01.6835770Z To address issues that do not require attention, run:
+2025-09-18T19:25:01.6836062Z   npm audit fix
+2025-09-18T19:25:01.6836171Z 
+2025-09-18T19:25:01.6836365Z To address all issues (including breaking changes), run:
+2025-09-18T19:25:01.6836697Z   npm audit fix --force
+2025-09-18T19:25:01.6836829Z 
+2025-09-18T19:25:01.6836926Z Run `npm audit` for details.

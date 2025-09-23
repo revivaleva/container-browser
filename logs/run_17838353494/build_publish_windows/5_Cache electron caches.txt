@@ -1,0 +1,13 @@
+﻿2025-09-18T18:47:44.6611276Z ##[group]Run actions/cache@v4
+2025-09-18T18:47:44.6611618Z with:
+2025-09-18T18:47:44.6611875Z   path: ~/.cache/electron
+~/.cache/electron-builder
+
+2025-09-18T18:47:44.6612781Z   key: Windows-electron-1d3592afdd061b71ce3efbb885eefcaad9dd823d54fa9fb6b60ca189c71f60ab
+2025-09-18T18:47:44.6613283Z   restore-keys: Windows-electron-
+2025-09-18T18:47:44.6613572Z   enableCrossOsArchive: false
+2025-09-18T18:47:44.6613814Z   fail-on-cache-miss: false
+2025-09-18T18:47:44.6614046Z   lookup-only: false
+2025-09-18T18:47:44.6614251Z   save-always: false
+2025-09-18T18:47:44.6614451Z ##[endgroup]
+2025-09-18T18:47:45.2497038Z Cache not found for input keys: Windows-electron-1d3592afdd061b71ce3efbb885eefcaad9dd823d54fa9fb6b60ca189c71f60ab, Windows-electron-

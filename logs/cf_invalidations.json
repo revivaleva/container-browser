@@ -1,0 +1,107 @@
+{
+    "InvalidationList": {
+        "Items": [
+            {
+                "Id": "I9R5V321DGC1W032TPA7JNKG6U",
+                "CreateTime": "2025-09-20T08:41:23.292000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I59928LVJVM5T2RPJTS7UXDMBT",
+                "CreateTime": "2025-09-20T08:37:21.311000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I6QRNPODJRANDRF2DIJ0XF0E4N",
+                "CreateTime": "2025-09-20T07:04:41.908000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "IB01PHEHZTE94QV395PA3VMBV1",
+                "CreateTime": "2025-09-19T03:32:59.199000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "IC8OSC2F2U1RODDVQNJ0QANKVU",
+                "CreateTime": "2025-09-18T19:26:02.911000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "IBB2YXUEEC8WLRYXUQXJ2BSU0K",
+                "CreateTime": "2025-09-18T19:17:08.842000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "ICVW3GSASWVIW0KWXNMXP30AV9",
+                "CreateTime": "2025-09-18T19:11:21.181000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I1DLGZUT01NL84SUTF03JPGWMY",
+                "CreateTime": "2025-09-18T09:03:40.115000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I8ATFQN6YCVQHMN8R5WK9SWX8P",
+                "CreateTime": "2025-09-17T23:55:53.692000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "IAWESRD4QVHATU7VPK1ENO6U18",
+                "CreateTime": "2025-09-17T23:55:00.598000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I91YE53HPEFGA04UE7OP1XWPZ9",
+                "CreateTime": "2025-09-17T19:46:02.366000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I9RMMFZYHIVWQS9V3SAO6G1ZLU",
+                "CreateTime": "2025-09-17T19:44:16.394000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I90TXD9JKFRUOXJYEZPWIBSH4D",
+                "CreateTime": "2025-09-17T19:43:44.376000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I4YB1XWHA4MRVEB9D0PSIOLOPM",
+                "CreateTime": "2025-09-17T18:50:39.009000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I87K3HQUSSAS7AK2ORRRMUOKH0",
+                "CreateTime": "2025-09-17T18:49:19.454000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I1J7LW7YK1O18GTACLCP2JIA8R",
+                "CreateTime": "2025-09-17T18:46:39.225000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I8HZ8ZZT6NYA1XQS83WWAK82VX",
+                "CreateTime": "2025-09-17T18:04:27.161000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I498F259SUL6E4YQ5112H2XPL9",
+                "CreateTime": "2025-09-17T18:01:24.117000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I9WYB1J9VDZKXVI8FDR71H7QBV",
+                "CreateTime": "2025-09-17T17:51:03.439000+00:00",
+                "Status": "Completed"
+            },
+            {
+                "Id": "I6FWHEVNT7ZT1M63H7YTGR8CX9",
+                "CreateTime": "2025-09-17T17:47:44.253000+00:00",
+                "Status": "Completed"
+            }
+        ]
+    },
+    "NextToken": "eyJNYXJrZXIiOiBudWxsLCAiYm90b190cnVuY2F0ZV9hbW91bnQiOiAyMH0="
+}

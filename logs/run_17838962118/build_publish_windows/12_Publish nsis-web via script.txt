@@ -1,0 +1,61 @@
+﻿2025-09-18T19:16:16.1977508Z ##[group]Run # Ensure signing env vars are removed from the step environment before running the release script
+2025-09-18T19:16:16.1978282Z [36;1m# Ensure signing env vars are removed from the step environment before running the release script[0m
+2025-09-18T19:16:16.1978792Z [36;1mRemove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue[0m
+2025-09-18T19:16:16.1979175Z [36;1mRemove-Item Env:CSC_LINK -ErrorAction SilentlyContinue[0m
+2025-09-18T19:16:16.1979562Z [36;1mRemove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue[0m
+2025-09-18T19:16:16.1979882Z [36;1m# Run the release script[0m
+2025-09-18T19:16:16.1980294Z [36;1mpowershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `[0m
+2025-09-18T19:16:16.1980723Z [36;1m  container-browser-updates `[0m
+2025-09-18T19:16:16.1980969Z [36;1m  E1Q66ASB5AODYF `[0m
+2025-09-18T19:16:16.1981233Z [36;1m  https://updates.threadsbooster.jp[0m
+2025-09-18T19:16:16.2039450Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T19:16:16.2039797Z env:
+2025-09-18T19:16:16.2040057Z   AWS_DEFAULT_REGION: ***
+2025-09-18T19:16:16.2040277Z   AWS_REGION: ***
+2025-09-18T19:16:16.2040473Z   AWS_ACCESS_KEY_ID: ***
+2025-09-18T19:16:16.2040746Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-18T19:16:16.2040937Z ##[endgroup]
+2025-09-18T19:16:16.9411907Z package.json version: 0.2.10
+2025-09-18T19:16:58.0806483Z NSIS_DIR: dist_update_20250918_191616\nsis-web
+2025-09-18T19:16:58.1433656Z 
+2025-09-18T19:16:58.1434980Z 
+2025-09-18T19:16:58.1438039Z     Directory: D:\a\container-browser\container-browser\dist_update_20250918_191616\nsis-web
+2025-09-18T19:16:58.1438745Z 
+2025-09-18T19:16:58.1438760Z 
+2025-09-18T19:16:58.1449695Z Mode                 LastWriteTime         Length Name                                                                 
+2025-09-18T19:16:58.1454327Z ----                 -------------         ------ ----                                                                 
+2025-09-18T19:16:58.1465201Z -a----         9/18/2025   7:16 PM         747217 Container Browser Web Setup 0.2.10.exe                               
+2025-09-18T19:16:58.1483123Z -a----         9/18/2025   7:16 PM       89352795 container-browser-0.2.10-x64.nsis.7z                                 
+2025-09-18T19:16:58.1500469Z -a----         9/18/2025   7:16 PM            609 latest.yml                                                           
+2025-09-18T19:16:58.1502233Z 
+2025-09-18T19:16:58.1502577Z 
+2025-09-18T19:17:09.5911627Z PKG: container-browser-0.2.10-x64.nsis.7z
+2025-09-18T19:17:09.6269416Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2025-09-18T19:17:09.6271371Z                                  Dload  Upload   Total   Spent    Left  Speed
+2025-09-18T19:17:09.6271793Z 
+2025-09-18T19:17:09.7105684Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2025-09-18T19:17:09.7106833Z   0   636    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2025-09-18T19:17:09.7235126Z 
+2025-09-18T19:17:09.7236779Z HTTP/1.1 200 OK
+2025-09-18T19:17:09.7240297Z 
+2025-09-18T19:17:09.7240822Z 
+2025-09-18T19:17:09.7342187Z   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+2025-09-18T19:17:09.7343055Z                                  Dload  Upload   Total   Spent    Left  Speed
+2025-09-18T19:17:09.7343455Z 
+2025-09-18T19:17:10.1308063Z   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2025-09-18T19:17:10.1309107Z   0 85.2M    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+2025-09-18T19:17:10.1334589Z 
+2025-09-18T19:17:10.1336829Z HTTP/1.1 200 OK
+2025-09-18T19:17:10.1340232Z 
+2025-09-18T19:17:10.1340564Z 
+2025-09-18T19:17:10.5678004Z 
+2025-09-18T19:17:10.5679927Z HTTP/1.1 206 Partial Content
+2025-09-18T19:17:11.0550895Z 
+2025-09-18T19:17:11.0551488Z 
+2025-09-18T19:17:11.0639360Z 
+2025-09-18T19:17:11.0646850Z == Web Setup (fixed URL) ==
+2025-09-18T19:17:11.0654194Z https://updates.threadsbooster.jp/nsis-web/ContainerBrowser-Web-Setup.exe
+2025-09-18T19:17:11.0660157Z == Offline Setup (reference) ==
+2025-09-18T19:17:11.0666001Z https://updates.threadsbooster.jp/nsis-web/ContainerBrowser-Offline-Setup.exe
+2025-09-18T19:17:11.0670662Z 
+2025-09-18T19:17:11.0673387Z Done. Logs: logs/upd_20250918_191616.main.out / logs/upd_20250918_191616.build.out / logs/upd_20250918_191616.build.err

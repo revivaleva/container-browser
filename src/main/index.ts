@@ -109,20 +109,22 @@ app.whenReady().then(async () => {
   // Setup auto-updater (will check for updates once app is ready)
   try {
     autoUpdater.autoDownload = true;
-    autoUpdater.on('checking-for-update', () => console.log('[auto-updater] checking for update'));
+    autoUpdater.on('checking-for-update', () => logger.info('[auto-updater] checking for update'));
     autoUpdater.on('update-available', (info) => console.log('[auto-updater] update available', info));
     autoUpdater.on('update-not-available', (info) => console.log('[auto-updater] update not available', info));
-    autoUpdater.on('error', (err) => console.error('[auto-updater] error', err));
-    autoUpdater.on('download-progress', (progress) => console.log('[auto-updater] progress', progress));
+    autoUpdater.on('update-available', (info) => logger.info('[auto-updater] update available', info));
+    autoUpdater.on('update-not-available', (info) => logger.info('[auto-updater] update not available', info));
+    autoUpdater.on('error', (err) => logger.error('[auto-updater] error', err));
+    autoUpdater.on('download-progress', (progress) => logger.info('[auto-updater] progress', progress));
     autoUpdater.on('update-downloaded', (info) => {
-      console.log('[auto-updater] update downloaded', info);
+      logger.info('[auto-updater] update downloaded', info);
       // quit and install automatically
       setTimeout(() => {
         try { autoUpdater.quitAndInstall(); } catch (e) { console.error('[auto-updater] quitAndInstall error', e); }
       }, 2000);
     });
     // trigger check
-    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { console.error('[auto-updater] check error', e); } }, 3000);
+    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[auto-updater] check error', e); } }, 3000);
   } catch (e) { console.error('[auto-updater] setup error', e); }
   await createMainWindow();
 

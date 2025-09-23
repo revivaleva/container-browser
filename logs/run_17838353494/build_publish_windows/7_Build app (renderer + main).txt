@@ -1,0 +1,34 @@
+﻿2025-09-18T18:51:01.7307706Z ##[group]Run npm run build
+2025-09-18T18:51:01.7308057Z [36;1mnpm run build[0m
+2025-09-18T18:51:01.7368570Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T18:51:01.7368932Z ##[endgroup]
+2025-09-18T18:51:02.4408618Z 
+2025-09-18T18:51:02.4409216Z > container-browser@0.2.10 build
+2025-09-18T18:51:02.4410003Z > electron-vite build
+2025-09-18T18:51:02.4410261Z 
+2025-09-18T18:51:02.9622084Z [36mvite v5.4.19 [32mbuilding SSR bundle for production...[36m[39m
+2025-09-18T18:51:03.0621661Z transforming...
+2025-09-18T18:51:04.6877593Z [32m✓[39m 384 modules transformed.
+2025-09-18T18:51:04.8944225Z [1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+2025-09-18T18:51:04.8948529Z (!) D:/a/container-browser/container-browser/src/main/containerManager.ts is dynamically imported by D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts but also statically imported by D:/a/container-browser/container-browser/src/main/index.ts, dynamic import will not move module into another chunk.
+2025-09-18T18:51:04.8951928Z [39m
+2025-09-18T18:51:04.8952255Z rendering chunks...
+2025-09-18T18:51:04.9023494Z [2mout/main/[22m[36mindex.js  [39m[1m[33m519.37 kB[39m[22m
+2025-09-18T18:51:04.9026884Z [32m✓ built in 1.90s[39m
+2025-09-18T18:51:04.9069798Z [36mvite v5.4.19 [32mbuilding SSR bundle for production...[36m[39m
+2025-09-18T18:51:04.9127803Z transforming...
+2025-09-18T18:51:04.9258645Z [32m✓[39m 3 modules transformed.
+2025-09-18T18:51:04.9327975Z rendering chunks...
+2025-09-18T18:51:04.9353029Z [2mout/preload/[22m[36mmainPreload.cjs       [39m[1m[2m2.93 kB[22m[1m[22m
+2025-09-18T18:51:04.9354437Z [2mout/preload/[22m[36mcontainerPreload.cjs  [39m[1m[2m8.00 kB[22m[1m[22m
+2025-09-18T18:51:04.9355441Z [32m✓ built in 28ms[39m
+2025-09-18T18:51:04.9404524Z [36mvite v5.4.19 [32mbuilding for production...[36m[39m
+2025-09-18T18:51:04.9683694Z transforming...
+2025-09-18T18:51:05.5241364Z [32m✓[39m 33 modules transformed.
+2025-09-18T18:51:05.5671506Z rendering chunks...
+2025-09-18T18:51:05.6026260Z [2m../../out/renderer/[22m[32mindex.html                         [39m[1m[2m  0.55 kB[22m[1m[22m
+2025-09-18T18:51:05.6027737Z [2m../../out/renderer/[22m[32mcontainerShell.html                [39m[1m[2m  3.91 kB[22m[1m[22m
+2025-09-18T18:51:05.6028989Z [2m../../out/renderer/[22m[35massets/index-D_34ibqy.css          [39m[1m[2m  1.23 kB[22m[1m[22m
+2025-09-18T18:51:05.6030305Z [2m../../out/renderer/[22m[36massets/containerShell-TrgT6HbI.js  [39m[1m[2m  9.69 kB[22m[1m[22m
+2025-09-18T18:51:05.6031738Z [2m../../out/renderer/[22m[36massets/index-ClCjK89A.js           [39m[1m[2m239.20 kB[22m[1m[22m
+2025-09-18T18:51:05.6033014Z [32m✓ built in 662ms[39m

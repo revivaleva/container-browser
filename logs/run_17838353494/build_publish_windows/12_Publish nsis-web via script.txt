@@ -1,0 +1,83 @@
+﻿2025-09-18T18:51:10.8068672Z ##[group]Run # Ensure signing env vars are removed from the step environment before running the release script
+2025-09-18T18:51:10.8069687Z [36;1m# Ensure signing env vars are removed from the step environment before running the release script[0m
+2025-09-18T18:51:10.8070243Z [36;1mRemove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue[0m
+2025-09-18T18:51:10.8070668Z [36;1mRemove-Item Env:CSC_LINK -ErrorAction SilentlyContinue[0m
+2025-09-18T18:51:10.8071083Z [36;1mRemove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue[0m
+2025-09-18T18:51:10.8071433Z [36;1m# Run the release script[0m
+2025-09-18T18:51:10.8071891Z [36;1mpowershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `[0m
+2025-09-18T18:51:10.8072339Z [36;1m  container-browser-updates `[0m
+2025-09-18T18:51:10.8072602Z [36;1m  E1Q66ASB5AODYF `[0m
+2025-09-18T18:51:10.8072897Z [36;1m  https://updates.threadsbooster.jp[0m
+2025-09-18T18:51:10.8131045Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T18:51:10.8131446Z env:
+2025-09-18T18:51:10.8131744Z   AWS_DEFAULT_REGION: ***
+2025-09-18T18:51:10.8132005Z   AWS_REGION: ***
+2025-09-18T18:51:10.8132239Z   AWS_ACCESS_KEY_ID: ***
+2025-09-18T18:51:10.8132545Z   AWS_SECRET_ACCESS_KEY: ***
+2025-09-18T18:51:10.8132769Z ##[endgroup]
+2025-09-18T18:51:11.9749834Z package.json version: 0.2.10
+2025-09-18T18:51:19.9108125Z 
+2025-09-18T18:51:19.9116992Z == BUILD OUT (tail) ==
+2025-09-18T18:51:19.9154084Z   • electron-builder  version=24.13.3 os=10.0.26100
+2025-09-18T18:51:19.9155325Z   • loaded configuration  file=package.json ("build" field)
+2025-09-18T18:51:19.9157409Z   • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+2025-09-18T18:51:19.9158488Z 
+2025-09-18T18:51:19.9160072Z To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+2025-09-18T18:51:19.9162358Z   • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-18T18:51:19.9165102Z   • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-18T18:51:19.9166446Z   • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-18T18:51:19.9167602Z   • packaging       platform=win32 arch=x64 electron=31.7.7 appOutDir=dist_update_20250918_185111\win-unpacked
+2025-09-18T18:51:19.9168727Z   • downloading     url=https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip size=111 MB parts=8
+2025-09-18T18:51:19.9170689Z   • downloaded      url=https://github.com/electron/electron/releases/download/v31.7.7/electron-v31.7.7-win32-x64.zip duration=1.33s
+2025-09-18T18:51:19.9172480Z   • downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+2025-09-18T18:51:19.9174234Z   • downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=158ms
+2025-09-18T18:51:19.9175836Z   ⨯ Cannot find module 'D:\a\container-browser\container-browser\false'
+2025-09-18T18:51:19.9176391Z Require stack:
+2025-09-18T18:51:19.9177204Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\platformPackager.js
+2025-09-18T18:51:19.9178522Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\electronMac.js
+2025-09-18T18:51:19.9180284Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\ElectronFramework.js
+2025-09-18T18:51:19.9181875Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\packager.js
+2025-09-18T18:51:19.9183561Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\index.js
+2025-09-18T18:51:19.9184872Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\builder.js
+2025-09-18T18:51:19.9188078Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\cli\cli.js
+2025-09-18T18:51:19.9189118Z - D:\a\container-browser\container-browser\node_modules\electron-builder\cli.js  failedTask=build stackTrace=Error: Cannot find module 'D:\a\container-browser\container-browser\false'
+2025-09-18T18:51:19.9189849Z Require stack:
+2025-09-18T18:51:19.9190340Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\platformPackager.js
+2025-09-18T18:51:19.9191067Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\electronMac.js
+2025-09-18T18:51:19.9434081Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\electron\ElectronFramework.js
+2025-09-18T18:51:19.9434970Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\packager.js
+2025-09-18T18:51:19.9435879Z - D:\a\container-browser\container-browser\node_modules\app-builder-lib\out\index.js
+2025-09-18T18:51:19.9437100Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\builder.js
+2025-09-18T18:51:19.9438678Z - D:\a\container-browser\container-browser\node_modules\electron-builder\out\cli\cli.js
+2025-09-18T18:51:19.9439695Z - D:\a\container-browser\container-browser\node_modules\electron-builder\cli.js
+2025-09-18T18:51:19.9441274Z     at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1140:15)
+2025-09-18T18:51:19.9441942Z     at Function.Module._load (node:internal/modules/cjs/loader:981:27)
+2025-09-18T18:51:19.9443710Z     at Module.require (node:internal/modules/cjs/loader:1231:19)
+2025-09-18T18:51:19.9445104Z     at require (node:internal/modules/helpers:177:18)
+2025-09-18T18:51:19.9446244Z     at resolveModule (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:771:10)
+2025-09-18T18:51:19.9447634Z     at resolveFunction (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:791:24)
+2025-09-18T18:51:19.9448910Z     at sign (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\codeSign\windowsCodeSign.ts:55:42)
+2025-09-18T18:51:19.9450600Z     at WinPackager.sign (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:213:20)
+2025-09-18T18:51:19.9451942Z     at WinPackager.signAndEditResources (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:348:5)
+2025-09-18T18:51:19.9452751Z From previous event:
+2025-09-18T18:51:19.9453948Z     at processImmediate (node:internal/timers:476:21)
+2025-09-18T18:51:19.9455371Z From previous event:
+2025-09-18T18:51:19.9456830Z     at WinPackager.signApp (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\winPackager.ts:384:27)
+2025-09-18T18:51:19.9458007Z     at WinPackager.doSignAfterPack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:336:32)
+2025-09-18T18:51:19.9459372Z     at WinPackager.doPack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:321:7)
+2025-09-18T18:51:19.9460594Z     at WinPackager.pack (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\platformPackager.ts:140:5)
+2025-09-18T18:51:19.9461854Z     at Packager.doBuild (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:445:9)
+2025-09-18T18:51:19.9464111Z     at executeFinally (D:\a\container-browser\container-browser\node_modules\builder-util\src\promise.ts:12:14)
+2025-09-18T18:51:19.9465839Z     at Packager._build (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:379:31)
+2025-09-18T18:51:19.9466907Z     at Packager.build (D:\a\container-browser\container-browser\node_modules\app-builder-lib\src\packager.ts:340:12)
+2025-09-18T18:51:19.9467880Z     at executeFinally (D:\a\container-browser\container-browser\node_modules\builder-util\src\promise.ts:12:14)
+2025-09-18T18:51:19.9473243Z 
+2025-09-18T18:51:19.9483084Z == BUILD ERR (tail) ==
+2025-09-18T18:51:19.9974265Z nsis-web build failed: ExitCode=1
+2025-09-18T18:51:19.9975194Z At D:\a\container-browser\container-browser\scripts\update-release.ps1:92 char:5
+2025-09-18T18:51:19.9976282Z +     throw ('nsis-web build failed: ExitCode={0}' -f $exit)
+2025-09-18T18:51:19.9976963Z +     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2025-09-18T18:51:19.9977646Z     + CategoryInfo          : OperationStopped: (nsis-web build failed: ExitCode=1:String) [], RuntimeException
+2025-09-18T18:51:19.9978267Z     + FullyQualifiedErrorId : nsis-web build failed: ExitCode=1
+2025-09-18T18:51:19.9978602Z  
+2025-09-18T18:51:20.0665056Z ##[error]Process completed with exit code 1.

@@ -1,0 +1,1 @@
+https://container-browser-updates.s3.ap-northeast-1.amazonaws.com/container-browser-0.3.0-x64.nsis.7z?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAY2DOS4LLHGQEHKXJ%2F20250921%2Fap-northeast-1%2Fs3%2Faws4_request&X-Amz-Date=20250921T000107Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=05b51b4a6f5c66280d7be2e4024db7a6183e4b0eb22802c3f691e7b84ddc84b6

@@ -1,0 +1,32 @@
+﻿2025-09-18T19:22:50.6310111Z Current runner version: '2.328.0'
+2025-09-18T19:22:50.6361707Z ##[group]Runner Image Provisioner
+2025-09-18T19:22:50.6363108Z Hosted Compute Agent
+2025-09-18T19:22:50.6363874Z Version: 20250829.383
+2025-09-18T19:22:50.6364470Z Commit: 27cb235aab5b0e52e153a26cd86b4742e89dac5d
+2025-09-18T19:22:50.6365239Z Build Date: 2025-08-29T13:48:48Z
+2025-09-18T19:22:50.6365829Z ##[endgroup]
+2025-09-18T19:22:50.6366346Z ##[group]Operating System
+2025-09-18T19:22:50.6367044Z Microsoft Windows Server 2025
+2025-09-18T19:22:50.6367562Z 10.0.26100
+2025-09-18T19:22:50.6368001Z Datacenter
+2025-09-18T19:22:50.6368446Z ##[endgroup]
+2025-09-18T19:22:50.6368977Z ##[group]Runner Image
+2025-09-18T19:22:50.6369502Z Image: windows-2025
+2025-09-18T19:22:50.6370031Z Version: 20250907.19.1
+2025-09-18T19:22:50.6371025Z Included Software: https://github.com/actions/runner-images/blob/win25/20250907.19/images/windows/Windows2025-Readme.md
+2025-09-18T19:22:50.6372346Z Image Release: https://github.com/actions/runner-images/releases/tag/win25%2F20250907.19
+2025-09-18T19:22:50.6374166Z ##[endgroup]
+2025-09-18T19:22:50.6375205Z ##[group]GITHUB_TOKEN Permissions
+2025-09-18T19:22:50.6377255Z Actions: write
+2025-09-18T19:22:50.6377902Z Contents: read
+2025-09-18T19:22:50.6378604Z Metadata: read
+2025-09-18T19:22:50.6379352Z ##[endgroup]
+2025-09-18T19:22:50.6381790Z Secret source: Actions
+2025-09-18T19:22:50.6382647Z Prepare workflow directory
+2025-09-18T19:22:50.6803367Z Prepare all required actions
+2025-09-18T19:22:50.6858158Z Getting action download info
+2025-09-18T19:22:50.9358790Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-09-18T19:22:51.0598498Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2025-09-18T19:22:51.2230731Z Download action repository 'actions/cache@v4' (SHA:0400d5f644dc74513175e3cd8d07132dd4860809)
+2025-09-18T19:22:51.3533543Z Download action repository 'aws-actions/configure-aws-credentials@v2' (SHA:5fd3084fc36e372ff1fff382a39b10d03659f355)
+2025-09-18T19:22:51.7162662Z Complete job name: build_publish_windows

@@ -1,0 +1,267 @@
+﻿2025-09-18T13:49:28.6166269Z Current runner version: '2.328.0'
+2025-09-18T13:49:28.6191597Z ##[group]Runner Image Provisioner
+2025-09-18T13:49:28.6192390Z Hosted Compute Agent
+2025-09-18T13:49:28.6192938Z Version: 20250829.383
+2025-09-18T13:49:28.6193588Z Commit: 27cb235aab5b0e52e153a26cd86b4742e89dac5d
+2025-09-18T13:49:28.6194290Z Build Date: 2025-08-29T13:48:48Z
+2025-09-18T13:49:28.6194850Z ##[endgroup]
+2025-09-18T13:49:28.6195306Z ##[group]Operating System
+2025-09-18T13:49:28.6195846Z Microsoft Windows Server 2025
+2025-09-18T13:49:28.6196391Z 10.0.26100
+2025-09-18T13:49:28.6196848Z Datacenter
+2025-09-18T13:49:28.6197250Z ##[endgroup]
+2025-09-18T13:49:28.6197727Z ##[group]Runner Image
+2025-09-18T13:49:28.6198249Z Image: windows-2025
+2025-09-18T13:49:28.6198755Z Version: 20250907.19.1
+2025-09-18T13:49:28.6199735Z Included Software: https://github.com/actions/runner-images/blob/win25/20250907.19/images/windows/Windows2025-Readme.md
+2025-09-18T13:49:28.6201388Z Image Release: https://github.com/actions/runner-images/releases/tag/win25%2F20250907.19
+2025-09-18T13:49:28.6202629Z ##[endgroup]
+2025-09-18T13:49:28.6205103Z ##[group]GITHUB_TOKEN Permissions
+2025-09-18T13:49:28.6206977Z Actions: write
+2025-09-18T13:49:28.6207803Z Attestations: write
+2025-09-18T13:49:28.6208378Z Checks: write
+2025-09-18T13:49:28.6208814Z Contents: write
+2025-09-18T13:49:28.6209290Z Deployments: write
+2025-09-18T13:49:28.6209807Z Discussions: write
+2025-09-18T13:49:28.6210287Z Issues: write
+2025-09-18T13:49:28.6210737Z Metadata: read
+2025-09-18T13:49:28.6211221Z Models: read
+2025-09-18T13:49:28.6211692Z Packages: write
+2025-09-18T13:49:28.6212170Z Pages: write
+2025-09-18T13:49:28.6212655Z PullRequests: write
+2025-09-18T13:49:28.6213133Z RepositoryProjects: write
+2025-09-18T13:49:28.6213922Z SecurityEvents: write
+2025-09-18T13:49:28.6214545Z Statuses: write
+2025-09-18T13:49:28.6215042Z ##[endgroup]
+2025-09-18T13:49:28.6217191Z Secret source: Actions
+2025-09-18T13:49:28.6218189Z Prepare workflow directory
+2025-09-18T13:49:28.6534718Z Prepare all required actions
+2025-09-18T13:49:28.6581721Z Getting action download info
+2025-09-18T13:49:29.0623164Z Download action repository 'actions/checkout@v4' (SHA:08eba0b27e820071cde6df949e0beb9ba4906955)
+2025-09-18T13:49:29.7049607Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2025-09-18T13:49:30.1489670Z Download action repository 'actions/cache@v4' (SHA:0400d5f644dc74513175e3cd8d07132dd4860809)
+2025-09-18T13:49:30.5334886Z Download action repository 'aws-actions/configure-aws-credentials@v2' (SHA:5fd3084fc36e372ff1fff382a39b10d03659f355)
+2025-09-18T13:49:31.9311147Z Complete job name: build_publish_windows
+2025-09-18T13:49:33.4135763Z ##[group]Run actions/checkout@v4
+2025-09-18T13:49:33.4136461Z with:
+2025-09-18T13:49:33.4136626Z   fetch-depth: 0
+2025-09-18T13:49:33.4136841Z   repository: revivaleva/container-browser
+2025-09-18T13:49:33.4137285Z   token: ***
+2025-09-18T13:49:33.4137462Z   ssh-strict: true
+2025-09-18T13:49:33.4137652Z   ssh-user: git
+2025-09-18T13:49:33.4137832Z   persist-credentials: true
+2025-09-18T13:49:33.4138034Z   clean: true
+2025-09-18T13:49:33.4138221Z   sparse-checkout-cone-mode: true
+2025-09-18T13:49:33.4138436Z   fetch-tags: false
+2025-09-18T13:49:33.4138618Z   show-progress: true
+2025-09-18T13:49:33.4138793Z   lfs: false
+2025-09-18T13:49:33.4138949Z   submodules: false
+2025-09-18T13:49:33.4139115Z   set-safe-directory: true
+2025-09-18T13:49:33.4139497Z ##[endgroup]
+2025-09-18T13:49:33.6418131Z Syncing repository: revivaleva/container-browser
+2025-09-18T13:49:33.6419594Z ##[group]Getting Git version info
+2025-09-18T13:49:33.6420028Z Working directory is 'D:\a\container-browser\container-browser'
+2025-09-18T13:49:33.8089203Z [command]"C:\Program Files\Git\bin\git.exe" version
+2025-09-18T13:49:35.3108655Z git version 2.51.0.windows.1
+2025-09-18T13:49:35.3161820Z ##[endgroup]
+2025-09-18T13:49:35.3186477Z Temporarily overriding HOME='D:\a\_temp\811487ca-bcce-4f27-a9b5-9cd558ae76a1' before making global git config changes
+2025-09-18T13:49:35.3189723Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-18T13:49:35.3198246Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\container-browser\container-browser
+2025-09-18T13:49:35.4901575Z Deleting the contents of 'D:\a\container-browser\container-browser'
+2025-09-18T13:49:35.4909605Z ##[group]Initializing the repository
+2025-09-18T13:49:35.4924669Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\container-browser\container-browser
+2025-09-18T13:49:35.8646114Z Initialized empty Git repository in D:/a/container-browser/container-browser/.git/
+2025-09-18T13:49:35.8697948Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/revivaleva/container-browser
+2025-09-18T13:49:36.0201996Z ##[endgroup]
+2025-09-18T13:49:36.0202684Z ##[group]Disabling automatic garbage collection
+2025-09-18T13:49:36.0213742Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2025-09-18T13:49:36.0512134Z ##[endgroup]
+2025-09-18T13:49:36.0512680Z ##[group]Setting up auth
+2025-09-18T13:49:36.0527015Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2025-09-18T13:49:36.0833461Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2025-09-18T13:49:40.9810741Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-18T13:49:41.0118418Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2025-09-18T13:49:41.5235693Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2025-09-18T13:49:41.5545145Z ##[endgroup]
+2025-09-18T13:49:41.5547819Z ##[group]Fetching the repository
+2025-09-18T13:49:41.5561475Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2025-09-18T13:49:48.1444711Z From https://github.com/revivaleva/container-browser
+2025-09-18T13:49:48.1446092Z  * [new branch]      chore/cf-key-rotation-finalize -> origin/chore/cf-key-rotation-finalize
+2025-09-18T13:49:48.1452484Z  * [new branch]      chore/update-release-clean -> origin/chore/update-release-clean
+2025-09-18T13:49:48.1453372Z  * [new branch]      ci/clean-ci-fixes     -> origin/ci/clean-ci-fixes
+2025-09-18T13:49:48.1454208Z  * [new branch]      ci/diagnose-cdn       -> origin/ci/diagnose-cdn
+2025-09-18T13:49:48.1455016Z  * [new branch]      ci/offline-release-ci -> origin/ci/offline-release-ci
+2025-09-18T13:49:48.1455608Z  * [new branch]      ci/s3-root-copy       -> origin/ci/s3-root-copy
+2025-09-18T13:49:48.1456577Z  * [new branch]      ci/workflow-manual-20250916 -> origin/ci/workflow-manual-20250916
+2025-09-18T13:49:48.1457561Z  * [new branch]      ci/workflow-manual-20250916-mainbase -> origin/ci/workflow-manual-20250916-mainbase
+2025-09-18T13:49:48.1458574Z  * [new branch]      feat/web-installer-switch -> origin/feat/web-installer-switch
+2025-09-18T13:49:48.1459086Z  * [new branch]      main                  -> origin/main
+2025-09-18T13:49:48.1807344Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/main
+2025-09-18T13:49:48.2294931Z   origin/main
+2025-09-18T13:49:48.2337619Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/main
+2025-09-18T13:49:48.2687533Z d067cc84f342da7a4e76e0eede1d8149c564ef19
+2025-09-18T13:49:48.2721110Z ##[endgroup]
+2025-09-18T13:49:48.2721663Z ##[group]Determining the checkout info
+2025-09-18T13:49:48.2723436Z ##[endgroup]
+2025-09-18T13:49:48.2734709Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2025-09-18T13:49:48.3319612Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2025-09-18T13:49:48.3633541Z ##[group]Checking out the ref
+2025-09-18T13:49:48.3634356Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B main refs/remotes/origin/main
+2025-09-18T13:49:48.4848846Z branch 'main' set up to track 'origin/main'.
+2025-09-18T13:49:48.4856973Z Switched to a new branch 'main'
+2025-09-18T13:49:48.4893149Z ##[endgroup]
+2025-09-18T13:49:48.5309587Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2025-09-18T13:49:48.5614372Z d067cc84f342da7a4e76e0eede1d8149c564ef19
+2025-09-18T13:49:48.6065980Z ##[group]Run actions/setup-node@v4
+2025-09-18T13:49:48.6066349Z with:
+2025-09-18T13:49:48.6066543Z   node-version: 18
+2025-09-18T13:49:48.6066767Z   always-auth: false
+2025-09-18T13:49:48.6066992Z   check-latest: false
+2025-09-18T13:49:48.6067412Z   token: ***
+2025-09-18T13:49:48.6067606Z ##[endgroup]
+2025-09-18T13:49:48.8690795Z Found in cache @ C:\hostedtoolcache\windows\node\18.20.8\x64
+2025-09-18T13:49:48.8701016Z ##[group]Environment details
+2025-09-18T13:49:53.9607311Z node: v18.20.8
+2025-09-18T13:49:53.9607614Z npm: 10.8.2
+2025-09-18T13:49:53.9607785Z yarn: 1.22.22
+2025-09-18T13:49:53.9609760Z ##[endgroup]
+2025-09-18T13:49:54.1383412Z ##[group]Run actions/cache@v4
+2025-09-18T13:49:54.1383685Z with:
+2025-09-18T13:49:54.1383851Z   path: ~/.npm
+2025-09-18T13:49:54.1384221Z   key: Windows-node-1d3592afdd061b71ce3efbb885eefcaad9dd823d54fa9fb6b60ca189c71f60ab
+2025-09-18T13:49:54.1384637Z   restore-keys: Windows-node-
+2025-09-18T13:49:54.1384853Z   enableCrossOsArchive: false
+2025-09-18T13:49:54.1385058Z   fail-on-cache-miss: false
+2025-09-18T13:49:54.1385254Z   lookup-only: false
+2025-09-18T13:49:54.1385431Z   save-always: false
+2025-09-18T13:49:54.1385600Z ##[endgroup]
+2025-09-18T13:49:54.7717667Z Cache not found for input keys: Windows-node-1d3592afdd061b71ce3efbb885eefcaad9dd823d54fa9fb6b60ca189c71f60ab, Windows-node-
+2025-09-18T13:49:54.9361970Z ##[group]Run actions/cache@v4
+2025-09-18T13:49:54.9362260Z with:
+2025-09-18T13:49:54.9362501Z   path: ~/.cache/electron
+~/.cache/electron-builder
+
+2025-09-18T13:49:54.9362963Z   key: Windows-electron-1d3592afdd061b71ce3efbb885eefcaad9dd823d54fa9fb6b60ca189c71f60ab
+2025-09-18T13:49:54.9363381Z   restore-keys: Windows-electron-
+2025-09-18T13:49:54.9363605Z   enableCrossOsArchive: false
+2025-09-18T13:49:54.9363812Z   fail-on-cache-miss: false
+2025-09-18T13:49:54.9364009Z   lookup-only: false
+2025-09-18T13:49:54.9364173Z   save-always: false
+2025-09-18T13:49:54.9364335Z ##[endgroup]
+2025-09-18T13:49:55.4430224Z Cache not found for input keys: Windows-electron-1d3592afdd061b71ce3efbb885eefcaad9dd823d54fa9fb6b60ca189c71f60ab, Windows-electron-
+2025-09-18T13:49:55.4664257Z ##[group]Run npm ci
+2025-09-18T13:49:55.4664545Z [36;1mnpm ci[0m
+2025-09-18T13:49:55.5920677Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T13:49:55.5921190Z ##[endgroup]
+2025-09-18T13:50:07.9342837Z npm warn EBADENGINE Unsupported engine {
+2025-09-18T13:50:07.9343462Z npm warn EBADENGINE   package: '@electron/rebuild@4.0.1',
+2025-09-18T13:50:07.9344061Z npm warn EBADENGINE   required: { node: '>=22.12.0' },
+2025-09-18T13:50:07.9344773Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-18T13:50:07.9345318Z npm warn EBADENGINE }
+2025-09-18T13:50:07.9354416Z npm warn EBADENGINE Unsupported engine {
+2025-09-18T13:50:07.9355077Z npm warn EBADENGINE   package: 'better-sqlite3@12.2.0',
+2025-09-18T13:50:07.9355887Z npm warn EBADENGINE   required: { node: '20.x || 22.x || 23.x || 24.x' },
+2025-09-18T13:50:07.9356721Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-18T13:50:07.9357384Z npm warn EBADENGINE }
+2025-09-18T13:50:07.9378377Z npm warn EBADENGINE Unsupported engine {
+2025-09-18T13:50:07.9379024Z npm warn EBADENGINE   package: 'node-abi@4.14.0',
+2025-09-18T13:50:07.9380047Z npm warn EBADENGINE   required: { node: '>=22.12.0' },
+2025-09-18T13:50:07.9380821Z npm warn EBADENGINE   current: { node: 'v18.20.8', npm: '10.8.2' }
+2025-09-18T13:50:07.9381445Z npm warn EBADENGINE }
+2025-09-18T13:50:10.8038669Z npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+2025-09-18T13:50:11.2233043Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+2025-09-18T13:50:12.7803529Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-18T13:50:12.9933471Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-18T13:50:13.0072244Z npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+2025-09-18T13:50:13.2682943Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+2025-09-18T13:53:18.8109681Z 
+2025-09-18T13:53:18.8110443Z > container-browser@0.2.10 postinstall
+2025-09-18T13:53:18.8110977Z > electron-builder install-app-deps
+2025-09-18T13:53:18.8111182Z 
+2025-09-18T13:53:19.6363280Z   • electron-builder  version=24.13.3
+2025-09-18T13:53:19.6384395Z   • loaded configuration  file=package.json ("build" field)
+2025-09-18T13:53:19.6916999Z   • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
+2025-09-18T13:53:19.6918105Z   • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
+2025-09-18T13:53:20.3423417Z   • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 
+2025-09-18T13:53:20.5598358Z 
+2025-09-18T13:53:20.5599232Z added 489 packages, and audited 490 packages in 3m
+2025-09-18T13:53:20.5599957Z 
+2025-09-18T13:53:20.5600682Z 69 packages are looking for funding
+2025-09-18T13:53:20.5601482Z   run `npm fund` for details
+2025-09-18T13:53:20.5862102Z 
+2025-09-18T13:53:20.5862826Z 4 moderate severity vulnerabilities
+2025-09-18T13:53:20.5863219Z 
+2025-09-18T13:53:20.5863584Z To address issues that do not require attention, run:
+2025-09-18T13:53:20.5864055Z   npm audit fix
+2025-09-18T13:53:20.5864265Z 
+2025-09-18T13:53:20.5864493Z To address all issues (including breaking changes), run:
+2025-09-18T13:53:20.5864877Z   npm audit fix --force
+2025-09-18T13:53:20.5865290Z 
+2025-09-18T13:53:20.5865548Z Run `npm audit` for details.
+2025-09-18T13:53:21.4914716Z ##[group]Run npm run build
+2025-09-18T13:53:21.4915114Z [36;1mnpm run build[0m
+2025-09-18T13:53:21.4974079Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T13:53:21.4974474Z ##[endgroup]
+2025-09-18T13:53:22.1315639Z 
+2025-09-18T13:53:22.1316214Z > container-browser@0.2.10 build
+2025-09-18T13:53:22.1316888Z > electron-vite build
+2025-09-18T13:53:22.1317136Z 
+2025-09-18T13:53:22.6761077Z [36mvite v5.4.19 [32mbuilding SSR bundle for production...[36m[39m
+2025-09-18T13:53:22.7605389Z transforming...
+2025-09-18T13:53:24.4139236Z [32m✓[39m 384 modules transformed.
+2025-09-18T13:53:24.6275704Z [1m[33m[plugin:vite:reporter][39m[22m [33m[plugin vite:reporter] 
+2025-09-18T13:53:24.6280407Z (!) D:/a/container-browser/container-browser/src/main/containerManager.ts is dynamically imported by D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts, D:/a/container-browser/container-browser/src/main/index.ts but also statically imported by D:/a/container-browser/container-browser/src/main/index.ts, dynamic import will not move module into another chunk.
+2025-09-18T13:53:24.6284241Z [39m
+2025-09-18T13:53:24.6284734Z rendering chunks...
+2025-09-18T13:53:24.6357854Z [2mout/main/[22m[36mindex.js  [39m[1m[33m519.37 kB[39m[22m
+2025-09-18T13:53:24.6360951Z [32m✓ built in 1.93s[39m
+2025-09-18T13:53:24.6403617Z [36mvite v5.4.19 [32mbuilding SSR bundle for production...[36m[39m
+2025-09-18T13:53:24.6457491Z transforming...
+2025-09-18T13:53:24.6591453Z [32m✓[39m 3 modules transformed.
+2025-09-18T13:53:24.6663629Z rendering chunks...
+2025-09-18T13:53:24.6689640Z [2mout/preload/[22m[36mmainPreload.cjs       [39m[1m[2m2.93 kB[22m[1m[22m
+2025-09-18T13:53:24.6690443Z [2mout/preload/[22m[36mcontainerPreload.cjs  [39m[1m[2m8.00 kB[22m[1m[22m
+2025-09-18T13:53:24.6691161Z [32m✓ built in 28ms[39m
+2025-09-18T13:53:24.6730525Z [36mvite v5.4.19 [32mbuilding for production...[36m[39m
+2025-09-18T13:53:24.7011414Z transforming...
+2025-09-18T13:53:25.2736724Z [32m✓[39m 33 modules transformed.
+2025-09-18T13:53:25.3187536Z rendering chunks...
+2025-09-18T13:53:25.3550438Z [2m../../out/renderer/[22m[32mindex.html                         [39m[1m[2m  0.55 kB[22m[1m[22m
+2025-09-18T13:53:25.3552048Z [2m../../out/renderer/[22m[32mcontainerShell.html                [39m[1m[2m  3.91 kB[22m[1m[22m
+2025-09-18T13:53:25.3553379Z [2m../../out/renderer/[22m[35massets/index-D_34ibqy.css          [39m[1m[2m  1.23 kB[22m[1m[22m
+2025-09-18T13:53:25.3554750Z [2m../../out/renderer/[22m[36massets/containerShell-TrgT6HbI.js  [39m[1m[2m  9.69 kB[22m[1m[22m
+2025-09-18T13:53:25.3556138Z [2m../../out/renderer/[22m[36massets/index-ClCjK89A.js           [39m[1m[2m239.20 kB[22m[1m[22m
+2025-09-18T13:53:25.3557091Z [32m✓ built in 682ms[39m
+2025-09-18T13:53:25.5237588Z ##[group]Run # Cancel other in-progress or queued publish-windows runs, keep this run
+2025-09-18T13:53:25.5238320Z [36;1m# Cancel other in-progress or queued publish-windows runs, keep this run[0m
+2025-09-18T13:53:25.5239116Z [36;1mpowershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\cancel_other_runs.ps1 -Workflow 'publish-windows.yml' -Keep $env:GITHUB_RUN_ID[0m
+2025-09-18T13:53:25.5331163Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2025-09-18T13:53:25.5331529Z ##[endgroup]
+2025-09-18T13:53:26.1268260Z Get-Content : Cannot find path 'D:\a\container-browser\container-browser\scripts\.github_token' because it does not 
+2025-09-18T13:53:26.1269250Z exist.
+2025-09-18T13:53:26.1269989Z At D:\a\container-browser\container-browser\scripts\cancel_other_runs.ps1:7 char:13
+2025-09-18T13:53:26.1270938Z +   $token = (Get-Content -Raw 'scripts/.github_token').Trim()
+2025-09-18T13:53:26.1271643Z +             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2025-09-18T13:53:26.1272271Z     + CategoryInfo          : ObjectNotFound: (D:\a\container-...s\.github_token:String) [Get-Content], ItemNotFoundEx 
+2025-09-18T13:53:26.1272785Z    ception
+2025-09-18T13:53:26.1273289Z     + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetContentCommand
+2025-09-18T13:53:26.1273804Z  
+2025-09-18T13:53:26.2608260Z D:\a\container-browser\container-browser\scripts\cancel_other_runs.ps1 : Failed to read scripts/.github_token
+2025-09-18T13:53:26.2609079Z     + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+2025-09-18T13:53:26.2609763Z     + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,cancel_other_runs.ps1
+2025-09-18T13:53:26.2610284Z  
+2025-09-18T13:53:26.3812935Z ##[error]Process completed with exit code 1.
+2025-09-18T13:53:26.4032734Z Post job cleanup.
+2025-09-18T13:53:26.6373535Z [command]"C:\Program Files\Git\bin\git.exe" version
+2025-09-18T13:53:26.6694148Z git version 2.51.0.windows.1
+2025-09-18T13:53:26.6774315Z Temporarily overriding HOME='D:\a\_temp\50c508b1-345f-4166-ac7f-254ce84a0f46' before making global git config changes
+2025-09-18T13:53:26.6775482Z Adding repository directory to the temporary git global config as a safe directory
+2025-09-18T13:53:26.6790190Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\container-browser\container-browser
+2025-09-18T13:53:26.7121408Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2025-09-18T13:53:26.7435085Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2025-09-18T13:53:27.2753351Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-09-18T13:53:27.3006003Z http.https://github.com/.extraheader
+2025-09-18T13:53:27.3048959Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2025-09-18T13:53:27.3342211Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2025-09-18T13:53:27.8950523Z Cleaning up orphan processes
+2025-09-18T13:53:27.9426503Z Terminate orphan process: pid (2240) (vctip)
