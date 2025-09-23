@@ -48,6 +48,7 @@
       }
     ],
     "win": {
+      "artifactName": "Container-Browser-Web-Setup-${version}.${ext}",
       "target": [
         "nsis-web"
       ],
