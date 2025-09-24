@@ -114,29 +114,20 @@ Get-ChildItem -LiteralPath $nsisDir | Tee-Object -FilePath $logMOut -Append | Ou
 $latestYml = Join-Path $nsisDir 'latest.yml'
 # Rewrite latest.yml to reference files under nsis-web/ root to match uploaded artifact paths.
 $latestContent = Get-Content -LiteralPath $latestYml -Raw
-# Prefix path/file/url entries that are plain filenames with 'nsis-web/' so clients download the correct S3 key.
-# Be conservative: handle optional quotes, spaces and avoid re-prefixing entries that already contain 'nsis-web/'.
-$latestContent = [regex]::Replace($latestContent,
-  '^(\s*(?:path|file|url):\s*)(?:"?)(?!nsis-web/)([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
-  '${1}nsis-web/${2}',
-  'Multiline')
-
-# Rewrite any '- url:' entries that are plain filenames to full CDN absolute URLs so clients
-# download via the CDN rather than attempting an S3 root direct fetch.
+# Rewrite manifest entries to point to absolute CDN root URLs (publish artifacts at S3 root).
+# Rationale: unify installer/package placement to S3 root to avoid dual-path ambiguity
+# and CloudFront cache behavior differences between root and 'nsis-web/'.
 $cdnBase = $Cdn.TrimEnd('/')
 $latestContent = [regex]::Replace(
   $latestContent,
   '^(\s*-\s*url:\s*)(?!https?://)([\w\-\.\s]+\.(?:exe|7z))$',
-  '${1}' + $cdnBase + '/nsis-web/${2}',
+  '${1}' + $cdnBase + '/${2}',
   'Multiline'
 )
-
-# Also rewrite any 'path' or 'file' entries (including those already prefixed with nsis-web/)
-# to absolute CDN URLs so clients will always fetch via the CDN origin.
 $latestContent = [regex]::Replace(
   $latestContent,
-  '^(\s*(?:path|file):\s*)(?:"?)(?!https?://)(?:nsis-web/)?([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
-  '${1}' + $cdnBase + '/nsis-web/${2}',
+  '^(\s*(?:path|file):\s*)(?:"?)(?!https?://)(?:.*?)([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
+  '${1}' + $cdnBase + '/${2}',
   'Multiline'
 )
 
@@ -147,11 +138,11 @@ try {
   if ($webSetup) {
     $fixedWebName = 'ContainerBrowser-Web-Setup.exe'
     Write-Host ("DEBUG: Found web setup: {0} -> copying as fixed name: {1}" -f $webSetup.Name, $fixedWebName)
-    # Upload the fixed-name copy to S3 under nsis-web/
-    aws s3 cp (Join-Path $nsisDir $webSetup.Name) ("s3://$Bucket/nsis-web/" + $fixedWebName) --no-progress --content-type 'application/x-msdownload' | Out-Null
+    # Upload the fixed-name copy to S3 root (consistent root placement)
+    aws s3 cp (Join-Path $nsisDir $webSetup.Name) ("s3://$Bucket/" + $fixedWebName) --no-progress --content-type 'application/x-msdownload' | Out-Null
 
-    # Also update latestContent so the manifest's url points to the fixed CDN URL
-    $fixedUrl = ($Cdn.TrimEnd('/') + '/nsis-web/' + $fixedWebName)
+    # Also update latestContent so the manifest's url points to the fixed CDN URL at root
+    $fixedUrl = ($Cdn.TrimEnd('/') + '/' + $fixedWebName)
     # Replace the first '- url:' entry with the fixed absolute URL
     $latestContent = [regex]::Replace($latestContent, '(^\s*-\s*url:\s*).*', '${1}' + $fixedUrl, 'Singleline')
   } else {
@@ -165,10 +156,16 @@ try {
 [IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
 # Upload latest.yml with no-cache to encourage CDN refresh
 aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress --content-type 'text/yaml' --cache-control 'no-cache, max-age=0' | Out-Null
-aws s3 cp $nsisDir ('s3://' + $Bucket + '/nsis-web/') --recursive --no-progress --cache-control 'public,max-age=300' | Out-Null
+# Upload each artifact file to the S3 root explicitly (avoid preserving local directory name)
+Get-ChildItem -LiteralPath $nsisDir -File | Where-Object { $_.Name -ne 'latest.yml' } | ForEach-Object {
+  $local = $_.FullName
+  $key = $_.Name
+  Write-Host ("Uploading {0} -> s3://{1}/{2}" -f $local, $Bucket, $key)
+  aws s3 cp $local ("s3://$Bucket/" + $key) --no-progress --content-type 'application/octet-stream' --cache-control 'public,max-age=300' | Out-Null
+}
 
 # 4) CloudFront invalidation
-$invObj = @{ Paths=@{ Quantity=2; Items=@('/latest.yml','/nsis-web/*') }; CallerReference=('autoupd-' + $ts) }
+$invObj = @{ Paths=@{ Quantity=2; Items=@('/latest.yml','/*') }; CallerReference=('autoupd-' + $ts) }
 try {
   $invJson = $invObj | ConvertTo-Json -Compress
   $invPath = Join-Path -Path 'logs' -ChildPath ('inv_' + $ts + '.json')

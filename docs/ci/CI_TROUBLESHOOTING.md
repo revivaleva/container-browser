@@ -59,10 +59,10 @@
   ```powershell
   powershell -NoProfile -ExecutionPolicy Bypass -Command "./scripts/dispatch_publish.ps1 -Token '<PAT>' -Ref 'ci/s3-root-copy'"
   ```
-- 成功の指標:
+  - 成功の指標:
   - ワークフローが正常終了し、artifacts（nsis 7z / exe）が生成されること。
-  - S3 の `nsis-web/` に期待するファイルが存在すること（`latest.yml` は S3 ルートに配置するが、`path`/`file`/`url` は必ず `nsis-web/<name>` を指す）。
-  - ルートに `.exe` や `.7z` を置かない運用にする（クライアントは常に `nsis-web/` を参照する）。
+  - S3 の運用方針を `root` ベースに統一しました: `latest.yml` と実ファイル（`.exe` / `.7z`）は S3 ルートに配置し、`nsis-web/` プレフィックス運用は廃止します。
+  - `latest.yml` 内の `path`/`file`/`url` は CDN ルート（`https://updates.threadsbooster.jp/<name>`）を指すようにスクリプトで変換されます。
 
 5) 既知の関連コミット／変更
 - 2025-09-17: ジョブ env 削除・`update-release.ps1` の署名引数削除 を適用（参照: `ci/s3-root-copy` ブランチのコミット）。
