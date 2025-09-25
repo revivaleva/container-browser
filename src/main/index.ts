@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+import { dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -97,10 +98,25 @@ async function createMainWindow() {
     }
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show', click: () => { try { mainWindow?.show(); } catch {} } },
+      { type: 'separator' },
+      { label: 'Check for updates', click: () => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[tray] checkForUpdates error', e); } } },
+      { label: 'Show version', click: () => { try { dialog.showMessageBox({ message: `Version: ${app.getVersion()}` }); } catch(e) { logger.error('[tray] showVersion error', e); } } },
+      { type: 'separator' },
       { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
     ]);
     try { tray.setToolTip('Container Browser'); tray.setContextMenu(contextMenu); tray.on('double-click', () => { try { mainWindow?.show(); } catch {} }); } catch (e) { logger.error('[main] tray setup error', e); }
   } catch (e) { logger.error('[main] failed to create tray', e); }
+
+// IPC handlers for app actions exposed to renderer via preload
+ipcMain.handle('app.getVersion', () => {
+  try { return app.getVersion(); } catch { return 'unknown'; }
+});
+ipcMain.handle('app.checkForUpdates', async () => {
+  try { await autoUpdater.checkForUpdates(); return { ok: true }; } catch (e:any) { logger.error('[ipc] checkForUpdates error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+ipcMain.handle('app.exit', () => {
+  try { isQuitting = true; app.quit(); return { ok: true }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
 }
 
 app.whenReady().then(async () => {

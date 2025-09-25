@@ -1,5 +1,0 @@
-2025-09-18T19:22:48.6540000Z Requested labels: windows-latest
-2025-09-18T19:22:48.6540000Z Job defined at: revivaleva/container-browser/.github/workflows/publish-windows.yml@refs/heads/main
-2025-09-18T19:22:48.6540000Z Waiting for a runner to pick up this job...
-2025-09-18T19:22:48.6600000Z Job is about to start running on the hosted runner: GitHub Actions 1000000234
-2025-09-18T19:22:48.6600000Z Job is waiting for a hosted runner to come online.

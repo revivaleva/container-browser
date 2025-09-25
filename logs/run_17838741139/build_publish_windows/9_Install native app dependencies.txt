@@ -1,9 +1,0 @@
-﻿2025-09-18T19:10:09.7871214Z ##[group]Run npx electron-builder install-app-deps
-2025-09-18T19:10:09.7871792Z [36;1mnpx electron-builder install-app-deps[0m
-2025-09-18T19:10:09.7942570Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
-2025-09-18T19:10:09.7943412Z ##[endgroup]
-2025-09-18T19:10:12.1824759Z   • electron-builder  version=24.13.3
-2025-09-18T19:10:12.1849851Z   • loaded configuration  file=package.json ("build" field)
-2025-09-18T19:10:12.2414607Z   • rebuilding native dependencies  dependencies=better-sqlite3@12.2.0, keytar@7.9.0 platform=win32 arch=x64
-2025-09-18T19:10:12.2416157Z   • install prebuilt binary  name=better-sqlite3 version=12.2.0 platform=win32 arch=x64 napi=
-2025-09-18T19:10:12.4723337Z   • install prebuilt binary  name=keytar version=7.9.0 platform=win32 arch=x64 napi= 

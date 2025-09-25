@@ -118,15 +118,29 @@ $latestContent = Get-Content -LiteralPath $latestYml -Raw
 # Rationale: unify installer/package placement to S3 root to avoid dual-path ambiguity
 # and CloudFront cache behavior differences between root and 'nsis-web/'.
 $cdnBase = $Cdn.TrimEnd('/')
+"# Normalize any embedded S3 direct URLs by stripping the S3 domain prefix so we can rewrite to CDN"
+$latestContent = $latestContent -replace 'https?://container-browser-updates\.s3\.amazonaws\.com/',''
+
+# Rewrite manifest entries:
+# - installer (.exe) -> CDN nsis-web/ path
+# - package (.nsis.7z) -> CDN root
 $latestContent = [regex]::Replace(
   $latestContent,
-  '^(\s*-\s*url:\s*)(?!https?://)([\w\-\.\s]+\.(?:exe|7z))$',
-  '${1}' + $cdnBase + '/${2}',
+  '(^\s*-\s*url:\s*)(?:\"?)(?!https?://)([\w\-\.\s]+?\.exe)(?:\"?)',
+  '${1}' + $cdnBase + '/nsis-web/${2}',
   'Multiline'
 )
 $latestContent = [regex]::Replace(
   $latestContent,
-  '^(\s*(?:path|file):\s*)(?:"?)(?!https?://)(?:.*?)([^"\r\n]+?\.(?:exe|7z))(?:"?)$',
+  '(^\s*-\s*url:\s*)(?:\"?)(?!https?://)([\w\-\.\s]+?\.nsis\.7z)(?:\"?)',
+  '${1}' + $cdnBase + '/${2}',
+  'Multiline'
+)
+
+# Also rewrite path/file entries that reference exe or nsis.7z
+$latestContent = [regex]::Replace(
+  $latestContent,
+  '(^\s*(?:path|file):\s*)(?:\"?)(?!https?://)(?:.*?)([^"\r\n]+?\.(?:exe|nsis\.7z))(?:\"?)$',
   '${1}' + $cdnBase + '/${2}',
   'Multiline'
 )

@@ -64,6 +64,19 @@
   - S3 の運用方針を `root` ベースに統一しました: `latest.yml` と実ファイル（`.exe` / `.7z`）は S3 ルートに配置し、`nsis-web/` プレフィックス運用は廃止します。
   - `latest.yml` 内の `path`/`file`/`url` は CDN ルート（`https://updates.threadsbooster.jp/<name>`）を指すようにスクリプトで変換されます。
 
+### アプリ側: 新機能追加メモ (2025-09-25)
+
+実装済み:
+- 起動時に自動でアップデートをチェックし、利用可能であればダウンロード→自動インストールを行う（`electron-updater` の初期化）。
+- トレイメニューに「Check for updates」「Show version」を追加。
+- Renderer から `appAPI.getVersion()` / `appAPI.checkForUpdates()` / `appAPI.exit()` を呼べるように preload 経由で公開。
+
+確認手順（ユーザ向け）:
+1. アプリを起動するとバックグラウンドで更新チェックが行われます（ログ: `[auto-updater] checking for update`）。
+2. 手動で更新を確認するにはトレイアイコン右クリック → `Check for updates` を選択するか、renderer から `window.appAPI.checkForUpdates()` を呼んでください。
+3. バージョン確認はトレイメニューの `Show version` で確認可能。または `window.appAPI.getVersion()` を呼んで取得できます。
+
+
 5) 既知の関連コミット／変更
 - 2025-09-17: ジョブ env 削除・`update-release.ps1` の署名引数削除 を適用（参照: `ci/s3-root-copy` ブランチのコミット）。
 
@@ -91,5 +104,38 @@
 注: 今後はこのような手動修正・検証を行った際に必ずこのドキュメントを更新してください。
 
 ※ 長期的には CI 用の IAM ユーザーに `cloudfront:CreateInvalidation` を付与することを推奨します（再配布の即時性が必要なため）。
+
+---
+
+## 2025-09-25 - 最終対応と運用手順の確定
+
+状況: クライアント側でのインストールが成功したため、本件は収束しました。原因は `latest.yml` の参照先が一部 S3 直リンクを指していたことと、CloudFront のキャッシュ/署名設定の不整合でした。
+
+今回確立した運用手順（必ず順に実行）:
+
+1. ビルド
+   - ローカルまたは CI で `electron-builder --win nsis-web --x64 --publish never` を実行して `nsis-web` アーティファクトを生成する。
+
+2. マニフェスト書換えとアップロード
+   - `scripts/update-release.ps1 -Bucket <bucket> -DistributionId <dist> -Cdn <cdn>` を実行する。
+   - スクリプトは `latest.yml` の `url`/`path`/`file` を CDN の絶対 URL に書き換える（installer は `nsis-web/`、package は CDN ルート）。
+
+3. CloudFront invalidation
+   - スクリプトが invalidation を作成する。手動で行う場合は `scripts/run_invalidate_and_check.ps1` を使用して `/latest.yml` と `/*` の invalidation を作成し、完了を待つ。
+
+4. 検証（必須）
+   - `Invoke-WebRequest -Uri "https://<cdn>/latest.yml" -OutFile logs/cdn_latest.yml` で manifest を取得し、中身の `url` が CDN を指していることを確認する。
+   - `curl -I https://<cdn>/<pkg>.nsis.7z` → 200
+   - `curl -A 'INetC/1.0' -r 0-1048575 -D - -o NUL https://<cdn>/<pkg>.nsis.7z` → 206
+
+5. クライアント側対応
+   - ローカルキャッシュを削除して再試行する（`%LOCALAPPDATA%\container-browser-updater*` と `SquirrelTemp`）。
+
+6. トラブル発生時の優先フロー
+   - まず CDN 上の `latest.yml` の中身確認 → `url` が CDN を指しているかを最優先で確認。
+   - 次に CloudFront の DefaultCacheBehavior/CacheBehaviors の `TrustedKeyGroups` / `TrustedSigners` を確認し、不要な署名要求がないかを確認。
+   - 必要なら DefaultCacheBehavior の `TrustedKeyGroups` を一時的に無効化して配信を回復し、invalidaton を実行する。
+
+付記: 今回の対応では `latest.yml` の書換えと CloudFront 側の設定調整で解決しました。将来のリリース時も上記手順に従ってください。
 
 

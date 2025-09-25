@@ -55,3 +55,9 @@ ipcRenderer.on('forward-log', (_e, msg) => {
 contextBridge.exposeInMainWorld('devtoolsAPI', {
   toggle: () => ipcRenderer.invoke('devtools.toggle')
 });
+
+contextBridge.exposeInMainWorld('appAPI', {
+  getVersion: () => ipcRenderer.invoke('app.getVersion'),
+  checkForUpdates: () => ipcRenderer.invoke('app.checkForUpdates'),
+  exit: () => ipcRenderer.invoke('app.exit')
+});
