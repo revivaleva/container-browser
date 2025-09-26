@@ -114,10 +114,22 @@ export default function App() {
   const colorDepthOptions = [24,30,32];
   const connOptions = ['wifi','4g','3g','2g','ethernet'];
   const [bookmarkSettingsOpen, setBookmarkSettingsOpen] = useState<boolean>(true);
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  useEffect(() => { refresh(); }, []);
+  useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const v = await (window as any).appAPI.getVersion();
+        setAppVersion(v || '');
+      } catch (e) { /* ignore */ }
+    })();
+  }, []);
 
   return (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
-      <h1>コンテナブラウザー</h1>
+      <h1>コンテナブラウザー <small style={{ fontSize: 12, color: '#666' }}>v{appVersion}</small></h1>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>
