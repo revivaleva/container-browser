@@ -114,6 +114,13 @@ async function createMainWindow() {
         submenu: [
           { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
         ]
+      },
+      {
+        label: 'Help',
+        submenu: [
+          { label: 'Check for updates', click: () => { try { checkForUpdatesInteractive().catch((e) => logger.error('[menu] checkForUpdatesInteractive error', e)); } catch (e) { logger.error('[menu] checkForUpdates error', e); } } },
+          { label: 'Show version', click: () => { try { dialog.showMessageBox({ message: `Version: ${app.getVersion()}` }); } catch (e) { logger.error('[menu] showVersion error', e); } } }
+        ]
       }
     ];
     const appMenu = Menu.buildFromTemplate(appMenuTemplate as any);
