@@ -9,6 +9,7 @@ declare global {
 
 let containerId: string | undefined;
 let currentTabs: any[] = [];
+let lastLocalActiveSet = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
   const urlInput = document.getElementById('url') as HTMLInputElement;
@@ -175,6 +176,7 @@ document.addEventListener('DOMContentLoaded', () => {
           await (window as any).tabsAPI.switchTab({ containerId, index: idx });
           // update currentTabs active index locally so bookmark handlers target correct tab
           (window as any).__activeIndex = idx;
+          lastLocalActiveSet = Date.now();
           // update DOM active class immediately for snappy UI
           try {
             const allBtns = tabsBar.querySelectorAll('.tab-btn');
@@ -247,8 +249,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (e) { console.error('[shell] onContext url set error', e); }
     try { if (ctx?.tabs) {
-      // store activeIndex for fallback
-      (window as any).__activeIndex = ctx.activeIndex ?? 0;
+      // Prefer local recent interactions: if renderer initiated a local navigation recently, avoid overriding activeIndex
+      const now = Date.now();
+      const age = now - (lastLocalActiveSet || 0);
+      const thresholdMs = 1200; // ignore main activeIndex updates within this ms after local action
+      if (age > thresholdMs) {
+        (window as any).__activeIndex = ctx.activeIndex ?? ((window as any).__activeIndex ?? 0);
+      }
       renderTabs(ctx.tabs, ctx?.currentUrl);
     } } catch (e) { console.error('[shell] onContext renderTabs error', e); }
     try { setupBookmarks(); } catch (e) { console.error('[shell] setupBookmarks error', e); }
