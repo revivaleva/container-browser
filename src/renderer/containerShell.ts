@@ -85,8 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!currentTabs || currentTabs.length === 0) {
               await (window as any).tabsAPI.createTab({ containerId, url });
             } else {
-              const activeIndex = (window as any).__activeIndex ?? 0;
-              try { await (window as any).tabsAPI.switchTab({ containerId, index: activeIndex }); } catch {}
+              // Navigate the currently active tab (do not change active tab index)
               await (window as any).containerShellAPI.navigate({ containerId, url });
             }
           } catch (e) { console.error(e); }
@@ -106,8 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
               if (!currentTabs || currentTabs.length === 0) {
                 await (window as any).tabsAPI.createTab({ containerId, url });
               } else {
-                const activeIndex = (window as any).__activeIndex ?? 0;
-                try { await (window as any).tabsAPI.switchTab({ containerId, index: activeIndex }); } catch {}
+                // Navigate the currently active tab (do not change active tab index)
                 await (window as any).containerShellAPI.navigate({ containerId, url });
               }
             } catch (e) { console.error(e); }
