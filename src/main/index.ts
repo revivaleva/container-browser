@@ -96,23 +96,7 @@ async function createMainWindow() {
     } catch (e) {
       logger.error('[main] tray creation error', e);
     }
-    // Interactive check function: shows message box whether update exists or not
-    async function checkForUpdatesInteractive() {
-      try {
-        const current = app.getVersion();
-        const res = await autoUpdater.checkForUpdates();
-        const remote = (res && (res as any).updateInfo && (res as any).updateInfo.version) ? (res as any).updateInfo.version : null;
-        if (remote && remote !== current) {
-          try { await dialog.showMessageBox({ message: `更新があります: ${remote}。ダウンロードを開始します。` }); } catch {}
-        } else {
-          try { await dialog.showMessageBox({ message: `既に最新バージョンです（${current}）。` }); } catch {}
-        }
-        return res;
-      } catch (e:any) {
-        logger.error('[update] interactive check failed', e);
-        try { await dialog.showMessageBox({ type: 'error', message: `更新確認に失敗しました: ${e?.message || String(e)}` }); } catch {}
-      }
-    }
+    // use module-scope interactive check (defined below)
 
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show', click: () => { try { mainWindow?.show(); } catch {} } },
@@ -156,6 +140,24 @@ ipcMain.handle('app.checkForUpdates', async () => {
 ipcMain.handle('app.exit', () => {
   try { isQuitting = true; app.quit(); return { ok: true }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });
+}
+
+// Module-scope interactive update check used by menus/tray
+async function checkForUpdatesInteractive() {
+  try {
+    const current = app.getVersion();
+    const res = await autoUpdater.checkForUpdates();
+    const remote = (res && (res as any).updateInfo && (res as any).updateInfo.version) ? (res as any).updateInfo.version : null;
+    if (remote && remote !== current) {
+      try { await dialog.showMessageBox({ message: `更新があります: ${remote}。ダウンロードを開始します。` }); } catch {}
+    } else {
+      try { await dialog.showMessageBox({ message: `既に最新バージョンです（${current}）。` }); } catch{}
+    }
+    return res;
+  } catch (e:any) {
+    logger.error('[update] interactive check failed', e);
+    try { await dialog.showMessageBox({ type: 'error', message: `更新確認に失敗しました: ${e?.message || String(e)}` }); } catch {}
+  }
 }
 
 app.whenReady().then(async () => {
