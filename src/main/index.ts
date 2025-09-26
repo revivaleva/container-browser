@@ -263,6 +263,11 @@ ipcMain.handle('containers.setNote', (_e, { id, note }) => {
     return { ok: true };
   } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });
+
+// Receive logs from renderer for easier debugging in terminal
+ipcMain.on('renderer.log', (_e, msg) => {
+  try { logger.info('[renderer]', msg); } catch { console.log('[renderer]', msg); }
+});
 ipcMain.handle('containers.create', (_e, { name, ua, locale, timezone, proxy }) => {
   console.log('[ipc] containers.create', { name });
   const id = randomUUID();

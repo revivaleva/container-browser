@@ -62,3 +62,8 @@ contextBridge.exposeInMainWorld('appAPI', {
   checkForUpdates: () => ipcRenderer.invoke('app.checkForUpdates'),
   exit: () => ipcRenderer.invoke('app.exit')
 });
+
+// Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)
+contextBridge.exposeInMainWorld('debugAPI', {
+  log: (msg: any) => { try { ipcRenderer.send('renderer.log', msg); } catch { } }
+});
