@@ -111,8 +111,8 @@ export function initDB() {
 export const DB = {
   upsertContainer(c: Container) {
     const stmt = db.prepare(`
-      INSERT INTO containers (id,name,userDataDir,partition,userAgent,locale,timezone,fingerprint,proxy,createdAt,updatedAt,lastSessionId)
-      VALUES (@id,@name,@userDataDir,@partition,@userAgent,@locale,@timezone,@fingerprint,@proxy,@createdAt,@updatedAt,@lastSessionId)
+      INSERT INTO containers (id,name,note,userDataDir,partition,userAgent,locale,timezone,fingerprint,proxy,createdAt,updatedAt,lastSessionId)
+      VALUES (@id,@name,@note,@userDataDir,@partition,@userAgent,@locale,@timezone,@fingerprint,@proxy,@createdAt,@updatedAt,@lastSessionId)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
         note=excluded.note,
