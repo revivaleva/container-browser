@@ -255,6 +255,14 @@ ipcMain.handle('containers.list', () => {
   console.log('[ipc] containers.list');
   return DB.listContainers();
 });
+ipcMain.handle('containers.setNote', (_e, { id, note }) => {
+  try {
+    const cur = DB.getContainer(id);
+    if (!cur) throw new Error('container not found');
+    DB.upsertContainer({ ...cur, note });
+    return { ok: true };
+  } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
 ipcMain.handle('containers.create', (_e, { name, ua, locale, timezone, proxy }) => {
   console.log('[ipc] containers.create', { name });
   const id = randomUUID();

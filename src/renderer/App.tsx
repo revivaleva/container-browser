@@ -160,7 +160,10 @@ export default function App() {
           {list.map((c:any)=> (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <label style={{ minWidth: 160 }}><strong>{c.name}</strong></label>
+                <div style={{ minWidth: 160 }}>
+                  <label><strong>{c.name}</strong></label>
+                  <div style={{ color:'#666', fontSize:12 }}>{c.note ?? ''}</div>
+                </div>
                 {/* per-container URL input removed */}
                 <div style={{ display:'flex', gap:8, marginLeft: 'auto' }}>
                   <button onClick={async ()=>{
@@ -190,6 +193,16 @@ export default function App() {
                     setModalProxyUsername(c.proxy?.username ?? '');
                     setModalProxyPassword(c.proxy?.password ?? '');
                   }}>設定</button>
+
+                  {/* Note edit inline */}
+                  <button onClick={async ()=>{
+                    const newNote = prompt('メモを入力してください（空で削除）', c.note ?? '');
+                    if (newNote === null) return; // cancel
+                    const payload = { id: c.id, note: newNote === '' ? null : newNote };
+                    const res = await (window as any).containersAPI.setNote(payload);
+                    if (!res?.ok) return alert('メモの保存に失敗しました: ' + (res?.error || ''));
+                    await refresh();
+                  }}>メモ</button>
                   <button style={{ marginLeft: 'auto', color: 'crimson' }} onClick={async ()=>{
                     if (!confirm(`コンテナ「${c.name}」を削除しますか？この操作は元に戻せません。`)) return;
                     await window.containersAPI.delete({ id: c.id });

@@ -14,6 +14,7 @@ export function initDB() {
   CREATE TABLE IF NOT EXISTS containers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    note TEXT,
     userDataDir TEXT NOT NULL,
     partition TEXT NOT NULL,
     userAgent TEXT,
@@ -73,12 +74,17 @@ export function initDB() {
   `);
 
   // migrate: add fingerprint column if missing
-  try {
+    try {
     const cols = db.prepare('PRAGMA table_info(containers)').all() as any[];
     const hasFingerprint = cols.some(c => c.name === 'fingerprint');
     if (!hasFingerprint) {
       db.prepare('ALTER TABLE containers ADD COLUMN fingerprint TEXT').run();
     }
+      // migrate: add note column if missing
+      const hasNote = cols.some(c => c.name === 'note');
+      if (!hasNote) {
+        try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
+      }
     // migrate: ensure bookmarks have sortOrder column
     try {
       const bcols = db.prepare("PRAGMA table_info(bookmarks)").all() as any[];
@@ -109,6 +115,7 @@ export const DB = {
       VALUES (@id,@name,@userDataDir,@partition,@userAgent,@locale,@timezone,@fingerprint,@proxy,@createdAt,@updatedAt,@lastSessionId)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
+        note=excluded.note,
         userDataDir=excluded.userDataDir,
         partition=excluded.partition,
         userAgent=excluded.userAgent,
@@ -121,6 +128,7 @@ export const DB = {
     `);
     stmt.run({
       ...c,
+      note: (c as any).note ?? null,
       fingerprint: c.fingerprint ? JSON.stringify(c.fingerprint) : null,
       proxy: c.proxy ? JSON.stringify(c.proxy) : null,
     });
@@ -129,6 +137,7 @@ export const DB = {
     const rows = db.prepare('SELECT * FROM containers ORDER BY createdAt DESC').all();
     return rows.map((r:any)=> ({
       ...r,
+      note: r.note ?? undefined,
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
     }));
@@ -138,6 +147,7 @@ export const DB = {
     if (!r) return undefined;
     return {
       ...r,
+      note: r.note ?? undefined,
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
     } as Container;

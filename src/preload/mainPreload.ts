@@ -3,6 +3,7 @@ import logger from '../shared/logger';
 
 contextBridge.exposeInMainWorld('containersAPI', {
   list: () => ipcRenderer.invoke('containers.list'),
+  setNote: (payload: { id: string; note: string | null }) => ipcRenderer.invoke('containers.setNote', payload),
   create: (payload: any) => ipcRenderer.invoke('containers.create', payload),
   open: (payload: any) => ipcRenderer.invoke('containers.open', payload),
   openByName: (payload: any) => ipcRenderer.invoke('containers.openByName', payload),

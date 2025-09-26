@@ -30,6 +30,7 @@ export type Fingerprint = {
 export type Container = {
   id: string;
   name: string;
+  note?: string;
   userDataDir: string;      // プロファイル保存先
   partition: string;        // 'persist:container-<id>'
   userAgent?: string;
