@@ -147,17 +147,19 @@ $latestContent = [regex]::Replace(
 
 # Ensure a stable (non-versioned) Web-Setup filename is available on the CDN so a fixed URL
 # like /nsis-web/ContainerBrowser-Web-Setup.exe always points to the latest installer.
+# ENFORCEMENT: upload the fixed-name installer under nsis-web/ (never to S3 root). This avoids
+# clients accidentally downloading versioned EXE from root and keeps .nsis.7z at S3 root.
 try {
   $webSetup = Get-ChildItem -LiteralPath $nsisDir -Filter '*Web-Setup*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($webSetup) {
     $fixedWebName = 'ContainerBrowser-Web-Setup.exe'
-    Write-Host ("DEBUG: Found web setup: {0} -> copying as fixed name: {1}" -f $webSetup.Name, $fixedWebName)
-    # Upload the fixed-name copy to S3 root (consistent root placement)
-    aws s3 cp (Join-Path $nsisDir $webSetup.Name) ("s3://$Bucket/" + $fixedWebName) --no-progress --content-type 'application/x-msdownload' | Out-Null
+    Write-Host ("DEBUG: Found web setup: {0} -> copying as fixed name into nsis-web/: {1}" -f $webSetup.Name, $fixedWebName)
+    # Upload the fixed-name copy to nsis-web/ (do NOT place it at bucket root)
+    aws s3 cp (Join-Path $nsisDir $webSetup.Name) ("s3://$Bucket/nsis-web/" + $fixedWebName) --no-progress --content-type 'application/x-msdownload' | Out-Null
 
-    # Also update latestContent so the manifest's url points to the fixed CDN URL at root
-    $fixedUrl = ($Cdn.TrimEnd('/') + '/' + $fixedWebName)
-    # Replace the first '- url:' entry with the fixed absolute URL
+    # Update latestContent so the manifest's url points to the fixed CDN URL under nsis-web
+    $fixedUrl = ($Cdn.TrimEnd('/') + '/nsis-web/' + $fixedWebName)
+    # Replace the first '- url:' entry with the fixed absolute URL (installer location)
     $latestContent = [regex]::Replace($latestContent, '(^\s*-\s*url:\s*).*', '${1}' + $fixedUrl, 'Singleline')
   } else {
     Write-Host 'DEBUG: web setup exe not found in nsisDir; skipping fixed-name copy.'
@@ -170,12 +172,28 @@ try {
 [IO.File]::WriteAllText($modifiedLatest, $latestContent, [Text.UTF8Encoding]::new($false))
 # Upload latest.yml with no-cache to encourage CDN refresh
 aws s3 cp $modifiedLatest ('s3://' + $Bucket + '/latest.yml') --no-progress --content-type 'text/yaml' --cache-control 'no-cache, max-age=0' | Out-Null
-# Upload each artifact file to the S3 root explicitly (avoid preserving local directory name)
+# Validate uploaded latest.yml does not contain direct s3 links; fail early if it does
+try {
+  pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'validate_latest_no_s3.ps1') -Cdn $Cdn | Out-Null
+} catch {
+  Write-Host 'WARNING: validate_latest_no_s3 failed; uploaded latest.yml may contain s3 references.'
+}
+# Upload artifacts with enforced placement:
+# - .nsis.7z -> S3 root (so clients can range GET from CDN root)
+# - .exe -> nsis-web/ (no versioned exe in root)
 Get-ChildItem -LiteralPath $nsisDir -File | Where-Object { $_.Name -ne 'latest.yml' } | ForEach-Object {
   $local = $_.FullName
   $key = $_.Name
-  Write-Host ("Uploading {0} -> s3://{1}/{2}" -f $local, $Bucket, $key)
-  aws s3 cp $local ("s3://$Bucket/" + $key) --no-progress --content-type 'application/octet-stream' --cache-control 'public,max-age=300' | Out-Null
+  if ($key -match '\.nsis\.7z$') {
+    Write-Host ("Uploading package {0} -> s3://{1}/{2}" -f $local, $Bucket, $key)
+    aws s3 cp $local ("s3://$Bucket/" + $key) --no-progress --content-type 'application/octet-stream' --cache-control 'public,max-age=300' | Out-Null
+  } elseif ($key -match '\.exe$') {
+    Write-Host ("Uploading installer {0} -> s3://{1}/nsis-web/{2}" -f $local, $Bucket, $key)
+    aws s3 cp $local ("s3://$Bucket/nsis-web/" + $key) --no-progress --content-type 'application/x-msdownload' --cache-control 'public,max-age=300' | Out-Null
+  } else {
+    Write-Host ("Uploading other artifact {0} -> s3://{1}/{2}" -f $local, $Bucket, $key)
+    aws s3 cp $local ("s3://$Bucket/" + $key) --no-progress --content-type 'application/octet-stream' --cache-control 'public,max-age=300' | Out-Null
+  }
 }
 
 # 4) CloudFront invalidation
