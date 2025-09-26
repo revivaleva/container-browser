@@ -257,11 +257,19 @@ ipcMain.handle('containers.list', () => {
 });
 ipcMain.handle('containers.setNote', (_e, { id, note }) => {
   try {
+    console.log('[ipc] containers.setNote called', { id, note });
     const cur = DB.getContainer(id);
-    if (!cur) throw new Error('container not found');
+    if (!cur) {
+      console.log('[ipc] containers.setNote: container not found', id);
+      throw new Error('container not found');
+    }
     DB.upsertContainer({ ...cur, note });
+    console.log('[ipc] containers.setNote: success', { id });
     return { ok: true };
-  } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+  } catch (e:any) {
+    console.error('[ipc] containers.setNote error', e?.message || String(e));
+    return { ok: false, error: e?.message || String(e) };
+  }
 });
 
 // Receive logs from renderer for easier debugging in terminal
