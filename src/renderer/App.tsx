@@ -102,6 +102,33 @@ export default function App() {
     setAutoSaveForms(!!pref?.autoSaveForms);
   }
 
+  // Save current modal settings (used by top/bottom save buttons)
+  async function saveCurrentSettings() {
+    if (!openSettingsId) return;
+    const id = openSettingsId;
+    const proxy = modalProxyServer ? { server: modalProxyServer, username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
+    const fingerprint: any = {
+      locale: modalLocale,
+      acceptLanguage: modalAcceptLang,
+      timezone: modalTimezone,
+      hardwareConcurrency: fpCores,
+      deviceMemory: fpRam,
+      viewportWidth: fpViewportW,
+      viewportHeight: fpViewportH,
+      colorDepth: fpColorDepth,
+      maxTouchPoints: fpMaxTouch,
+      connectionType: fpConn,
+      cookieEnabled: fpCookie,
+      webglVendor: fpWebglVendor || undefined,
+      webglRenderer: fpWebglRenderer || undefined,
+    };
+    if (!proxy) fingerprint.fakeIp = fpFakeIp;
+    await window.containersAPI.update({ id, name: modalContainerName, fingerprint }, proxy ? { proxy } : undefined as any);
+    await (window as any).containersAPI.setNote({ id, note: modalNote === '' ? null : modalNote });
+    await refresh();
+    setOpenSettingsId(null);
+  }
+
   useEffect(() => { refresh(); }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
 
@@ -220,7 +247,10 @@ export default function App() {
                 <div style={{ marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <strong>設定（{c.name}）</strong>
-                    <button onClick={()=> setOpenSettingsId(null)}>閉じる</button>
+                    <div>
+                      <button style={{ marginRight: 8 }} onClick={saveCurrentSettings}>保存</button>
+                      <button onClick={()=> setOpenSettingsId(null)}>閉じる</button>
+                    </div>
                   </div>
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr', gap:8, marginTop:8 }}>
                     <label>コンテナ名</label>
