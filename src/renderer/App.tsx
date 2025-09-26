@@ -225,6 +225,8 @@ export default function App() {
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr', gap:8, marginTop:8 }}>
                     <label>コンテナ名</label>
                     <input value={modalContainerName} onChange={e=>setModalContainerName(e.target.value)} />
+                    <label>メモ</label>
+                    <textarea value={modalNote} onChange={e=>setModalNote(e.target.value)} style={{ width: '100%', minHeight: 80 }} />
                     <label>ロケール</label>
                     <input value={modalLocale} onChange={e=>setModalLocale(e.target.value)} />
                     <label>Accept-Language</label>
@@ -278,8 +280,7 @@ export default function App() {
                     <input value={modalProxyUsername} onChange={e=>setModalProxyUsername(e.target.value)} />
                     <label>プロキシ パスワード</label>
                     <input value={modalProxyPassword} onChange={e=>setModalProxyPassword(e.target.value)} type="password" />
-                    <label>メモ</label>
-                    <textarea value={modalNote} onChange={e=>setModalNote(e.target.value)} style={{ width: '100%', minHeight: 80 }} />
+                    
                   </div>
                   <div style={{ marginTop:10, display:'flex', gap:8 }}>
                     <button onClick={async ()=>{
