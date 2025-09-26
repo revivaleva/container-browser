@@ -96,16 +96,55 @@ async function createMainWindow() {
     } catch (e) {
       logger.error('[main] tray creation error', e);
     }
+    // Interactive check function: shows message box whether update exists or not
+    async function checkForUpdatesInteractive() {
+      try {
+        const current = app.getVersion();
+        const res = await autoUpdater.checkForUpdates();
+        const remote = (res && (res as any).updateInfo && (res as any).updateInfo.version) ? (res as any).updateInfo.version : null;
+        if (remote && remote !== current) {
+          try { await dialog.showMessageBox({ message: `更新があります: ${remote}。ダウンロードを開始します。` }); } catch {}
+        } else {
+          try { await dialog.showMessageBox({ message: `既に最新バージョンです（${current}）。` }); } catch {}
+        }
+        return res;
+      } catch (e:any) {
+        logger.error('[update] interactive check failed', e);
+        try { await dialog.showMessageBox({ type: 'error', message: `更新確認に失敗しました: ${e?.message || String(e)}` }); } catch {}
+      }
+    }
+
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show', click: () => { try { mainWindow?.show(); } catch {} } },
       { type: 'separator' },
-      { label: 'Check for updates', click: () => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[tray] checkForUpdates error', e); } } },
+      { label: 'Check for updates', click: () => { try { checkForUpdatesInteractive().catch((e) => logger.error('[tray] checkForUpdatesInteractive error', e)); } catch (e) { logger.error('[tray] checkForUpdates error', e); } } },
       { label: 'Show version', click: () => { try { dialog.showMessageBox({ message: `Version: ${app.getVersion()}` }); } catch(e) { logger.error('[tray] showVersion error', e); } } },
       { type: 'separator' },
       { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
     ]);
     try { tray.setToolTip('Container Browser'); tray.setContextMenu(contextMenu); tray.on('double-click', () => { try { mainWindow?.show(); } catch {} }); } catch (e) { logger.error('[main] tray setup error', e); }
   } catch (e) { logger.error('[main] failed to create tray', e); }
+
+  // Ensure application menu contains File->Exit that fully quits the app
+  try {
+    const appMenuTemplate = [
+      {
+        label: 'File',
+        submenu: [
+          { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
+        ]
+      },
+      {
+        label: 'Help',
+        submenu: [
+          { label: 'Check for updates', click: () => { try { checkForUpdatesInteractive().catch((e) => logger.error('[menu] checkForUpdatesInteractive error', e)); } catch (e) { logger.error('[menu] checkForUpdates error', e); } } },
+          { label: 'Show version', click: () => { try { dialog.showMessageBox({ message: `Version: ${app.getVersion()}` }); } catch (e) { logger.error('[menu] showVersion error', e); } } }
+        ]
+      }
+    ];
+    const appMenu = Menu.buildFromTemplate(appMenuTemplate as any);
+    Menu.setApplicationMenu(appMenu);
+  } catch (e) { logger.error('[main] failed to set application menu', e); }
 
 // IPC handlers for app actions exposed to renderer via preload
 ipcMain.handle('app.getVersion', () => {
