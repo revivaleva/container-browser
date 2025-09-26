@@ -200,7 +200,7 @@ export default function App() {
           {list.map((c:any)=> (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div style={{ minWidth: 160 }}>
+                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyServer(c.proxy?.server ?? ''); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
                   <label><strong>{c.name}</strong></label>
                   <div style={{ color:'#666', fontSize:12 }}>{c.note ?? ''}</div>
                 </div>
