@@ -35,6 +35,7 @@ export default function App() {
   const [modalProxyServer, setModalProxyServer] = useState<string>('');
   const [modalProxyUsername, setModalProxyUsername] = useState<string>('');
   const [modalProxyPassword, setModalProxyPassword] = useState<string>('');
+  const [modalNote, setModalNote] = useState<string>('');
   const [fpLocale, setFpLocale] = useState('ja-JP');
   const [fpAcceptLang, setFpAcceptLang] = useState('ja,en-US;q=0.8,en;q=0.7');
   const [fpTimezone, setFpTimezone] = useState('Asia/Tokyo');
@@ -192,17 +193,8 @@ export default function App() {
                     setModalProxyServer(c.proxy?.server ?? '');
                     setModalProxyUsername(c.proxy?.username ?? '');
                     setModalProxyPassword(c.proxy?.password ?? '');
+                    setModalNote(c.note ?? '');
                   }}>設定</button>
-
-                  {/* Note edit inline */}
-                  <button onClick={async ()=>{
-                    const newNote = prompt('メモを入力してください（空で削除）', c.note ?? '');
-                    if (newNote === null) return; // cancel
-                    const payload = { id: c.id, note: newNote === '' ? null : newNote };
-                    const res = await (window as any).containersAPI.setNote(payload);
-                    if (!res?.ok) return alert('メモの保存に失敗しました: ' + (res?.error || ''));
-                    await refresh();
-                  }}>メモ</button>
                   <button style={{ marginLeft: 'auto', color: 'crimson' }} onClick={async ()=>{
                     if (!confirm(`コンテナ「${c.name}」を削除しますか？この操作は元に戻せません。`)) return;
                     await window.containersAPI.delete({ id: c.id });
@@ -274,6 +266,8 @@ export default function App() {
                     <input value={modalProxyUsername} onChange={e=>setModalProxyUsername(e.target.value)} />
                     <label>プロキシ パスワード</label>
                     <input value={modalProxyPassword} onChange={e=>setModalProxyPassword(e.target.value)} type="password" />
+                    <label>メモ</label>
+                    <textarea value={modalNote} onChange={e=>setModalNote(e.target.value)} style={{ width: '100%', minHeight: 80 }} />
                   </div>
                   <div style={{ marginTop:10, display:'flex', gap:8 }}>
                     <button onClick={async ()=>{
@@ -296,6 +290,8 @@ export default function App() {
                       };
                       if (!proxy) fingerprint.fakeIp = fpFakeIp;
                       await window.containersAPI.update({ id: c.id, name: modalContainerName, fingerprint }, proxy ? { proxy } : undefined as any);
+                      // save note separately to ensure DB column is updated via dedicated IPC
+                      await (window as any).containersAPI.setNote({ id: c.id, note: modalNote === '' ? null : modalNote });
                       // reflect url state (in-memory)
                       await refresh();
                       setOpenSettingsId(null);
