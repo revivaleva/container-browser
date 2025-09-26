@@ -177,6 +177,13 @@ document.addEventListener('DOMContentLoaded', () => {
           await (window as any).tabsAPI.switchTab({ containerId, index: idx });
           // update currentTabs active index locally so bookmark handlers target correct tab
           (window as any).__activeIndex = idx;
+          // update DOM active class immediately for snappy UI
+          try {
+            const allBtns = tabsBar.querySelectorAll('.tab-btn');
+            allBtns.forEach((b:any, i:number) => {
+              if (i === idx) b.classList.add('tab-active'); else b.classList.remove('tab-active');
+            });
+          } catch (e) { console.error('[shell] update active class error', e); }
         } catch (e) { console.error('[shell] tab click error', e); }
       });
       // close button
