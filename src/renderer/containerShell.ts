@@ -1,3 +1,4 @@
+export {};
 declare global {
   interface Window {
     containerShellAPI: {
@@ -66,52 +67,53 @@ document.addEventListener('DOMContentLoaded', () => {
         try { bms = await bmApi.list(); } catch (e) { console.error('[shell] bookmarksAPI.list error', e); }
       }
       const bmRow = document.getElementById('bookmark-row');
-      const bm1 = document.getElementById('bm-1');
-      const bm2 = document.getElementById('bm-2');
       // filter to global bookmarks (no containerId) with valid URL
-      const globals = (bms || []).filter((b:any) => (!b.containerId || b.containerId === '') && b.url).slice(0, 2);
+      const globals = (bms || []).filter((b:any) => (!b.containerId || b.containerId === '') && b.url);
       if (!globals || globals.length === 0) {
         if (bmRow) bmRow.style.display = 'none';
         return;
       }
-      if (bmRow) bmRow.style.display = 'flex';
-      if (bm1) {
-        const first = globals[0];
-        bm1.textContent = first && first.title ? first.title : (first && first.url ? first.url : 'Bookmark');
-        bm1.onclick = async () => {
+      if (bmRow) {
+        bmRow.style.display = 'flex';
+        // clear existing buttons
+        bmRow.innerHTML = '';
+        // create a button for each global bookmark (no fixed limit)
+        globals.forEach((bk:any, i:number) => {
           try {
-            if (!containerId) return;
-            const url = first && first.url ? first.url : undefined;
-            if (!url) return;
-            if (!currentTabs || currentTabs.length === 0) {
-              await (window as any).tabsAPI.createTab({ containerId, url });
-            } else {
-              // Navigate the currently active tab (do not change active tab index)
-              await (window as any).containerShellAPI.navigate({ containerId, url });
-            }
-          } catch (e) { console.error(e); }
-        };
-      }
-      if (bm2) {
-        const second = globals[1];
-        if (!second) { bm2.style.display = 'none'; }
-        else {
-          bm2.style.display = '';
-          bm2.textContent = second && second.title ? second.title : second.url;
-          bm2.onclick = async () => {
-            try {
-              if (!containerId) return;
-              const url = second && second.url ? second.url : undefined;
-              if (!url) return;
-              if (!currentTabs || currentTabs.length === 0) {
-                await (window as any).tabsAPI.createTab({ containerId, url });
-              } else {
-                // Navigate the currently active tab (do not change active tab index)
-                await (window as any).containerShellAPI.navigate({ containerId, url });
-              }
-            } catch (e) { console.error(e); }
-          };
-        }
+            const btn = document.createElement('button');
+            btn.className = 'bookmark-btn';
+            btn.style.padding = '6px 10px';
+            btn.style.borderRadius = '6px';
+            btn.style.border = '1px solid #d6a500';
+            btn.style.background = '#fff8e1';
+            btn.textContent = bk && bk.title ? bk.title : (bk && bk.url ? bk.url : 'Bookmark');
+            btn.onclick = async () => {
+              try {
+                if (!containerId) return;
+                const url = bk && bk.url ? bk.url : undefined;
+                if (!url) return;
+                if (!currentTabs || currentTabs.length === 0) {
+                  await (window as any).tabsAPI.createTab({ containerId, url });
+                } else {
+                  // Ensure main process activeIndex matches renderer before navigating
+                  const idx = (window as any).__activeIndex ?? 0;
+                  try { await (window as any).tabsAPI.switchTab({ containerId, index: idx }); } catch (e) { /* ignore */ }
+                  (window as any).__activeIndex = idx;
+                  lastLocalActiveSet = Date.now();
+                  // Update DOM active class for snappy UI
+                  try {
+                    const allBtns = document.querySelectorAll('#tabs .tab-btn');
+                    allBtns.forEach((b:any, i:number) => {
+                      if (i === idx) b.classList.add('tab-active'); else b.classList.remove('tab-active');
+                    });
+                  } catch (e) { /* ignore */ }
+                  await (window as any).containerShellAPI.navigate({ containerId, url });
+                }
+              } catch (e) { console.error(e); }
+            };
+            bmRow.appendChild(btn);
+          } catch (e) { console.error('[shell] create bookmark btn error', e); }
+        });
       }
     } catch (e) { console.error('[shell] setupBookmarks error', e); }
   }
@@ -139,18 +141,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // render tabs exactly as reported by main; do not invent dummies here
     const effectiveTabs = (tabs && tabs.length > 0) ? tabs.slice() : [];
     currentTabs = effectiveTabs;
-    // Ensure at least two tabs are shown in the UI even if main reports fewer
+    // Ensure at least three tabs are shown in the UI even if main reports fewer
     if (effectiveTabs.length === 0) {
+      effectiveTabs.push({ url: 'about:blank', title: '' });
       effectiveTabs.push({ url: 'about:blank', title: '' });
       effectiveTabs.push({ url: 'about:blank', title: '' });
     } else if (effectiveTabs.length === 1) {
       effectiveTabs.push({ url: 'about:blank', title: '' });
-    }
-    // Ensure at least two tabs are shown in the UI even if main reports fewer
-    if (effectiveTabs.length === 0) {
       effectiveTabs.push({ url: 'about:blank', title: '' });
-      effectiveTabs.push({ url: 'about:blank', title: '' });
-    } else if (effectiveTabs.length === 1) {
+    } else if (effectiveTabs.length === 2) {
+      // If only two reported, add a blank third slot
       effectiveTabs.push({ url: 'about:blank', title: '' });
     }
     effectiveTabs.forEach((t:any, idx:number)=>{
@@ -235,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // update url input when main process sends context updates including current URL and tabs
-  window.containerShellAPI.onContext((ctx) => {
+  window.containerShellAPI.onContext((ctx: any) => {
     containerId = ctx?.containerId;
     try {
       const cur = ctx?.currentUrl;
