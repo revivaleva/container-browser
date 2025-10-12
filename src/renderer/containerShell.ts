@@ -129,10 +129,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // tab bar: use the static #tabs element declared in HTML
   const tabsBar = document.getElementById('tabs') as HTMLElement;
 
-  // F12 -> toggle DevTools via preload API
+  // F12/F11 -> toggle DevTools via preload API
   document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'F12') {
-      try { (window as any).devtoolsAPI.toggle(); } catch (e) { console.error('devtools toggle error', e); }
+    if (ev.key === 'F12' || ev.key === 'F11') {
+      try {
+        // Prefer toggling the focused view's DevTools when available
+        try { (window as any).devtoolsAPI.toggleView(); } catch (e) { /* fallback below */ }
+        try { (window as any).devtoolsAPI.toggle(); } catch (e) { /* ignore */ }
+      } catch (e) { console.error('devtools toggle error', e); }
     }
   });
 
@@ -156,7 +160,9 @@ document.addEventListener('DOMContentLoaded', () => {
     effectiveTabs.forEach((t:any, idx:number)=>{
       const wrap = document.createElement('div'); wrap.className = 'tab-wrap';
       const btn = document.createElement('button'); btn.className = 'tab-btn';
-      const label = (t.title && t.title.length > 0) ? t.title : (t.url || 'tab');
+      // Prefer tab title, fall back to container name + index when no title/url present
+      const containerName = (window as any).__containerName ?? '';
+      const label = (t.title && t.title.length > 0) ? t.title : (t.url || ((containerName ? (containerName + ' ') : '') + 'Tab ' + (idx+1)));
       const span = document.createElement('span');
       span.textContent = label;
       span.style.display = 'inline-block';
@@ -173,7 +179,14 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           console.log('[shell] tab click idx=', idx, 'containerId=', containerId);
           try { (document.getElementById('url') as HTMLInputElement).value = t.url || ''; } catch {}
-          await (window as any).tabsAPI.switchTab({ containerId, index: idx });
+          try {
+            const tabsAPI = (window as any).tabsAPI;
+            if (!tabsAPI || typeof tabsAPI.switchTab !== 'function') {
+              console.error('[shell] tabsAPI.switchTab not available');
+            } else {
+              await tabsAPI.switchTab({ containerId, index: idx });
+            }
+          } catch (e) { console.error('[shell] switchTab error', e); }
           // update currentTabs active index locally so bookmark handlers target correct tab
           (window as any).__activeIndex = idx;
           lastLocalActiveSet = Date.now();
@@ -237,6 +250,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // update url input when main process sends context updates including current URL and tabs
   window.containerShellAPI.onContext((ctx: any) => {
     containerId = ctx?.containerId;
+    // containerName available from main
+    try { (window as any).__containerName = ctx?.containerName ?? ((window as any).__containerName ?? ''); } catch {}
     try {
       const cur = ctx?.currentUrl;
       if (cur) {

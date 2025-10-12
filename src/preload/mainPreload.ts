@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('containersAPI', {
   saveCredential: (payload: any) => ipcRenderer.invoke('vault.saveCredential', payload)
 });
 
+// (containerShellAPI is defined below together with tabsAPI; do not duplicate exposeInMainWorld)
+
 contextBridge.exposeInMainWorld('proxyAPI', {
   test: (payload: any) => ipcRenderer.invoke('proxy.test', payload),
 });
@@ -54,7 +56,8 @@ ipcRenderer.on('forward-log', (_e, msg) => {
 
 // DevTools control for renderer: toggle DevTools when requested (e.g. F12)
 contextBridge.exposeInMainWorld('devtoolsAPI', {
-  toggle: () => ipcRenderer.invoke('devtools.toggle')
+  toggle: () => ipcRenderer.invoke('devtools.toggle'),
+  toggleView: () => ipcRenderer.invoke('devtools.toggleView')
 });
 
 contextBridge.exposeInMainWorld('appAPI', {
