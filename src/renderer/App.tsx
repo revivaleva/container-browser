@@ -35,6 +35,7 @@ export default function App() {
   const [modalProxyServer, setModalProxyServer] = useState<string>('');
   const [modalProxyUsername, setModalProxyUsername] = useState<string>('');
   const [modalProxyPassword, setModalProxyPassword] = useState<string>('');
+  const [modalProxyType, setModalProxyType] = useState<'http' | 'socks5'>('http');
   const [modalNote, setModalNote] = useState<string>('');
   const [fpLocale, setFpLocale] = useState('ja-JP');
   const [fpAcceptLang, setFpAcceptLang] = useState('ja,en-US;q=0.8,en;q=0.7');
@@ -102,11 +103,65 @@ export default function App() {
     setAutoSaveForms(!!pref?.autoSaveForms);
   }
 
+  // helper: normalize proxy input according to selected type
+  function normalizeProxyString(type: 'http' | 'socks5', server: string) {
+    if (!server) return '';
+    const s = server.trim();
+    if (type === 'socks5') {
+      if (/^socks5:\/\//i.test(s)) return s;
+      return `socks5://${s.replace(/^socks5:\/\//i, '')}`;
+    }
+    // http type: if user provided rule-like string, keep as-is
+    if (s.includes('=') || /^http(s)?:\/\//i.test(s)) return s;
+    return `http=${s};https=${s}`;
+  }
+
+  function detectProxyType(server: string) {
+    if (!server) return 'http';
+    if (/^socks5:\/\//i.test(server) || /^socks5=/i.test(server)) return 'socks5';
+    return 'http';
+  }
+
+  function extractHostPort(server: string) {
+    if (!server) return '';
+    let s = server.trim();
+
+    // If input contains key=value pairs like "http=host:port;https=host:port",
+    // parse them robustly (handles spaces and different separators).
+    if (s.includes('=')) {
+      const pairs = s.split(/[;,]+/).map(p => p.trim()).filter(Boolean);
+      // prefer https then http then socks5
+      const prefer = ['https', 'http', 'socks5'];
+      for (const key of prefer) {
+        for (const p of pairs) {
+          const m = p.match(new RegExp('^\s*' + key + '\s*=\s*(.+)$', 'i'));
+          if (m && m[1]) return m[1].trim();
+        }
+      }
+      // fallback: take the RHS of the first pair
+      const first = pairs[0].split('=')[1];
+      if (first) return first.trim();
+    }
+
+    // remove common URI schemes
+    s = s.replace(/^socks5:\/\//i, '');
+    s = s.replace(/^http:\/\//i, '');
+    s = s.replace(/^https:\/\//i, '');
+
+    // if still contains an equals sign like 'socks5=host:port', handle it
+    if (s.includes('=')) {
+      const parts = s.split('=');
+      return (parts[1] || parts[0] || '').trim();
+    }
+
+    return s;
+  }
+
   // Save current modal settings (used by top/bottom save buttons)
   async function saveCurrentSettings() {
     if (!openSettingsId) return;
     const id = openSettingsId;
-    const proxy = modalProxyServer ? { server: modalProxyServer, username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
+    const proxy = modalProxyServer ? { server: normalizeProxyString(modalProxyType, modalProxyServer), username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
     const fingerprint: any = {
       locale: modalLocale,
       acceptLanguage: modalAcceptLang,
@@ -123,7 +178,8 @@ export default function App() {
       webglRenderer: fpWebglRenderer || undefined,
     };
     if (!proxy) fingerprint.fakeIp = fpFakeIp;
-    await window.containersAPI.update({ id, name: modalContainerName, fingerprint }, proxy ? { proxy } : undefined as any);
+    const payload = proxy ? { id, name: modalContainerName, fingerprint, proxy } : { id, name: modalContainerName, fingerprint };
+    await window.containersAPI.update(payload);
     await (window as any).containersAPI.setNote({ id, note: modalNote === '' ? null : modalNote });
     await refresh();
     setOpenSettingsId(null);
@@ -200,7 +256,7 @@ export default function App() {
           {list.map((c:any)=> (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyServer(c.proxy?.server ?? ''); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
+                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ const raw = c.proxy?.server ?? ''; setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyType(detectProxyType(raw)); setModalProxyServer(extractHostPort(raw)); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
                   <label><strong>{c.name}</strong></label>
                   <div style={{ color:'#666', fontSize:12 }}>{c.note ?? ''}</div>
                 </div>
@@ -212,7 +268,8 @@ export default function App() {
                     await window.containersAPI.open({ id: c.id, url: urlToOpen });
                   }}>開く</button>
                   <button title="前回の状態で開きます" onClick={()=> window.containersAPI.open({ id: c.id })}>復元</button>
-                  <button style={{ marginLeft: 8 }} onClick={()=>{
+                    <button style={{ marginLeft: 8 }} onClick={()=>{
+                    const raw = c.proxy?.server ?? '';
                     setOpenSettingsId(c.id);
                     setModalContainerName(c.name || '');
                     setModalLocale(c.fingerprint?.locale ?? 'ja-JP');
@@ -229,7 +286,8 @@ export default function App() {
                     setFpWebglVendor(c.fingerprint?.webglVendor ?? '');
                     setFpWebglRenderer(c.fingerprint?.webglRenderer ?? '');
                     setFpFakeIp(!!c.fingerprint?.fakeIp);
-                    setModalProxyServer(c.proxy?.server ?? '');
+                    setModalProxyType(detectProxyType(raw));
+                    setModalProxyServer(extractHostPort(raw));
                     setModalProxyUsername(c.proxy?.username ?? '');
                     setModalProxyPassword(c.proxy?.password ?? '');
                     setModalNote(c.note ?? '');
@@ -299,11 +357,18 @@ export default function App() {
                     <label>プロキシ接続テスト</label>
                     <div style={{ display:'flex', gap:8 }}>
                       <button onClick={async ()=>{
-                        const proxy = { server: modalProxyServer };
+                        const proxy = { server: normalizeProxyString(modalProxyType, modalProxyServer) };
+                        console.log('[renderer] proxy.test ->', proxy);
                         const res = await (window as any).proxyAPI.test({ proxy });
-                        alert(res.ok ? '接続成功' : `接続失敗: ${res.error}`);
+                        console.log('[renderer] proxy.test result ->', res);
+                        alert(res.ok ? '接続成功' : `接続失敗: ${res.errorCode ?? res.error}`);
                       }}>テスト</button>
                     </div>
+                    <label>プロキシ種類</label>
+                    <select value={modalProxyType} onChange={e=> setModalProxyType(e.target.value as any)}>
+                      <option value="http">HTTP</option>
+                      <option value="socks5">SOCKS5</option>
+                    </select>
                     <label>プロキシサーバー</label>
                     <input value={modalProxyServer} onChange={e=>setModalProxyServer(e.target.value)} placeholder="host:port" />
                     <label>プロキシ ユーザー名</label>
@@ -315,7 +380,7 @@ export default function App() {
                   <div style={{ marginTop:10, display:'flex', gap:8 }}>
                     <button onClick={async ()=>{
                       // save fingerprint and close
-                      const proxy = modalProxyServer ? { server: modalProxyServer, username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
+                      const proxy = modalProxyServer ? { server: normalizeProxyString(modalProxyType, modalProxyServer), username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
                       const fingerprint: any = {
                         locale: modalLocale,
                         acceptLanguage: modalAcceptLang,
@@ -332,7 +397,8 @@ export default function App() {
                         webglRenderer: fpWebglRenderer || undefined,
                       };
                       if (!proxy) fingerprint.fakeIp = fpFakeIp;
-                      await window.containersAPI.update({ id: c.id, name: modalContainerName, fingerprint }, proxy ? { proxy } : undefined as any);
+                      const payload2 = proxy ? { id: c.id, name: modalContainerName, fingerprint, proxy } : { id: c.id, name: modalContainerName, fingerprint };
+                      await window.containersAPI.update(payload2);
                       // save note separately to ensure DB column is updated via dedicated IPC
                       await (window as any).containersAPI.setNote({ id: c.id, note: modalNote === '' ? null : modalNote });
                       // reflect url state (in-memory)
