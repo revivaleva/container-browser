@@ -47,6 +47,9 @@
         ]
       }
     ],
+    "nsis": {
+      "include": "build/installer.nsh"
+    },
     "win": {
       "artifactName": "Container-Browser-Web-Setup-${version}.${ext}",
       "target": [
