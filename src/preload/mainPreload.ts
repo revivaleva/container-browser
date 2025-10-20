@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('appAPI', {
   checkForUpdates: () => ipcRenderer.invoke('app.checkForUpdates'),
   exit: () => ipcRenderer.invoke('app.exit'),
   saveToken: (token: string) => ipcRenderer.invoke('auth.saveToken', { token }),
+  getToken: () => ipcRenderer.invoke('auth.getToken'),
   clearToken: () => ipcRenderer.invoke('auth.clearToken')
 });
 

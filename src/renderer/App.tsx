@@ -208,6 +208,16 @@ export default function App() {
         setAppVersion(v || '');
       } catch (e) { /* ignore */ }
     })();
+    // load saved token if any
+    (async () => {
+      try {
+        const saved = await (window as any).appAPI.getToken();
+        if (saved && saved.token) {
+          // optionally trigger auto-check with token present or store in state
+          console.log('[app] loaded saved token (length):', saved.token.length);
+        }
+      } catch (e) { }
+    })();
   }, []);
 
   return (
@@ -363,6 +373,20 @@ export default function App() {
                         console.log('[renderer] proxy.test result ->', res);
                         alert(res.ok ? '接続成功' : `接続失敗: ${res.errorCode ?? res.error}`);
                       }}>テスト</button>
+                    </div>
+                    <label>トークン</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input id="tokenInput" placeholder="トークンを入力" style={{ flex:1 }} />
+                      <button onClick={async ()=>{
+                        const t = (document.getElementById('tokenInput') as HTMLInputElement).value.trim();
+                        if(!t) return alert('トークンを入力してください');
+                        const res = await (window as any).appAPI.saveToken(t);
+                        if(res && res.ok) alert('トークンを保存しました'); else alert('保存に失敗しました');
+                      }}>保存</button>
+                      <button onClick={async ()=>{
+                        const res = await (window as any).appAPI.getToken();
+                        alert(res && res.token ? '保存済みトークンあり' : '保存トークンなし');
+                      }}>確認</button>
                     </div>
                     <label>プロキシ種類</label>
                     <select value={modalProxyType} onChange={e=> setModalProxyType(e.target.value as any)}>
