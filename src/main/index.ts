@@ -177,17 +177,62 @@ ipcMain.handle('auth.getDeviceId', async () => {
 
 // Validate token against auth API (uses AUTH_API_BASE env var)
 ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
+  const MAX_RETRIES = 3;
+  const BASE_URL = process.env.AUTH_API_BASE || 'https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod';
+  const timeoutMs = Number(process.env.AUTH_API_TIMEOUT_MS || 5000);
   try {
     const t = token || await getToken();
     if (!t) return { ok: false, code: 'NO_TOKEN' };
     const deviceId = getOrCreateDeviceId();
-    const base = process.env.AUTH_API_BASE || 'https://api.example.com';
-    const url = base.replace(/\/$/, '') + '/auth/validate';
-    // Use global fetch if available
-    const res = await (global as any).fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: deviceId }) });
-    const j = await res.json().catch(()=>null);
-    if (!res.ok) return { ok: false, status: res.status, body: j };
-    return { ok: true, data: j && j.data ? j.data : j };
+    const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
+
+    // helper to perform fetch with timeout
+    const doFetch = async () => {
+      const ac = new AbortController();
+      const id = setTimeout(() => ac.abort(), timeoutMs);
+      try {
+        const res = await (global as any).fetch(url, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: deviceId, device_info: { name: app.getName(), hostname: app.getName() } }),
+          signal: ac.signal
+        });
+        clearTimeout(id);
+        const j = await res.json().catch(() => null);
+        return { res, j };
+      } catch (err:any) {
+        clearTimeout(id);
+        throw err;
+      }
+    };
+
+    let attempt = 0;
+    while (true) {
+      try {
+        attempt++;
+        const { res, j } = await doFetch();
+        if (!res.ok) {
+          // 4xx -> do not retry
+          if (res.status >= 400 && res.status < 500) {
+            return { ok: false, status: res.status, body: j };
+          }
+          // 5xx -> may retry
+          if (res.status >= 500) throw new Error(`server ${res.status}`);
+        }
+        // success
+        const data = j && j.data ? j.data : j;
+        return { ok: true, data };
+      } catch (err:any) {
+        logger.warn('[auth] validateToken attempt failed', attempt, err?.message || String(err));
+        if (attempt >= MAX_RETRIES) {
+          logger.error('[auth] validateToken: exhausted retries', err);
+          return { ok: false, error: err?.message || String(err) };
+        }
+        // exponential backoff
+        const backoff = 200 * Math.pow(2, attempt - 1);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
   } catch (err:any) {
     logger.error('[auth] validateToken error', err);
     return { ok: false, error: err?.message || String(err) };
