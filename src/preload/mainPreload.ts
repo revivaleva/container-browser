@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld('appAPI', {
 contextBridge.exposeInMainWorld('deviceAPI', {
   getDeviceId: () => ipcRenderer.invoke('auth.getDeviceId')
 });
+// expose validation helper
+contextBridge.exposeInMainWorld('authAPI', {
+  validateToken: (opts?: any) => ipcRenderer.invoke('auth.validateToken', opts || {})
+});
 
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)
 contextBridge.exposeInMainWorld('debugAPI', {

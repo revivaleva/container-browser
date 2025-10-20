@@ -185,6 +185,21 @@ export default function App() {
     setOpenSettingsId(null);
   }
 
+  // Helper: check remaining quota before allowing new container creation
+  async function canCreateContainer(): Promise<boolean> {
+    try {
+      const tokenResp = await (window as any).appAPI.getToken();
+      const validateResp = await (window as any).authAPI.validateToken();
+      if (validateResp && validateResp.ok && validateResp.data && typeof validateResp.data.remaining_quota === 'number') {
+        const remaining = validateResp.data.remaining_quota;
+        // count current containers
+        const current = list.length;
+        return current < remaining;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   useEffect(() => { refresh(); }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
 
@@ -236,7 +251,11 @@ export default function App() {
         <h3>コンテナ作成</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="名前" />
-          <button onClick={async ()=>{ await window.containersAPI.create({ name }); await refresh(); }}>作成</button>
+          <button onClick={async ()=>{ 
+              const ok = await canCreateContainer();
+              if(!ok) return alert('同時作成数が上限に達しています');
+              await window.containersAPI.create({ name }); await refresh();
+            }}>作成</button>
         </div>
       </section>
 
