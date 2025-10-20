@@ -36,9 +36,17 @@ ipcRenderer.on('container.context', (_e, ctx) => {
     try { cb(ctx); } catch {}
   }
 });
+// DevTools change notification listeners
+const __devtoolsListeners = new Set<(payload: any) => void>();
+ipcRenderer.on('container.devtoolsChanged', (_e, payload) => {
+  for (const cb of __devtoolsListeners) {
+    try { cb(payload); } catch {}
+  }
+});
 contextBridge.exposeInMainWorld('containerShellAPI', {
   onContext: (cb: (ctx: any) => void) => { __ctxListeners.add(cb); return () => __ctxListeners.delete(cb); },
   navigate: (payload: { containerId: string; url: string }) => ipcRenderer.invoke('container.navigate', payload),
+  onDevtoolsChange: (cb: (payload: any) => void) => { __devtoolsListeners.add(cb); return () => __devtoolsListeners.delete(cb); }
 });
 contextBridge.exposeInMainWorld('tabsAPI', {
   navigate: (payload: { containerId: string; url: string }) => ipcRenderer.invoke('tabs.navigate', payload),
@@ -63,7 +71,9 @@ contextBridge.exposeInMainWorld('devtoolsAPI', {
 contextBridge.exposeInMainWorld('appAPI', {
   getVersion: () => ipcRenderer.invoke('app.getVersion'),
   checkForUpdates: () => ipcRenderer.invoke('app.checkForUpdates'),
-  exit: () => ipcRenderer.invoke('app.exit')
+  exit: () => ipcRenderer.invoke('app.exit'),
+  saveToken: (token: string) => ipcRenderer.invoke('auth.saveToken', { token }),
+  clearToken: () => ipcRenderer.invoke('auth.clearToken')
 });
 
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)

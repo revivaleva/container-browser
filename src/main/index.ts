@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut } from 'electron';
 import { dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
@@ -10,6 +10,32 @@ import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint } from '../shared/types';
 import logger from '../shared/logger';
+import { saveToken, getToken, clearToken } from './tokenStore';
+
+// Helper: after opening DevTools in detached mode, find the DevTools window and set its title/icon
+function adjustDevtoolsWindowForWebContents(targetWC: Electron.WebContents) {
+  try {
+    setTimeout(() => {
+      try {
+        const devWC = (targetWC as any).getDevToolsWebContents ? (targetWC as any).getDevToolsWebContents() : (targetWC as any).devToolsWebContents;
+        if (!devWC) return;
+        const devWin = BrowserWindow.fromWebContents(devWC as any);
+        const parentWin = BrowserWindow.fromWebContents(targetWC as any);
+        if (devWin) {
+          try {
+            const parentTitle = parentWin ? (parentWin.getTitle && parentWin.getTitle()) || '' : '';
+            if (parentTitle) try { devWin.setTitle(`Dev-${parentTitle}`); } catch {}
+            // set a common icon if available
+            try {
+              const icoPath = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
+              if (existsSync(icoPath)) devWin.setIcon(icoPath as any);
+            } catch {}
+          } catch {}
+        }
+      } catch {}
+    }, 200);
+  } catch {}
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -103,7 +129,7 @@ async function createMainWindow() {
       { type: 'separator' },
       { label: 'Exit', click: () => { isQuitting = true; app.quit(); } }
     ]);
-    try { tray.setToolTip('Container Browser'); tray.setContextMenu(contextMenu); tray.on('double-click', () => { try { mainWindow?.show(); } catch {} }); } catch (e) { logger.error('[main] tray setup error', e); }
+    try { tray?.setToolTip('Container Browser'); tray?.setContextMenu(contextMenu); tray?.on('double-click', () => { try { mainWindow?.show(); } catch {} }); } catch (e) { logger.error('[main] tray setup error', e); }
   } catch (e) { logger.error('[main] failed to create tray', e); }
 
   // Ensure application menu contains File->Exit that fully quits the app
@@ -133,6 +159,16 @@ ipcMain.handle('app.getVersion', () => {
 });
 ipcMain.handle('app.checkForUpdates', async () => {
   try { await autoUpdater.checkForUpdates(); return { ok: true }; } catch (e:any) { logger.error('[ipc] checkForUpdates error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+// Token storage IPC
+ipcMain.handle('auth.saveToken', async (_e, { token }) => {
+  try { const ok = await saveToken(token); return { ok }; } catch (e:any) { logger.error('[auth] saveToken error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+ipcMain.handle('auth.getToken', async () => {
+  try { const t = await getToken(); return { ok: true, token: t }; } catch (e:any) { logger.error('[auth] getToken error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+ipcMain.handle('auth.clearToken', async () => {
+  try { await clearToken(); return { ok: true }; } catch (e:any) { logger.error('[auth] clearToken error', e); return { ok: false, error: e?.message || String(e) }; }
 });
 ipcMain.handle('app.exit', () => {
   try { isQuitting = true; app.quit(); return { ok: true }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
@@ -182,6 +218,36 @@ app.whenReady().then(async () => {
   } catch (e) { console.error('[auto-updater] setup error', e); }
   await createMainWindow();
 
+  // Register F11 global shortcut to toggle DevTools for focused view/window
+  try {
+    globalShortcut.register('F11', () => {
+      try {
+        const focusedWindow = BrowserWindow.getFocusedWindow();
+        const windows = focusedWindow ? [focusedWindow] : BrowserWindow.getAllWindows();
+        for (const w of windows) {
+          try {
+            const getViews = (w as any).getBrowserViews;
+            const views = typeof getViews === 'function' ? (w as any).getBrowserViews() as any[] : [];
+            const targetView = (views || []).find(v => v && v.webContents && typeof v.webContents.isFocused === 'function' && v.webContents.isFocused());
+            if (targetView && targetView.webContents) {
+              if (typeof targetView.webContents.isDevToolsOpened === 'function' && targetView.webContents.isDevToolsOpened()) {
+                targetView.webContents.closeDevTools();
+              } else {
+                targetView.webContents.openDevTools({ mode: 'detach' });
+              }
+              return;
+            }
+          } catch (e) { /* ignore per-window errors */ }
+        }
+        const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+        if (fw && fw.webContents) {
+          if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
+          else fw.webContents.openDevTools({ mode: 'detach' });
+        }
+      } catch (e) { /* swallow */ }
+    });
+  } catch (e) { logger.error('[main] globalShortcut.register F11 error', e); }
+
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createMainWindow();
   });
@@ -208,7 +274,6 @@ app.on('second-instance', (_event, argv) => {
 });
 
 // DevTools toggle handler (used by renderer via preload -> ipc)
-import { ipcMain } from 'electron';
 ipcMain.handle('devtools.toggle', (_e) => {
   try {
     const all = BrowserWindow.getAllWindows();
@@ -220,6 +285,38 @@ ipcMain.handle('devtools.toggle', (_e) => {
       }
     }
     return true;
+  } catch (e) { return false; }
+});
+
+// Toggle DevTools for the focused BrowserView (tab) if any; otherwise fall back to focused window
+ipcMain.handle('devtools.toggleView', (_e) => {
+  try {
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+    const windows = focusedWindow ? [focusedWindow] : BrowserWindow.getAllWindows();
+    for (const w of windows) {
+      try {
+        const getViews = (w as any).getBrowserViews;
+        const views = typeof getViews === 'function' ? (w as any).getBrowserViews() as any[] : [];
+        // Prefer the focused view
+        const targetView = (views || []).find(v => v && v.webContents && typeof v.webContents.isFocused === 'function' && v.webContents.isFocused());
+        if (targetView && targetView.webContents) {
+          if (typeof targetView.webContents.isDevToolsOpened === 'function' && targetView.webContents.isDevToolsOpened()) {
+            targetView.webContents.closeDevTools();
+          } else {
+            targetView.webContents.openDevTools({ mode: 'detach' });
+          }
+          return true;
+        }
+      } catch (e) { /* ignore view-level errors */ }
+    }
+    // fallback: toggle focused window's webContents
+    const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    if (fw && fw.webContents) {
+      if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
+      else fw.webContents.openDevTools({ mode: 'detach' });
+      return true;
+    }
+    return false;
   } catch (e) { return false; }
 });
 
@@ -363,6 +460,7 @@ ipcMain.handle('containers.delete', async (_e, { id }) => {
 });
 
 ipcMain.handle('containers.update', async (_e, payload: Partial<Container> & { id: string }) => {
+  console.log('[ipc] containers.update payload=', payload && { id: payload.id, proxy: (payload as any).proxy });
   const cur = DB.getContainer(payload.id);
   if (!cur) throw new Error('container not found');
   const next: Container = {
@@ -379,21 +477,115 @@ ipcMain.handle('containers.update', async (_e, payload: Partial<Container> & { i
 
 // proxy test endpoint: try to create a request via the proxy (basic TCP connect)
 ipcMain.handle('proxy.test', async (_e, { proxy }) => {
+  console.log('[ipc] proxy.test called, proxy=', proxy);
+  // Enhanced proxy test: supports HTTP proxy (with CONNECT check) and SOCKS5 handshake
   try {
-    if (!proxy || !proxy.server) return { ok: false, error: 'no proxy' };
-    // simple TCP connect test to host:port
-    const [hostPart, portPart] = (proxy.server.replace(/^https?:\/\//, '')).split(':');
-    const port = parseInt(portPart || '0');
-    if (!hostPart || !port) return { ok: false, error: 'invalid proxy format' };
+    if (!proxy || !proxy.server) return { ok: false, errorCode: 'no_proxy', error: 'no proxy' };
+    const server = String(proxy.server).trim();
     const net = await import('node:net');
-    await new Promise((resolve, reject) => {
-      const s = net.createConnection({ host: hostPart, port }, () => { s.end(); resolve(void 0); });
-      s.on('error', (err) => { reject(err); });
-      setTimeout(() => { s.destroy(); reject(new Error('timeout')); }, 5000);
+
+    // helper: parse host:port pair
+    const parseHostPort = (s: string) => {
+      // remove any scheme or leading "type=" prefix (e.g. "http=", "https=", "socks5=")
+      let t = s.replace(/^\s+|\s+$/g, '');
+      t = t.replace(/^[a-z0-9]+=/i, '');
+      t = t.replace(/^.*:\/\//, '');
+      const parts = t.split(':');
+      const host = parts[0] || '';
+      const port = parseInt(parts[1] || '0');
+      return { host, port };
+    };
+
+    // detect SOCKS5 (prefix or scheme)
+    if (/^socks5:\/\//i.test(server) || /^socks5=/i.test(server)) {
+      // normalize to host:port
+      const withoutScheme = server.replace(/^socks5:\/\//i, '').replace(/^socks5=/i, '');
+      const { host, port } = parseHostPort(withoutScheme);
+      if (!host || !port) return { ok: false, errorCode: 'invalid_format', error: 'invalid socks5 format' };
+
+      return await new Promise((resolve) => {
+        const sock = net.createConnection({ host, port }, async () => {
+          try {
+            // SOCKS5 greeting: no authentication
+            sock.write(Buffer.from([0x05, 0x01, 0x00]));
+            sock.once('data', (d: Buffer) => {
+              if (d.length < 2 || d[0] !== 0x05) {
+                sock.destroy();
+                return resolve({ ok: false, errorCode: 'socks5_invalid_response', error: 'invalid socks5 greeting' });
+              }
+              const method = d[1];
+              if (method !== 0x00) {
+                sock.destroy();
+                return resolve({ ok: false, errorCode: 'socks5_auth_required', error: 'socks5 requires auth', method });
+              }
+              // send CONNECT request to test remote reachability (use 1.1.1.1:443 as target)
+              const addr = Buffer.from([0x01, 1,1,1,1]);
+              const portBuf = Buffer.alloc(2);
+              portBuf.writeUInt16BE(443, 0);
+              const req = Buffer.concat([Buffer.from([0x05, 0x01, 0x00]), addr, portBuf]);
+              sock.write(req);
+              sock.once('data', (resp: Buffer) => {
+                // resp[1] == 0x00 means succeeded
+                const status = resp && resp.length >= 2 ? resp[1] : undefined;
+                sock.end();
+                if (status === 0x00) return resolve({ ok: true, protocol: 'socks5', host, port });
+                else return resolve({ ok: false, errorCode: 'socks5_connect_failed', error: 'socks5 connect failed', status });
+              });
+            });
+          } catch (err:any) {
+            sock.destroy();
+            return resolve({ ok: false, errorCode: 'socks5_error', error: err?.message || String(err) });
+          }
+        });
+        sock.on('error', (err) => resolve({ ok: false, errorCode: 'connect_error', error: err?.message || String(err) }));
+        setTimeout(() => { try { sock.destroy(); } catch {} ; resolve({ ok: false, errorCode: 'timeout', error: 'timeout' }); }, 7000);
+      });
+    }
+
+    // HTTP-style proxy rule: could be 'http=host:port;https=host:port' or plain 'host:port' (normalized earlier)
+    // Pick first host:port we can find
+    let candidate = server;
+    // if rules like 'http=host:port;https=host:port', prefer https= then http=
+    const httpsMatch = server.match(/https=([^;]+)/i);
+    const httpMatch = server.match(/http=([^;]+)/i);
+    if (httpsMatch) candidate = httpsMatch[1];
+    else if (httpMatch) candidate = httpMatch[1];
+    // if still contains '=', fallback to after '='
+    if (candidate.includes('=')) candidate = candidate.split('=')[1] || candidate;
+
+    const { host: phost, port: pport } = parseHostPort(candidate);
+    if (!phost || !pport) return { ok: false, errorCode: 'invalid_format', error: 'invalid proxy format' };
+
+    // TCP connect first
+    return await new Promise((resolve) => {
+      const s = net.createConnection({ host: phost, port: pport }, () => {
+        // attempt HTTP CONNECT to example.com:443 to verify tunnel
+        try {
+          const connectReq = `CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n`;
+          s.write(connectReq);
+          let acc = '';
+          const onData = (d: Buffer) => {
+            acc += d.toString('utf8');
+            // check for status line
+            const m = acc.match(/^HTTP\/\d\.\d\s+(\d{3})/m);
+            if (m) {
+              const status = parseInt(m[1], 10);
+              s.end();
+              if (status >= 200 && status < 300) return resolve({ ok: true, protocol: 'http', host: phost, port: pport, httpStatus: status });
+              return resolve({ ok: false, errorCode: 'http_tunnel_failed', error: `tunnel status ${status}`, httpStatus: status });
+            }
+            // simple safety: if headers exceed 8kb, bail
+            if (acc.length > 8192) { s.end(); return resolve({ ok: false, errorCode: 'http_no_status', error: 'no http status in response' }); }
+          };
+          s.on('data', onData);
+          s.on('error', (err) => { try { s.destroy(); } catch {} ; resolve({ ok: false, errorCode: 'connect_error', error: err?.message || String(err) }); });
+          setTimeout(() => { try { s.destroy(); } catch {} ; resolve({ ok: false, errorCode: 'timeout', error: 'timeout' }); }, 7000);
+        } catch (err:any) { try { s.destroy(); } catch {} ; resolve({ ok: false, errorCode: 'write_error', error: err?.message || String(err) }); }
+      });
+      s.on('error', (err) => resolve({ ok: false, errorCode: 'connect_error', error: err?.message || String(err) }));
     });
-    return { ok: true };
   } catch (e:any) {
-    return { ok: false, error: e?.message || String(e) };
+    return { ok: false, errorCode: 'unknown', error: e?.message || String(e) };
   }
 });
 
