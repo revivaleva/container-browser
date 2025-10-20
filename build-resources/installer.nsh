@@ -1,14 +1,16 @@
 Function .onInit
-  ; Immediate forced termination of running app processes (no user warning)
+  ; Log file in TEMP for troubleshooting
   StrCpy $0 "$TEMP\\container-browser-install.log"
-  ; Force kill by executable name
-  nsExec::ExecToStack 'taskkill /IM "Container Browser.exe" /T /F >NUL 2>&1'
+  ; Attempt graceful close via CloseMainWindow
+  nsExec::ExecToStack 'powershell -NoProfile -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like \"Container Browser*\" -or $_.Name -like \"Container Browser*\" } | ForEach-Object { try { $_.CloseMainWindow(); Start-Sleep -Milliseconds 500 } catch {} }"'
   Pop $1
-  ; Also attempt to kill any child electron processes by process name
-  nsExec::ExecToStack 'taskkill /IM "electron.exe" /T /F >NUL 2>&1'
+  ; Wait briefly for processes to exit
+  Sleep 1000
+  ; Attempt polite Stop-Process (no force)
+  nsExec::ExecToStack 'powershell -NoProfile -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like \"Container Browser*\" -or $_.Name -like \"Container Browser*\" } | ForEach-Object { try { Stop-Process -Id $_.Id -ErrorAction SilentlyContinue } catch {} }"'
   Pop $1
-  ; Log that we issued force kill commands
+  ; Write a small log indicating attempts
   FileOpen $3 $0 a
-  FileWrite $3 "Forced kill executed on Container Browser and electron processes\r\n"
+  FileWrite $3 "Graceful shutdown attempts executed (no forced kill)\r\n"
   FileClose $3
 FunctionEnd
