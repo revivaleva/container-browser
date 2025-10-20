@@ -76,6 +76,9 @@ contextBridge.exposeInMainWorld('appAPI', {
   getToken: () => ipcRenderer.invoke('auth.getToken'),
   clearToken: () => ipcRenderer.invoke('auth.clearToken')
 });
+contextBridge.exposeInMainWorld('deviceAPI', {
+  getDeviceId: () => ipcRenderer.invoke('auth.getDeviceId')
+});
 
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)
 contextBridge.exposeInMainWorld('debugAPI', {

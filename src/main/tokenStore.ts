@@ -67,4 +67,21 @@ export async function clearToken() {
   try { if (fs.existsSync(fallbackFile)) fs.unlinkSync(fallbackFile); } catch(e) {}
 }
 
+export function getOrCreateDeviceId(): string {
+  const idFile = path.join(path.dirname(fallbackFile), 'device_id.txt');
+  try {
+    if (fs.existsSync(idFile)) {
+      const v = fs.readFileSync(idFile, 'utf8').trim();
+      if (v) return v;
+    }
+    const newId = crypto.randomUUID();
+    ensureDir(idFile);
+    fs.writeFileSync(idFile, newId, { encoding: 'utf8' });
+    return newId;
+  } catch (e) {
+    // fallback to random each run
+    return crypto.randomUUID();
+  }
+}
+
 

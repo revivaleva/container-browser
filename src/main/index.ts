@@ -170,6 +170,44 @@ ipcMain.handle('auth.getToken', async () => {
 ipcMain.handle('auth.clearToken', async () => {
   try { await clearToken(); return { ok: true }; } catch (e:any) { logger.error('[auth] clearToken error', e); return { ok: false, error: e?.message || String(e) }; }
 });
+
+ipcMain.handle('auth.getDeviceId', async () => {
+  try { const id = getOrCreateDeviceId(); return { ok: true, deviceId: id }; } catch (e:any) { logger.error('[auth] getDeviceId error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+
+// Validate token against auth API (uses AUTH_API_BASE env var)
+ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
+  try {
+    const t = token || await getToken();
+    if (!t) return { ok: false, code: 'NO_TOKEN' };
+    const deviceId = getOrCreateDeviceId();
+    const base = process.env.AUTH_API_BASE || 'https://api.example.com';
+    const url = base.replace(/\/$/, '') + '/auth/validate';
+    // Use global fetch if available
+    const res = await (global as any).fetch(url, { method: 'POST', headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: deviceId }) });
+    const j = await res.json().catch(()=>null);
+    if (!res.ok) return { ok: false, status: res.status, body: j };
+    return { ok: true, data: j && j.data ? j.data : j };
+  } catch (err:any) {
+    logger.error('[auth] validateToken error', err);
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('auth.getQuota', async () => {
+  try {
+    const resp = await (ipcMain as any).emit ? null : null; // placeholder
+    // reuse validateToken handler to get current token state
+    const out = await (exports as any).authValidate?.() || null;
+    // Instead call validateToken IPC synchronously
+    const r = await (async () => { return await (global as any).Promise.resolve(); })();
+    // For simplicity, call the validateToken handler we just defined via ipcMain.handle directly
+    const val = await (ipcMain as any).handlers && (ipcMain as any).handlers['auth.validateToken'] ? null : null;
+    // Fallback: call validateToken by invoking via this process
+    const v = await (exports as any).authValidate?.() .catch(()=>({}));
+    return { ok: false, message: 'not implemented' };
+  } catch (e:any) { logger.error('[auth] getQuota error', e); return { ok:false, error: e?.message || String(e) }; }
+});
 ipcMain.handle('app.exit', () => {
   try { isQuitting = true; app.quit(); return { ok: true }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });

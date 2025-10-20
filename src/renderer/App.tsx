@@ -208,15 +208,23 @@ export default function App() {
         setAppVersion(v || '');
       } catch (e) { /* ignore */ }
     })();
-    // load saved token if any
+    // load saved token if any and validate; if missing/invalid, show token prompt
     (async () => {
       try {
         const saved = await (window as any).appAPI.getToken();
+        const deviceResp = await (window as any).deviceAPI.getDeviceId();
+        const deviceId = deviceResp && deviceResp.deviceId ? deviceResp.deviceId : '';
         if (saved && saved.token) {
-          // optionally trigger auto-check with token present or store in state
-          console.log('[app] loaded saved token (length):', saved.token.length);
+          try {
+            const res = await (window as any).ipcRenderer?.invoke ? window.api?.validateToken?.(saved.token) : null;
+          } catch (e) {
+            // show token prompt on error
+            setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500);
+          }
+        } else {
+          setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500);
         }
-      } catch (e) { }
+      } catch (e) { setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500); }
     })();
   }, []);
 
