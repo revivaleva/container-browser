@@ -11,6 +11,36 @@ type OpenedContainer = { win: BrowserWindow; views: BrowserView[]; activeIndex: 
 const openedById = new Map<string, OpenedContainer>();
 let isRestoringGlobal = false;
 
+// --- helpers for external control (export API) ---
+export function isContainerOpen(containerId: string) {
+  return openedById.has(containerId);
+}
+
+export function closeContainer(containerId: string) {
+  const entry = openedById.get(containerId);
+  if (!entry || !entry.win) return false;
+  try {
+    entry.win.close();
+    return true;
+  } catch (e) {
+    console.error('[main] closeContainer error', e);
+    return false;
+  }
+}
+
+export function waitForContainerClosed(containerId: string, timeoutMs = 60000) {
+  return new Promise<void>((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (!openedById.has(containerId)) return resolve();
+      if (Date.now() - start > timeoutMs) return reject(new Error('waitForContainerClosed timeout'));
+      setTimeout(check, 200);
+    };
+    check();
+  });
+}
+
+
 // Global top bar height used by layout calculations so main and createTab stay consistent
 // Must match the renderer `body { padding-top }` so BrowserView content does not overlap the shell UI
 // revert BAR_HEIGHT to match renderer padding-top
@@ -118,12 +148,15 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   const sendCtx = () => {
     try {
       const entry = openedById.get(container.id);
+      const containerRecord = DB.getContainer(container.id) || { name: undefined };
+      const containerName = containerRecord.name ?? container.name ?? '';
       const tabs = entry ? entry.views.map(v => ({ url: v.webContents.getURL(), title: v.webContents.getTitle?.() })) : [];
       const activeIndex = entry ? entry.activeIndex : 0;
       const activeView = entry ? (entry.views[activeIndex] || entry.views[0]) : null;
       const currentUrl = activeView ? activeView.webContents.getURL() : undefined;
-      console.log('[main] sendCtx', { containerId: container.id, sessionId, currentUrl, tabsLength: tabs.length, activeIndex });
-      win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl, tabs, activeIndex });
+      console.log('[main] sendCtx', { containerId: container.id, sessionId, currentUrl, tabsLength: tabs.length, activeIndex, containerName });
+      try { win.setTitle(containerName || 'コンテナシェル'); } catch {}
+      win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl, tabs, activeIndex, containerName });
     } catch {}
   };
   win.webContents.on('did-finish-load', sendCtx);
@@ -191,6 +224,33 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           }
         } catch (e) { console.error('[main] sendCtx from view favicon-updated error', e); }
       });
+      // When DevTools is opened/closed for this view, update the tab title/icon to make it clear
+      try {
+        v.webContents.on('devtools-opened', () => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
+            const containerRecord = DB.getContainer(container.id) || { name: undefined };
+            const containerName = containerRecord.name ?? container.name ?? '';
+            DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title: `Dev-${containerName}`, favicon: '/favicon.ico', scrollY: 0, updatedAt: Date.now() });
+            const ctx = getContextForWindow(win);
+            if (ctx) win.webContents.send('container.context', ctx);
+            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: true, containerName }); } catch (e) { /* ignore */ }
+          } catch (e) { console.error('[main] devtools-opened handler error', e); }
+        });
+        v.webContents.on('devtools-closed', () => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
+            // restore title from page when devtools closed
+            const title = v.webContents.getTitle?.() ?? null;
+            DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title, favicon: null, scrollY: 0, updatedAt: Date.now() });
+            const ctx = getContextForWindow(win);
+            if (ctx) win.webContents.send('container.context', ctx);
+            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: false, containerName: containerRecord.name ?? container.name ?? '' }); } catch (e) { /* ignore */ }
+          } catch (e) { console.error('[main] devtools-closed handler error', e); }
+        });
+      } catch (e) { /* ignore if devtools events unsupported */ }
     } catch (e) { console.error('[main] createView attach handlers error', e); }
 
     if (u) v.webContents.loadURL(u).catch(()=>{});
@@ -331,10 +391,39 @@ export function forceCloseAllNonMainWindows() {
 export function getContextForWindow(win: BrowserWindow) {
   for (const [containerId, entry] of openedById.entries()) {
     if (entry.win === win) {
-      const tabs = entry.views.map(v => ({ url: v.webContents.getURL(), title: v.webContents.getTitle?.() }));
+      const containerRecord = DB.getContainer(containerId) || { name: undefined };
+      const containerName = containerRecord.name ?? '';
+      // helper: treat devtools pages as Dev tabs
+      const isDevtoolsUrl = (u: string) => {
+        if (!u) return false;
+        try {
+          // common indicators for devtools pages
+          return u.startsWith('devtools://') || u.includes('chrome-devtools') || u.includes('devtools') || u.includes('about:blank') && u.includes('devtools');
+        } catch { return false; }
+      };
+      const tabs = entry.views.map(v => {
+        const url = v.webContents.getURL();
+        let title = v.webContents.getTitle?.() ?? null;
+        let favicon: string | null = null;
+        try {
+          // If this view currently has DevTools opened, force Dev-<containerName>
+          if (typeof v.webContents.isDevToolsOpened === 'function' && v.webContents.isDevToolsOpened()) {
+            title = `Dev-${containerName}`;
+            favicon = '/favicon.ico';
+            return { url, title, favicon };
+          }
+        } catch {}
+        if (isDevtoolsUrl(String(url))) {
+          title = `Dev-${containerName}`;
+          // use common favicon served by renderer (dev server provides /favicon.ico)
+          favicon = '/favicon.ico';
+        }
+        return { url, title, favicon };
+      });
       const activeView = entry.views[entry.activeIndex] || entry.views[0];
       const currentUrl = activeView ? activeView.webContents.getURL() : undefined;
-      return { containerId, sessionId: entry.sessionId, fingerprint: (DB.getContainer(containerId) || {}).fingerprint, currentUrl, tabs };
+      try { entry.win.setTitle(containerName || 'コンテナシェル'); } catch {}
+      return { containerId, sessionId: entry.sessionId, fingerprint: containerRecord.fingerprint, currentUrl, tabs, containerName };
     }
   }
   return null;
@@ -510,6 +599,16 @@ export function goForward(containerId: string) {
     if (view.webContents.canGoForward()) { view.webContents.goForward(); return true; }
   } catch {}
   return false;
+}
+
+// Return the active BrowserView.webContents for a given containerId, or null if not open
+export function getActiveWebContents(containerId: string) {
+  try {
+    const entry = openedById.get(containerId);
+    if (!entry) return null;
+    const view = entry.views[entry.activeIndex] || entry.views[0];
+    return view ? view.webContents : null;
+  } catch (e) { return null; }
 }
 
 ipcMain.handle('tabs.goBack', (_e, { containerId }) => goBack(containerId));
