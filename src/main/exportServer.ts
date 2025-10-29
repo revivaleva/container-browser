@@ -189,6 +189,12 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
 
             // helper: wait for selector
             const waitForSelector = async (selector: string, ms: number) => {
+              // support xpath: prefix
+              if (typeof selector === 'string' && selector.startsWith('xpath:')) {
+                const xp = selector.slice(6);
+                const poll = `(function(xp){return new Promise((resolve)=>{const t0=Date.now();(function p(){try{const n=document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(n) return resolve(true);}catch{}if(Date.now()-t0> ${ms}) return resolve(false);setTimeout(p,200);})();})})(${JSON.stringify(xp)});`;
+                try { const ok = await wc.executeJavaScript(poll, true); return !!ok; } catch { return false; }
+              }
               const poll = `(function(sel){return new Promise((resolve)=>{const t0=Date.now();(function p(){try{const el=document.querySelector(sel);if(el) return resolve(true);}catch{}if(Date.now()-t0> ${ms}) return resolve(false);setTimeout(p,200);})();})})(${JSON.stringify(selector)});`;
               try { const ok = await wc.executeJavaScript(poll, true); return !!ok; } catch { return false; }
             };
@@ -214,11 +220,23 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               }
               try {
                 if (command === 'click') {
-                  const script = `(function(sel){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.click(); return true;})(${JSON.stringify(selector)});`;
+                  let script: string;
+                  if (typeof selector === 'string' && selector.startsWith('xpath:')) {
+                    const xp = selector.slice(6);
+                    script = `(function(){const node = document.evaluate(${JSON.stringify(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(!node) throw new Error('selector not found'); node.click(); return true;})()`;
+                  } else {
+                    script = `(function(sel){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.click(); return true;})(${JSON.stringify(selector)});`;
+                  }
                   await wc.executeJavaScript(script, true);
                 } else if (command === 'type') {
                   const text = String(body.text || '');
-                  const script = `(function(sel, txt){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.focus(); el.value = txt; el.dispatchEvent(new Event('input',{bubbles:true})); return true;})(${JSON.stringify(selector)}, ${JSON.stringify(text)});`;
+                  let script: string;
+                  if (typeof selector === 'string' && selector.startsWith('xpath:')) {
+                    const xp = selector.slice(6);
+                    script = `(function(txt){const node = document.evaluate(${JSON.stringify(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(!node) throw new Error('selector not found'); node.focus(); node.value = txt; node.dispatchEvent(new Event('input',{bubbles:true})); return true;})(${JSON.stringify(text)});`;
+                  } else {
+                    script = `(function(sel, txt){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.focus(); el.value = txt; el.dispatchEvent(new Event('input',{bubbles:true})); return true;})(${JSON.stringify(selector)}, ${JSON.stringify(text)});`;
+                  }
                   await wc.executeJavaScript(script, true);
                 } else if (command === 'eval') {
                   const expr = String(body.eval || '');
