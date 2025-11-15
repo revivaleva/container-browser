@@ -305,6 +305,51 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         try { rmSync(String(p), { recursive: true, force: true }); return jsonResponse(res, 200, { ok: true }); } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
       }
 
+      // Close container endpoint: idempotent
+      if (req.method === 'POST' && u.pathname === '/internal/export-restored/close') {
+        try {
+          const body = await parseBody(req);
+          const id = String(body && body.id || '');
+          if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          // clear any active locks for this context to avoid deadlocks from long-running ops
+          try { locks.delete(id); } catch {}
+
+          // If not open, return idempotent response
+          if (!isContainerOpen(id)) return jsonResponse(res, 200, { ok: true, closed: false, message: 'not-open' });
+
+          const runId = (crypto && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : `${Date.now()}-${Math.floor(Math.random()*1000000)}`;
+          const closedBy = req.headers['x-requested-by'] || null;
+          console.log('[exportServer] close requested', { id, runId, closedBy, time: new Date().toISOString() });
+
+          // attempt close
+          try {
+            const ok = closeContainer(id);
+            if (!ok) {
+              console.error('[exportServer] closeContainer returned false for', id);
+              return jsonResponse(res, 500, { ok: false, error: 'internal' });
+            }
+            // wait for container to be fully removed
+            try {
+              const timeoutMs = Number(body && body.timeoutMs) || 30000;
+              await waitForContainerClosed(id, timeoutMs);
+            } catch (e:any) {
+              console.error('[exportServer] waitForContainerClosed error', e);
+              return jsonResponse(res, 500, { ok: false, error: 'internal' });
+            }
+            console.log('[exportServer] close completed', { id, runId, time: new Date().toISOString() });
+            return jsonResponse(res, 200, { ok: true, closed: true, message: 'closed' });
+          } catch (e:any) {
+            console.error('[exportServer] close error', e);
+            return jsonResponse(res, 500, { ok: false, error: 'internal' });
+          }
+        } catch (e:any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
       jsonResponse(res, 404, { ok: false, error: 'not found' });
     } catch (e:any) {
       jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
