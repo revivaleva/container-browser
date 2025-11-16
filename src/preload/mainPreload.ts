@@ -94,6 +94,12 @@ contextBridge.exposeInMainWorld('exportAPI', {
     ipcRenderer.on('export.server.status', listener);
     return () => { try { ipcRenderer.removeListener('export.server.status', listener); } catch {} };
   }
+  ,
+  onOpenSettings: (cb: () => void) => {
+    const listener = () => { try { cb(); } catch {} };
+    ipcRenderer.on('open-settings', listener);
+    return () => { try { ipcRenderer.removeListener('open-settings', listener); } catch {} };
+  }
 });
 
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)

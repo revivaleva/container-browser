@@ -222,6 +222,7 @@ export default function App() {
   const [exportEnabled, setExportEnabled] = useState<boolean>(false);
   const [exportPort, setExportPort] = useState<number>(3001);
   const [exportStatus, setExportStatus] = useState<{ running: boolean; port: number; error?: string } | null>(null);
+  const [openAsSettingsSignal, setOpenAsSettingsSignal] = useState<boolean>(false);
 
   useEffect(() => { refresh(); }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
@@ -268,13 +269,17 @@ export default function App() {
     const unsub = window.exportAPI?.onStatus?.((p:any)=>{
       try { setExportStatus({ running: !!p.running, port: Number(p.port || 3001), error: p.error || undefined }); } catch {}
     });
+    // subscribe to explicit open-settings signal from main (used when query param may not be preserved)
+    const unsub2 = window.exportAPI?.onOpenSettings?.(() => {
+      try { setOpenAsSettingsSignal(true); } catch {}
+    });
     return () => { try { if (unsub) unsub(); } catch {} };
   }, []);
 
   // If this renderer was opened as a Settings window (main process adds ?settings=1),
   // render the Settings-only UI and skip the main dashboard.
   const isSettingsWindow = (() => {
-    try { const u = new URL(window.location.href); return u.searchParams.get('settings') === '1'; } catch { return false; }
+    try { const u = new URL(window.location.href); return u.searchParams.get('settings') === '1' || openAsSettingsSignal; } catch { return !!openAsSettingsSignal; }
   })();
 
   const SettingsOnly = () => (

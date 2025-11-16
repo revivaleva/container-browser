@@ -178,6 +178,10 @@ function createSettingsWindow() {
       }
     });
     win.loadURL(url).catch(() => {});
+    // Notify renderer instance that it should show Settings-only view after load
+    win.webContents.once('did-finish-load', () => {
+      try { win.webContents.send('open-settings'); } catch (e) { /* ignore */ }
+    });
     return win;
   } catch (e) {
     logger.error('[main] createSettingsWindow error', e);
