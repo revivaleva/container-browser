@@ -84,6 +84,18 @@ contextBridge.exposeInMainWorld('authAPI', {
   validateToken: (opts?: any) => ipcRenderer.invoke('auth.validateToken', opts || {})
 });
 
+// Export server settings/status API
+contextBridge.exposeInMainWorld('exportAPI', {
+  getSettings: () => ipcRenderer.invoke('export.getSettings'),
+  saveSettings: (payload: any) => ipcRenderer.invoke('export.saveSettings', payload),
+  getStatus: () => ipcRenderer.invoke('export.getStatus'),
+  onStatus: (cb: (payload: any) => void) => {
+    const listener = (_e: any, payload: any) => { try { cb(payload); } catch {} };
+    ipcRenderer.on('export.server.status', listener);
+    return () => { try { ipcRenderer.removeListener('export.server.status', listener); } catch {} };
+  }
+});
+
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)
 contextBridge.exposeInMainWorld('debugAPI', {
   log: (msg: any) => { try { ipcRenderer.send('renderer.log', msg); } catch { } }

@@ -4,6 +4,12 @@ type Container = any;
 
 declare global {
   interface Window {
+    exportAPI?: {
+      getSettings: () => Promise<any>;
+      saveSettings: (payload: any) => Promise<any>;
+      getStatus: () => Promise<any>;
+      onStatus: (cb: (payload: any) => void) => () => void;
+    };
     containersAPI: {
       list: () => Promise<Container[]>;
       create: (payload: any) => Promise<Container>;
@@ -213,6 +219,9 @@ export default function App() {
   const connOptions = ['wifi','4g','3g','2g','ethernet'];
   const [bookmarkSettingsOpen, setBookmarkSettingsOpen] = useState<boolean>(true);
   const [appVersion, setAppVersion] = useState<string>('');
+  const [exportEnabled, setExportEnabled] = useState<boolean>(false);
+  const [exportPort, setExportPort] = useState<number>(3001);
+  const [exportStatus, setExportStatus] = useState<{ running: boolean; port: number; error?: string } | null>(null);
 
   useEffect(() => { refresh(); }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
@@ -241,11 +250,63 @@ export default function App() {
         }
       } catch (e) { setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500); }
     })();
+    // load export settings/status
+    (async () => {
+      try {
+        const s = await window.exportAPI?.getSettings();
+        if (s && s.settings) {
+          setExportEnabled(!!s.settings.enabled);
+          setExportPort(Number(s.settings.port || 3001));
+        }
+      } catch {}
+      try {
+        const st = await window.exportAPI?.getStatus();
+        if (st && st.ok) setExportStatus({ running: !!st.running, port: Number(st.port || 3001), error: st.error || undefined });
+      } catch {}
+    })();
+    // subscribe to status events
+    const unsub = window.exportAPI?.onStatus?.((p:any)=>{
+      try { setExportStatus({ running: !!p.running, port: Number(p.port || 3001), error: p.error || undefined }); } catch {}
+    });
+    return () => { try { if (unsub) unsub(); } catch {} };
   }, []);
 
   return (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
       <h1>コンテナブラウザー <small style={{ fontSize: 12, color: '#666' }}>v{appVersion}</small></h1>
+      
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
+        <h3>アプリ設定</h3>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <label style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <input type="checkbox" checked={exportEnabled} onChange={e=>setExportEnabled(e.target.checked)} /> Export Server を有効にする
+          </label>
+          <label style={{ display:'flex', gap:8, alignItems:'center', marginLeft: 8 }}>
+            ポート:
+            <input type="number" value={exportPort} onChange={e=>setExportPort(parseInt(e.target.value||'0')||0)} style={{ width: 100 }} />
+          </label>
+          <button onClick={async ()=>{
+            const ok = await window.exportAPI?.saveSettings?.({ enabled: exportEnabled, port: Number(exportPort) });
+            if (ok && ok.ok) alert('設定を保存しました（次回起動で反映されます）');
+            else alert('保存に失敗しました');
+          }}>保存</button>
+          <button onClick={async ()=>{
+            try {
+              const st = await window.exportAPI?.getStatus();
+              if (st && st.ok) setExportStatus({ running: !!st.running, port: Number(st.port || 3001), error: st.error || undefined });
+              alert('ステータスを更新しました');
+            } catch { alert('ステータス取得に失敗しました'); }
+          }}>ステータス更新</button>
+        </div>
+        <div style={{ marginTop:8 }}>
+          {exportStatus ? (
+            <div style={{ color: exportStatus.running ? 'green' : 'orange' }}>
+              {exportStatus.running ? `Export API 実行中: 127.0.0.1:${exportStatus.port}` : `Export API 停止中（設定ポート: ${exportPort}）`}
+              {exportStatus.error ? ` — エラー: ${exportStatus.error}` : ''}
+            </div>
+          ) : <div style={{ color:'#666' }}>ステータス情報がありません</div>}
+        </div>
+      </section>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>

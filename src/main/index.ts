@@ -6,11 +6,12 @@ import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
 import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows } from './containerManager';
 import './ipc';
+import { loadConfig, getExportSettings, setExportSettings } from './settings';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint } from '../shared/types';
 import logger from '../shared/logger';
-import { saveToken, getToken, clearToken } from './tokenStore';
+import { saveToken, getToken, clearToken, getOrCreateDeviceId } from './tokenStore';
 
 // Helper: after opening DevTools in detached mode, find the DevTools window and set its title/icon
 function adjustDevtoolsWindowForWebContents(targetWC: Electron.WebContents) {
@@ -300,6 +301,49 @@ app.whenReady().then(async () => {
     setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[auto-updater] check error', e); } }, 3000);
   } catch (e) { console.error('[auto-updater] setup error', e); }
   await createMainWindow();
+  try {
+    const es = await import('./exportServer');
+    // determine port/enabled from env or saved settings
+    const cfg = loadConfig();
+    const envPort = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
+    const exportSettings = cfg.exportServer || getExportSettings();
+    const shouldStart = !!envPort || !!exportSettings.enabled;
+    const portToUse = envPort || Number(exportSettings.port || 3001);
+    try {
+      if (shouldStart) {
+        const srv = es.startExportServer(Number(portToUse));
+        // notify renderer of status
+        try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(portToUse), error: null }); } catch {}
+      } else {
+        try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: null }); } catch {}
+      }
+    } catch (e) {
+      logger.error('[main] failed to start export server', e);
+      try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: String(e?.message || e) }); } catch {}
+    }
+  } catch (e) { logger.error('[main] failed to start export server', e); }
+
+  // IPC: get/save export settings & status
+  ipcMain.handle('export.getSettings', () => {
+    try { return { ok: true, settings: getExportSettings() }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.saveSettings', (_e, payload: any) => {
+    try {
+      const ok = setExportSettings(payload || {});
+      return { ok };
+    } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.getStatus', () => {
+    try {
+      // best-effort: check if server is listening by reading config + env
+      const envPort2 = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
+      const cur = loadConfig();
+      const s = cur.exportServer || getExportSettings();
+      const running = !!envPort2 || !!s.enabled;
+      const port = envPort2 || Number(s.port || 3001);
+      return { ok: true, running, port };
+    } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+  });
 
   // Register F11 global shortcut to toggle DevTools for focused view/window
   try {
