@@ -271,12 +271,17 @@ export default function App() {
     return () => { try { if (unsub) unsub(); } catch {} };
   }, []);
 
-  return (
+  // If this renderer was opened as a Settings window (main process adds ?settings=1),
+  // render the Settings-only UI and skip the main dashboard.
+  const isSettingsWindow = (() => {
+    try { const u = new URL(window.location.href); return u.searchParams.get('settings') === '1'; } catch { return false; }
+  })();
+
+  const SettingsOnly = () => (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
-      <h1>コンテナブラウザー <small style={{ fontSize: 12, color: '#666' }}>v{appVersion}</small></h1>
-      
+      <h1>設定</h1>
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
-        <h3>アプリ設定</h3>
+        <h3>Export Server 設定</h3>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <label style={{ display:'flex', gap:8, alignItems:'center' }}>
             <input type="checkbox" checked={exportEnabled} onChange={e=>setExportEnabled(e.target.checked)} /> Export Server を有効にする
@@ -307,6 +312,11 @@ export default function App() {
           ) : <div style={{ color:'#666' }}>ステータス情報がありません</div>}
         </div>
       </section>
+    </div>
+  );
+
+  // Render settings-only when opened as settings window, otherwise render main dashboard
+  return isSettingsWindow ? <SettingsOnly /> : (
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>

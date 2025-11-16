@@ -145,6 +145,8 @@ async function createMainWindow() {
       {
         label: 'Help',
         submenu: [
+          { label: 'Settings', click: () => { try { createSettingsWindow(); } catch (e) { logger.error('[menu] openSettings error', e); } } },
+          { type: 'separator' },
           { label: 'Check for updates', click: () => { try { checkForUpdatesInteractive().catch((e) => logger.error('[menu] checkForUpdatesInteractive error', e)); } catch (e) { logger.error('[menu] checkForUpdates error', e); } } },
           { label: 'Show version', click: () => { try { dialog.showMessageBox({ message: `Version: ${app.getVersion()}` }); } catch (e) { logger.error('[menu] showVersion error', e); } } }
         ]
@@ -154,9 +156,35 @@ async function createMainWindow() {
     Menu.setApplicationMenu(appMenu);
   } catch (e) { logger.error('[main] failed to set application menu', e); }
 
+// Create a separate Settings window that loads the renderer with ?settings=1
+function createSettingsWindow() {
+  try {
+    const devUrl = process.env['ELECTRON_RENDERER_URL'];
+    const base = devUrl ? devUrl.replace(/\/\/$/, '') : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html')).toString();
+    const url = devUrl ? `${base}/containerShell.html?settings=1` : `${base}?settings=1`;
+    const win = new BrowserWindow({
+      width: 600,
+      height: 420,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs')
+      }
+    });
+    win.loadURL(url).catch(() => {});
+    return win;
+  } catch (e) {
+    logger.error('[main] createSettingsWindow error', e);
+    return null;
+  }
+}
+
 // IPC handlers for app actions exposed to renderer via preload
 ipcMain.handle('app.getVersion', () => {
   try { return app.getVersion(); } catch { return 'unknown'; }
+});
+ipcMain.handle('app.openSettings', () => {
+  try { createSettingsWindow(); return { ok: true }; } catch (e:any) { logger.error('[ipc] app.openSettings error', e); return { ok: false, error: e?.message || String(e) }; }
 });
 ipcMain.handle('app.checkForUpdates', async () => {
   try { await autoUpdater.checkForUpdates(); return { ok: true }; } catch (e:any) { logger.error('[ipc] checkForUpdates error', e); return { ok: false, error: e?.message || String(e) }; }
