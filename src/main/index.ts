@@ -160,8 +160,14 @@ async function createMainWindow() {
 function createSettingsWindow() {
   try {
     const devUrl = process.env['ELECTRON_RENDERER_URL'];
-    const base = devUrl ? devUrl.replace(/\/\/$/, '') : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html')).toString();
-    const url = devUrl ? `${base}/containerShell.html?settings=1` : `${base}?settings=1`;
+    // In dev mode the renderer dev server root is provided in devUrl.
+    // Use the root (or index) and append ?settings=1 so the renderer shows the Settings-only UI.
+    let url: string;
+    if (devUrl) {
+      url = `${devUrl.replace(/\/$/, '')}/?settings=1`;
+    } else {
+      url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html')).toString() + '?settings=1';
+    }
     const win = new BrowserWindow({
       width: 600,
       height: 420,
