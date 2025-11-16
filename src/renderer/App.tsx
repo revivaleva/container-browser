@@ -317,6 +317,7 @@ export default function App() {
 
   // Render settings-only when opened as settings window, otherwise render main dashboard
   return isSettingsWindow ? <SettingsOnly /> : (
+    <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>
