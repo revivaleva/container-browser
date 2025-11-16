@@ -361,10 +361,34 @@ app.whenReady().then(async () => {
   ipcMain.handle('export.getSettings', () => {
     try { return { ok: true, settings: getExportSettings() }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
   });
-  ipcMain.handle('export.saveSettings', (_e, payload: any) => {
+  ipcMain.handle('export.saveSettings', async (_e, payload: any) => {
     try {
       const ok = setExportSettings(payload || {});
+      // If enabling, try to start the export server immediately (best-effort)
+      try {
+        const cfg = loadConfig();
+        const s = cfg.exportServer || getExportSettings();
+        if (s && s.enabled) {
+          const es = await import('./exportServer');
+          try {
+            // start server on configured port
+            const port = Number(s.port || 3001);
+            es.startExportServer(Number(port));
+            try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(port), error: null }); } catch {}
+          } catch (e) {
+            try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s.port || 3001), error: String(e?.message || e) }); } catch {}
+          }
+        } else {
+          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s?.port || 3001), error: null }); } catch {}
+        }
+      } catch (e) { /* ignore best-effort start errors */ }
       return { ok };
+    } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.getConfigPath', () => {
+    try {
+      const p = require('./settings').configPath();
+      return { ok: true, path: p };
     } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
   });
   ipcMain.handle('export.getStatus', () => {
