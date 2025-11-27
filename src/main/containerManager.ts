@@ -5,11 +5,23 @@ import type { Container } from '../shared/types';
 import { DB } from './db';
 import { existsSync } from 'node:fs';
 
-type OpenOpts = { restore?: boolean };
+type OpenOpts = { restore?: boolean; singleTab?: boolean };
 
 type OpenedContainer = { win: BrowserWindow; views: BrowserView[]; activeIndex: number; sessionId: string };
 const openedById = new Map<string, OpenedContainer>();
 let isRestoringGlobal = false;
+let mainWindowRef: BrowserWindow | null = null;
+
+// Register main window reference to prevent accidental app quit when closing containers
+export function setMainWindow(win: BrowserWindow) {
+  mainWindowRef = win;
+  // Clear ref when window is destroyed
+  try {
+    win.on('closed', () => {
+      if (mainWindowRef === win) mainWindowRef = null;
+    });
+  } catch {}
+}
 
 // --- helpers for external control (export API) ---
 export function isContainerOpen(containerId: string) {
@@ -265,11 +277,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   openedById.set(container.id, entry);
   // 初期タブ情報をシェルに送る
   try { console.log('[main] initial sendCtx for', container.id); sendCtx(); } catch {}
-  // Ensure there are at least three BrowserViews so renderer tab indices match
+  // Ensure there are at least three BrowserViews so renderer tab indices match,
+  // unless singleTab option requested.
   try {
-    while (entry.views.length < 3) {
-      const vNew = createView('about:blank');
-      entry.views.push(vNew);
+    if (!opts.singleTab) {
+      while (entry.views.length < 3) {
+        const vNew = createView('about:blank');
+        entry.views.push(vNew);
+      }
     }
     // assign tabIndex values according to array index
     entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch {} });
@@ -313,7 +328,8 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   const devUrl = process.env['ELECTRON_RENDERER_URL'];
   const shellHtml = devUrl ? `${devUrl.replace(/\/\/$/, '')}/containerShell.html` : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'containerShell.html')).toString();
   await win.loadURL(shellHtml);
-  // load restored URLs into the two views (firstView and second view if present)
+  // load restored URLs into the two views (firstView and second view if present).
+  // If singleTab option is set, only load the first target.
   if (restoreUrls.length > 0) {
     try {
       isRestoringGlobal = true;
@@ -322,11 +338,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch {} });
       // load sequentially and wait finish
       try { await firstView.webContents.loadURL(firstTarget); } catch (e) { console.error('[main] load firstTarget error', e); }
-      if (entry.views[1]) {
-        try { await entry.views[1].webContents.loadURL(secondTarget); } catch (e) { console.error('[main] load secondTarget error', e); }
-      }
-      if (entry.views[2]) {
-        try { await entry.views[2].webContents.loadURL(thirdTarget); } catch (e) { console.error('[main] load thirdTarget error', e); }
+      if (!opts.singleTab) {
+        if (entry.views[1]) {
+          try { await entry.views[1].webContents.loadURL(secondTarget); } catch (e) { console.error('[main] load secondTarget error', e); }
+        }
+        if (entry.views[2]) {
+          try { await entry.views[2].webContents.loadURL(thirdTarget); } catch (e) { console.error('[main] load thirdTarget error', e); }
+        }
       }
       // after loads, write canonical entries into DB with tabIndex
       try {

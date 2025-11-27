@@ -45,10 +45,14 @@ let isQuitting = false;
 const _pendingOpenNames = new Set<string>();
 
 async function createMainWindow() {
-  const preloadPath = path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs');
-  logger.debug('[main] main preload:', preloadPath, 'exists=', existsSync(preloadPath));
+  try {
+    console.log('[DEBUG] createMainWindow() started');
+    const preloadPath = path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs');
+    console.log('[DEBUG] Preload path:', preloadPath, 'exists=', existsSync(preloadPath));
+    logger.debug('[main] main preload:', preloadPath, 'exists=', existsSync(preloadPath));
 
-  mainWindow = new BrowserWindow({
+    console.log('[DEBUG] Creating BrowserWindow...');
+    mainWindow = new BrowserWindow({
     width: 1200,
     height: 900,
     webPreferences: {
@@ -81,7 +85,64 @@ async function createMainWindow() {
 
   const devUrl = process.env['ELECTRON_RENDERER_URL'];
   if (devUrl) {
-    await mainWindow.loadURL(devUrl);
+    // In dev mode the renderer dev server root is provided in devUrl.
+    // Instead of immediately calling loadURL, poll the dev server HTTP endpoint and
+    // only call loadURL once it responds. Try localhost then 127.0.0.1 as fallback.
+    if (devUrl) {
+      const maxAttempts = 40;
+      let attempt = 0;
+      const tryUrl = async (u: string) => {
+        try {
+          // simple HEAD request using node http/https
+          const parsed = new URL(u);
+          const mod = parsed.protocol === 'https:' ? require('https') : require('http');
+          return await new Promise((resolve) => {
+            const req = mod.request({ method: 'HEAD', hostname: parsed.hostname, port: parsed.port, path: parsed.pathname || '/', timeout: 1000 }, (res: any) => {
+              resolve(res.statusCode && res.statusCode >= 200 && res.statusCode < 500);
+            });
+            req.on('error', () => resolve(false));
+            req.on('timeout', () => { req.destroy(); resolve(false); });
+            req.end();
+          });
+        } catch (e) { return false; }
+      };
+
+      // compute candidate URLs
+      const candidates = [devUrl];
+      try {
+        const parsed = new URL(devUrl);
+        if (parsed.hostname === 'localhost') {
+          const alt = `${parsed.protocol}//127.0.0.1:${parsed.port}${parsed.pathname || ''}`;
+          candidates.push(alt);
+        }
+      } catch (e) {}
+
+      let loaded = false;
+      while (attempt < maxAttempts && !loaded) {
+        attempt++;
+        for (const c of candidates) {
+          const ok = await tryUrl(c).catch(() => false);
+          if (ok) {
+            try {
+              await mainWindow.loadURL(c);
+              loaded = true;
+              break;
+            } catch (e) {
+              // continue to next candidate or retry
+            }
+          }
+        }
+        if (!loaded) await new Promise(r => setTimeout(r, 250));
+      }
+      if (!loaded) {
+        // fallback to file if dev server not reachable
+        const url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html'));
+        await mainWindow.loadURL(url.toString());
+      }
+    } else {
+      const url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html'));
+      await mainWindow.loadURL(url.toString());
+    }
   } else {
     const url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html'));
     await mainWindow.loadURL(url.toString());
@@ -147,14 +208,35 @@ async function createMainWindow() {
         submenu: [
           { label: 'Settings', click: () => { try { createSettingsWindow(); } catch (e) { logger.error('[menu] openSettings error', e); } } },
           { type: 'separator' },
-          { label: 'Check for updates', click: () => { try { checkForUpdatesInteractive().catch((e) => logger.error('[menu] checkForUpdatesInteractive error', e)); } catch (e) { logger.error('[menu] checkForUpdates error', e); } } },
+          { label: 'Check for updates (disabled)', enabled: false, click: () => { /* disabled */ } },
           { label: 'Show version', click: () => { try { dialog.showMessageBox({ message: `Version: ${app.getVersion()}` }); } catch (e) { logger.error('[menu] showVersion error', e); } } }
         ]
       }
     ];
     const appMenu = Menu.buildFromTemplate(appMenuTemplate as any);
     Menu.setApplicationMenu(appMenu);
-  } catch (e) { logger.error('[main] failed to set application menu', e); }
+    console.log('[DEBUG] Application menu set successfully');
+  } catch (e) { 
+    console.error('[main] failed to set application menu', e);
+    logger.error('[main] failed to set application menu', e); 
+  }
+  
+  console.log('[DEBUG] createMainWindow() completed successfully');
+  
+  // Register mainWindow with container manager to prevent accidental app quit
+  try {
+    const cm = await import('./containerManager');
+    if (mainWindow && cm.setMainWindow) {
+      cm.setMainWindow(mainWindow);
+    }
+  } catch (e) {
+    logger.error('[main] failed to register mainWindow with containerManager', e);
+  }
+  } catch (error) {
+    console.error('[FATAL] createMainWindow() failed:', error);
+    logger.error('[FATAL] createMainWindow() failed:', error);
+    throw error;
+  }
 
 // Create a separate Settings window that loads the renderer with ?settings=1
 function createSettingsWindow() {
@@ -197,7 +279,7 @@ ipcMain.handle('app.openSettings', () => {
   try { createSettingsWindow(); return { ok: true }; } catch (e:any) { logger.error('[ipc] app.openSettings error', e); return { ok: false, error: e?.message || String(e) }; }
 });
 ipcMain.handle('app.checkForUpdates', async () => {
-  try { await autoUpdater.checkForUpdates(); return { ok: true }; } catch (e:any) { logger.error('[ipc] checkForUpdates error', e); return { ok: false, error: e?.message || String(e) }; }
+  return { ok: false, error: 'Auto-update disabled in this version' };
 });
 // Token storage IPC
 ipcMain.handle('auth.saveToken', async (_e, { token }) => {
@@ -316,29 +398,131 @@ async function checkForUpdatesInteractive() {
 }
 
 app.whenReady().then(async () => {
-  initDB();
-  registerCustomProtocol();
-  // Setup auto-updater (will check for updates once app is ready)
   try {
-    autoUpdater.autoDownload = true;
-    autoUpdater.on('checking-for-update', () => logger.info('[auto-updater] checking for update'));
-    autoUpdater.on('update-available', (info) => console.log('[auto-updater] update available', info));
-    autoUpdater.on('update-not-available', (info) => console.log('[auto-updater] update not available', info));
-    autoUpdater.on('update-available', (info) => logger.info('[auto-updater] update available', info));
-    autoUpdater.on('update-not-available', (info) => logger.info('[auto-updater] update not available', info));
-    autoUpdater.on('error', (err) => logger.error('[auto-updater] error', err));
-    autoUpdater.on('download-progress', (progress) => logger.info('[auto-updater] progress', progress));
-    autoUpdater.on('update-downloaded', (info) => {
-      logger.info('[auto-updater] update downloaded', info);
-      // quit and install automatically
-      setTimeout(() => {
-        try { autoUpdater.quitAndInstall(); } catch (e) { console.error('[auto-updater] quitAndInstall error', e); }
-      }, 2000);
-    });
-    // trigger check
-    setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[auto-updater] check error', e); } }, 3000);
-  } catch (e) { console.error('[auto-updater] setup error', e); }
-  await createMainWindow();
+    console.log('[DEBUG] App ready event triggered');
+    logger.info('[DEBUG] App ready event triggered');
+    
+    console.log('[DEBUG] Initializing database...');
+    initDB();
+    console.log('[DEBUG] Database initialized');
+    
+    console.log('[DEBUG] Registering custom protocol...');
+    registerCustomProtocol();
+    console.log('[DEBUG] Custom protocol registered');
+    
+    // Setup auto-updater (will check for updates once app is ready)
+    // アップデート機能を一時的に無効化（サーバー問題回避）
+    const ENABLE_AUTO_UPDATE = false;
+    
+    if (ENABLE_AUTO_UPDATE) {
+      try {
+        console.log('[DEBUG] Setting up auto-updater...');
+        autoUpdater.autoDownload = true;
+        autoUpdater.autoInstallOnAppQuit = false; // 手動でインストールタイミングを制御
+      autoUpdater.on('checking-for-update', () => logger.info('[auto-updater] checking for update'));
+      autoUpdater.on('update-available', (info) => console.log('[auto-updater] update available', info));
+      autoUpdater.on('update-not-available', (info) => console.log('[auto-updater] update not available', info));
+      autoUpdater.on('update-available', (info) => logger.info('[auto-updater] update available', info));
+      autoUpdater.on('update-not-available', (info) => logger.info('[auto-updater] update not available', info));
+      autoUpdater.on('error', (err) => {
+        logger.error('[auto-updater] error', err);
+        console.log('[auto-updater] Update check failed:', err.message);
+        // ネットワークエラーやサーバーエラーの場合は静かに失敗
+        if (err.message && (
+          err.message.includes('403') || 
+          err.message.includes('Forbidden') ||
+          err.message.includes('ENOTFOUND') ||
+          err.message.includes('net::ERR_')
+        )) {
+          console.log('[auto-updater] Network/server error detected, skipping update check');
+        }
+      });
+      autoUpdater.on('download-progress', (progress) => logger.info('[auto-updater] progress', progress));
+      autoUpdater.on('update-downloaded', (info) => {
+        logger.info('[auto-updater] update downloaded', info);
+        console.log('[auto-updater] Update downloaded, preparing to install...');
+        
+        // 適切なプロセス終了処理を実行してからインストール
+        setTimeout(async () => {
+          try {
+            console.log('[auto-updater] Starting graceful shutdown for update...');
+            
+            // 1. すべてのコンテナウィンドウを閉じる
+            try {
+              console.log('[auto-updater] Closing all containers...');
+              if (closeAllContainers) closeAllContainers();
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (e) {
+              console.error('[auto-updater] Error closing containers:', e);
+            }
+            
+            // 2. すべての非メインウィンドウを強制終了
+            try {
+              console.log('[auto-updater] Force closing all non-main windows...');
+              if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows();
+              await new Promise(resolve => setTimeout(resolve, 300));
+            } catch (e) {
+              console.error('[auto-updater] Error force closing windows:', e);
+            }
+            
+            // 3. メインウィンドウを閉じる
+            try {
+              console.log('[auto-updater] Closing main window...');
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.removeAllListeners();
+                mainWindow.destroy();
+              }
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (e) {
+              console.error('[auto-updater] Error closing main window:', e);
+            }
+            
+            // 4. トレイアイコンを削除
+            try {
+              if (tray && !tray.isDestroyed()) {
+                tray.destroy();
+              }
+            } catch (e) {
+              console.error('[auto-updater] Error destroying tray:', e);
+            }
+            
+            // 5. グローバルショートカットを解除
+            try {
+              globalShortcut.unregisterAll();
+            } catch (e) {
+              console.error('[auto-updater] Error unregistering shortcuts:', e);
+            }
+            
+            // 6. 終了フラグを設定
+            isQuitting = true;
+            
+            console.log('[auto-updater] Graceful shutdown completed, installing update...');
+            
+            // 7. アップデートをインストール
+            autoUpdater.quitAndInstall(false, true);
+            
+          } catch (e) {
+            console.error('[auto-updater] quitAndInstall error', e);
+            // フォールバック: 強制終了
+            setTimeout(() => process.exit(0), 1000);
+          }
+        }, 2000);
+      });
+        // trigger check
+        setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[auto-updater] check error', e); } }, 3000);
+        console.log('[DEBUG] Auto-updater setup complete');
+      } catch (e) { 
+        console.error('[auto-updater] setup error', e);
+        logger.error('[auto-updater] setup error', e);
+      }
+    } else {
+      console.log('[DEBUG] Auto-updater disabled (standalone mode)');
+      logger.info('[DEBUG] Auto-updater disabled (standalone mode)');
+    }
+    
+    console.log('[DEBUG] Creating main window...');
+    await createMainWindow();
+    console.log('[DEBUG] Main window created successfully');
   try {
     const es = await import('./exportServer');
     // determine port/enabled from env or saved settings
@@ -359,7 +543,20 @@ app.whenReady().then(async () => {
       logger.error('[main] failed to start export server', e);
       try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: String(e?.message || e) }); } catch {}
     }
-  } catch (e) { logger.error('[main] failed to start export server', e); }
+  } catch (e) { 
+    console.error('[main] failed to start export server', e);
+    logger.error('[main] failed to start export server', e); 
+  }
+  
+  console.log('[DEBUG] App initialization completed successfully');
+  logger.info('[DEBUG] App initialization completed successfully');
+  
+} catch (error) {
+  console.error('[FATAL] App initialization failed:', error);
+  logger.error('[FATAL] App initialization failed:', error);
+  // アプリ初期化失敗時は終了
+  process.exit(1);
+}
 
   // IPC: get/save export settings & status
   ipcMain.handle('export.getSettings', () => {
@@ -510,11 +707,21 @@ ipcMain.handle('devtools.toggleView', (_e) => {
 });
 
 app.on('window-all-closed', () => {
-  // Close all opened container windows when main window is closed, then quit.
+  // Protection: Don't quit if mainWindow still exists (e.g., after container close)
+  // Only quit when all windows including mainWindow are actually closed
   try {
-    const cm = require('./containerManager');
-    if (cm && cm.closeAllContainers) cm.closeAllContainers();
-  } catch {}
+    const allWindows = BrowserWindow.getAllWindows();
+    const hasMainWindow = allWindows.some((w: any) => w === mainWindow && !w.isDestroyed());
+    if (hasMainWindow) {
+      console.log('[main] window-all-closed: mainWindow still exists, skipping app.quit()');
+      return;
+    }
+  } catch (e) {
+    console.error('[main] window-all-closed: error checking mainWindow', e);
+  }
+  
+  // Close all opened container windows when main window is closed, then quit.
+  try { if (closeAllContainers) closeAllContainers(); } catch {}
   try { if (closeAllNonMainWindows) closeAllNonMainWindows(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
@@ -529,10 +736,7 @@ app.on('before-quit', () => {
 
 // fallback: force destroy non-main windows shortly after quit if any remain
 app.on('will-quit', () => {
-  try {
-    const cm = require('./containerManager');
-    if (cm && cm.forceCloseAllNonMainWindows) cm.forceCloseAllNonMainWindows();
-  } catch (e) { console.error('[main] will-quit force close error', e); }
+  try { if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows(); } catch (e) { console.error('[main] will-quit force close error', e); }
 });
 
 // === IPC（メインUI向け） ===
@@ -830,15 +1034,53 @@ function handleArgv(argv: string[]) {
 }
 
 // Windows: 二重起動時のプロトコル引数
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  app.quit();
-} else {
-  app.on('second-instance', (_event, argv) => {
-    handleArgv(argv);
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+// シングルインスタンスロックを有効化して別プロセス起動を抑止する
+const ENABLE_SINGLE_INSTANCE = true;
+
+// デバッグ情報をログファイルに出力
+try {
+  const debugInfo = {
+    ENABLE_SINGLE_INSTANCE,
+    NODE_ENV: process.env.NODE_ENV,
+    ELECTRON_RENDERER_URL: process.env.ELECTRON_RENDERER_URL,
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    timestamp: new Date().toISOString()
+  };
+  logger.info('[DEBUG] Environment check:', debugInfo);
+  console.log('[DEBUG] Environment check:', JSON.stringify(debugInfo, null, 2));
+} catch (e) {
+  console.log('[DEBUG] Failed to log environment info:', e);
 }
+
+let gotLock = true;
+
+if (ENABLE_SINGLE_INSTANCE) {
+  gotLock = app.requestSingleInstanceLock();
+  logger.info('[DEBUG] Single instance lock result:', gotLock);
+  console.log('[DEBUG] Single instance lock result:', gotLock);
+  
+  if (!gotLock) {
+    const msg = '[DEBUG] Single instance lock failed, quitting...';
+    logger.error(msg);
+    console.log(msg);
+    app.quit();
+    process.exit(1);
+  } else {
+    const msg = '[DEBUG] Single instance lock acquired successfully';
+    logger.info(msg);
+    console.log(msg);
+  }
+} else {
+  const msg = '[DEBUG] Single instance lock disabled';
+  logger.info(msg);
+  console.log(msg);
+}
+
+app.on('second-instance', (_event, argv) => {
+  handleArgv(argv);
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});

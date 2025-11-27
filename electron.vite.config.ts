@@ -26,6 +26,12 @@ export default defineConfig({
     },
   },
   renderer: {
+    vite: {
+      server: {
+        port: 5173,
+        open: false,
+      },
+    },
     build: {
       rollupOptions: {
         input: {

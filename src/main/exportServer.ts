@@ -7,6 +7,7 @@ import { DB } from './db';
 import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, getActiveWebContents } from './containerManager';
 import { getToken } from './tokenStore';
 import { session } from 'electron';
+import type { WebContents } from 'electron';
 import setCookieParser from 'set-cookie-parser';
 import crypto from 'node:crypto';
 
@@ -14,6 +15,16 @@ const locks = new Set<string>();
 
 function jsonResponse(res: http.ServerResponse, status: number, body: any) {
   const s = JSON.stringify(body);
+  try {
+    // 軽量ログ：ステータス・bodyの要点・文字長を出力（ログ失敗は無視）
+    let bodySummary: any = undefined;
+    if (body && typeof body === 'object') {
+      bodySummary = { ok: (body as any).ok, error: (body as any).error };
+    } else {
+      bodySummary = body;
+    }
+    console.log('[exportServer] respond', { status, bodySummary, len: s.length });
+  } catch (e) { /* ignore logging errors */ }
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(s);
 }
@@ -37,6 +48,45 @@ function parseBodyRaw(req: http.IncomingMessage): Promise<{ raw: string; json: a
       try { if (!acc) return resolve({ raw: '', json: {} }); return resolve({ raw: acc, json: JSON.parse(acc) }); } catch (e) { return reject(e); }
     });
     req.on('error', reject);
+  });
+}
+
+type NavigationWebContents = WebContents & {
+  once(event: string, listener: (...args: unknown[]) => void): NavigationWebContents;
+  removeListener(event: string, listener: (...args: unknown[]) => void): NavigationWebContents;
+};
+
+function waitForNavigationComplete(wc: WebContents, timeoutMs: number): Promise<void> {
+  const raw = wc as NavigationWebContents;
+  return new Promise((resolve, reject) => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    const onNavigate = () => {
+      cleanup();
+      resolve();
+    };
+    const onFail = (_event: unknown, errorCode: number, errorDescription: string, _validatedURL: string, isMainFrame: boolean) => {
+      if (!isMainFrame) return;
+      cleanup();
+      reject(new Error(errorDescription || `navigation failed (${errorCode})`));
+    };
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      raw.removeListener('did-navigate', onNavigate);
+      raw.removeListener('did-fail-load', onFail);
+    };
+    // did-navigateで通信成功を判定（早期レスポンス）
+    raw.once('did-navigate', onNavigate);
+    raw.once('did-fail-load', onFail);
+    const effectiveTimeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : 0;
+    if (effectiveTimeout > 0) {
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('navigation timeout'));
+      }, effectiveTimeout);
+    }
   });
 }
 
@@ -69,9 +119,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         try {
           const c = DB.getContainer(id);
           if (!c) throw new Error('container not found');
-          // ensure opened and restored
+          // ensure opened and restored (open via API should be single-tab)
           if (!isContainerOpen(id)) {
-            await openContainerWindow(c, undefined, { restore: true });
+            await openContainerWindow(c, undefined, { restore: true, singleTab: true });
           }
 
           // auth injection (optional - default true)
@@ -172,6 +222,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           const timeoutMs = Number(options.timeoutMs || 30000);
           if (!contextId || !command) return jsonResponse(res, 400, { ok: false, error: 'missing contextId or command' });
 
+          console.log('[exportServer] exec request', { contextId, command, url: body.url, selector: body.selector, evalId: body.exprId, options });
           if (locks.has(contextId)) return jsonResponse(res, 409, { ok: false, error: 'context busy' });
           locks.add(contextId);
           const tstart = Date.now();
@@ -179,9 +230,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             // resolve container
             const c = DB.getContainer(contextId);
             if (!c) throw new Error('container not found');
-            // ensure container open
+            // ensure container open (when opened via API prefer single-tab)
             if (!isContainerOpen(contextId)) {
-              await openContainerWindow(c, undefined, { restore: true });
+              await openContainerWindow(c, undefined, { restore: true, singleTab: true });
             }
             // get active webContents
             const wc = getActiveWebContents(contextId);
@@ -200,35 +251,31 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             };
 
             let navigationOccurred = false;
+            let evalResult: any = undefined;
             if (command === 'navigate') {
               const url = String(body.url || '');
               if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
               try {
+                const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
+                // 先にナビゲーション完了待機をセットしてから loadURL を呼ぶ（did-navigate を見逃さないため）
+                const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
                 await wc.loadURL(url);
+                await navPromise;
                 if (options.waitForSelector) {
                   const ok = await waitForSelector(options.waitForSelector, timeoutMs);
                   if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
                 }
                 navigationOccurred = true;
               } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
-            } else if (command === 'click' || command === 'type' || command === 'eval') {
+            } else if (command === 'type' || command === 'eval') {
               const selector = body.selector;
-              if ((command === 'click' || command === 'type') && !selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              if (command === 'type' && !selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
               if (options.waitForSelector) {
                 const ok = await waitForSelector(options.waitForSelector, timeoutMs);
                 if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
               }
               try {
-                if (command === 'click') {
-                  let script: string;
-                  if (typeof selector === 'string' && selector.startsWith('xpath:')) {
-                    const xp = selector.slice(6);
-                    script = `(function(){const node = document.evaluate(${JSON.stringify(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(!node) throw new Error('selector not found'); node.click(); return true;})()`;
-                  } else {
-                    script = `(function(sel){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.click(); return true;})(${JSON.stringify(selector)});`;
-                  }
-                  await wc.executeJavaScript(script, true);
-                } else if (command === 'type') {
+                if (command === 'type') {
                   const text = String(body.text || '');
                   let script: string;
                   if (typeof selector === 'string' && selector.startsWith('xpath:')) {
@@ -239,11 +286,43 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                   }
                   await wc.executeJavaScript(script, true);
                 } else if (command === 'eval') {
-                  const expr = String(body.eval || '');
-                  if (!expr) return jsonResponse(res, 400, { ok: false, error: 'missing eval' });
-                  const rval = await wc.executeJavaScript(`(function(){return (${expr});})()`, true);
-                  const elapsed = Date.now() - tstart;
-                  return jsonResponse(res, 200, { ok: true, command, result: rval, elapsedMs: elapsed });
+                  const rawEval = body.eval;
+                  if (rawEval === undefined || rawEval === null) return jsonResponse(res, 400, { ok: false, error: 'missing eval' });
+                  // Support client sending JSON-stringified expr; try parse but fall back to raw string
+                  let exprStr: string = rawEval as any;
+                  if (typeof rawEval === 'string') {
+                    try { const parsed = JSON.parse(rawEval); if (typeof parsed === 'string') exprStr = parsed; } catch {}
+                  } else {
+                    exprStr = String(rawEval);
+                  }
+                  // Execute the expression directly (no template wrapping) and capture runtime/syntax errors with details
+                  try {
+                    evalResult = await wc.executeJavaScript(exprStr, true);
+                  } catch (e:any) {
+                    const message = String(e?.message || e);
+                    const stack = String(e?.stack || '');
+                    const stackShort = stack.split('\\n').slice(0,5).join('\\n');
+                    // try to extract line/column from stack (format: <anonymous>:line:column)
+                    let line: number | null = null;
+                    let column: number | null = null;
+                    const m = stack.match(/:(\\d+):(\\d+)/);
+                    if (m) { line = Number(m[1]); column = Number(m[2]); }
+                    // snippet: extract corresponding line from expr if available
+                    let snippet: string | null = null;
+                    try {
+                      if (line !== null) {
+                        const lines = exprStr.split(/\\r?\\n/);
+                        const idx = Math.max(0, line - 1);
+                        snippet = (lines[idx] || '').trim().slice(0, 200);
+                      } else {
+                        snippet = String(exprStr).slice(0, 200);
+                      }
+                    } catch {}
+                    const context = String(exprStr).slice(-80);
+                    const errorDetail: any = { message, stack: stackShort, line, column, snippet, context, exprId: body.exprId || null, sourceSnippet: body.sourceSnippet || null };
+                    return jsonResponse(res, 500, { ok: false, error: message, errorDetail });
+                  }
+                  // do not return here; allow post-collection collection (html/cookies/screenshot) to run and include evalResult
                 }
               } catch (e:any) {
                 const msg = String(e?.message || e);
@@ -261,10 +340,68 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             let html: string | null = null;
             if (options.returnHtml && options.returnHtml !== 'none') {
               try {
-                const full = await wc.executeJavaScript('document.documentElement.outerHTML', true);
-                if (options.returnHtml === 'trim') html = String(full).slice(0, 32 * 1024);
-                else html = String(full);
-              } catch {}
+                // in-page sanitizer: clone DOM, remove styles/scripts/comments, strip inline styles and data: URLs
+                const isTrim = (options.returnHtml === 'trim');
+                const maxLen = isTrim ? (64 * 1024) : 0;
+                
+                // HTML取得にタイムアウト機構を追加
+                const htmlTimeoutMs = 10000; // 10秒タイムアウト
+                const htmlPromise = wc.executeJavaScript(`(function(maxLen,isTrim){
+  try {
+    const doc = document.documentElement.cloneNode(true);
+    // remove style/link/script/noscript
+    doc.querySelectorAll('style, link[rel="stylesheet"], script, noscript').forEach(n => n.remove());
+    // remove comments
+    try {
+      const walker = document.createTreeWalker(doc, NodeFilter.SHOW_COMMENT, null, false);
+      const comments = [];
+      while (walker.nextNode()) comments.push(walker.currentNode);
+      comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
+    } catch(e) {}
+    // strip inline styles
+    doc.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'));
+    // remove data: URLs from src/href to avoid huge base64 blobs
+    doc.querySelectorAll('[src],[href]').forEach(el => {
+      try {
+        const a = el.getAttribute('src') || el.getAttribute('href');
+        if (typeof a === 'string' && a.startsWith('data:')) {
+          if (el.hasAttribute('src')) el.setAttribute('src','');
+          if (el.hasAttribute('href')) el.setAttribute('href','');
+        }
+      } catch(e) {}
+    });
+    // remove some meta selectors likely irrelevant
+    const removeSelectors = ['meta[http-equiv]','meta[name=\"google-site-verification\"]','meta[name=\"robots\"]'];
+    removeSelectors.forEach(s => { try { doc.querySelectorAll(s).forEach(n => n.remove()); } catch(e) {} });
+    // remove class attributes from all elements without deleting elements themselves
+    try { doc.querySelectorAll('[class]').forEach((el) => { try { el.removeAttribute('class'); } catch(e) {} }); } catch(e) {}
+    // If trim mode requested, return only body innerHTML (to focus on content)
+    let out = '';
+    try {
+      if (isTrim) {
+        const b = doc.querySelector('body');
+        out = b ? (b.innerHTML || '') : (doc.outerHTML || '');
+      } else {
+        out = doc.outerHTML || '';
+      }
+    } catch(e) { out = doc.outerHTML || ''; }
+    if (typeof maxLen === 'number' && maxLen > 0) out = out.slice(0, maxLen);
+    return out;
+  } catch(e) { return null; }
+})(${maxLen}, ${isTrim})`, true);
+
+                const timeoutPromise = new Promise((_, reject) => {
+                  setTimeout(() => reject(new Error('HTML fetch timeout')), htmlTimeoutMs);
+                });
+
+                const full = await Promise.race([htmlPromise, timeoutPromise]);
+                html = full ? String(full) : null;
+                const htmlLen = html ? html.length : 0;
+                console.log('[exportServer] html len', htmlLen, 'contextId=', contextId);
+              } catch (e:any) {
+                console.error('[exportServer] html fetch error', e?.message || e);
+                // HTML取得失敗時もレスポンスを継続
+              }
             }
             // cookies
             let cookies: any[] | null = null;
@@ -287,7 +424,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             }
 
             const elapsed = Date.now() - tstart;
-            return jsonResponse(res, 200, { ok: true, command, navigationOccurred, url: urlNow, title, html, screenshotPath: shotPath, cookies, elapsedMs: elapsed });
+            const out: any = { ok: true, command, navigationOccurred, url: urlNow, title, html, screenshotPath: shotPath, cookies, elapsedMs: elapsed };
+            if (typeof evalResult !== 'undefined') out.result = evalResult;
+            return jsonResponse(res, 200, out);
           } catch (e:any) {
             const msg = String(e?.message || e);
             if (msg && msg.toLowerCase().includes('timeout')) return jsonResponse(res, 504, { ok: false, error: 'timeout' });

@@ -3,6 +3,7 @@ declare global {
   interface Window {
     containerShellAPI: {
       onContext: (cb: (ctx: any) => void) => () => void;
+      onDevtoolsChange?: (cb: (payload: any) => void) => () => void;
       navigate: (payload: { containerId: string; url: string }) => Promise<boolean>;
     }
   }
@@ -162,7 +163,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const btn = document.createElement('button'); btn.className = 'tab-btn';
       // Prefer tab title, fall back to container name + index when no title/url present
       const containerName = (window as any).__containerName ?? '';
-      const label = (t.title && t.title.length > 0) ? t.title : (t.url || ((containerName ? (containerName + ' ') : '') + 'Tab ' + (idx+1)));
+      const titleFromMain = t.title && t.title.length > 0 ? t.title : null;
+      const urlFromMain = t.url || '';
+      const looksLikeDev = (titleFromMain && /devtools/i.test(titleFromMain)) || /devtools:|devtools\/|chrome-devtools/i.test(urlFromMain) || (titleFromMain && titleFromMain.startsWith('Dev-'));
+      const label = looksLikeDev ? (`Dev-${containerName}`) : (titleFromMain || urlFromMain || ((containerName ? (containerName + ' ') : '') + 'Tab ' + (idx+1)));
       const span = document.createElement('span');
       span.textContent = label;
       span.style.display = 'inline-block';
@@ -170,6 +174,19 @@ document.addEventListener('DOMContentLoaded', () => {
       span.style.overflow = 'hidden';
       span.style.textOverflow = 'ellipsis';
       span.style.whiteSpace = 'nowrap';
+      // If this tab looks like a DevTools tab, prepend a common icon
+      if (looksLikeDev) {
+        try {
+          const ico = document.createElement('img');
+          // use renderer-served favicon; adjust path if you want a packaged asset
+          ico.src = '/favicon.ico';
+          ico.style.width = '16px';
+          ico.style.height = '16px';
+          ico.style.marginRight = '8px';
+          ico.style.verticalAlign = 'middle';
+          btn.appendChild(ico);
+        } catch (e) { /* ignore */ }
+      }
       btn.appendChild(span);
       btn.title = label;
       // Use activeIndex provided by main process as the single source of truth
@@ -275,6 +292,31 @@ document.addEventListener('DOMContentLoaded', () => {
     } } catch (e) { console.error('[shell] onContext renderTabs error', e); }
     try { setupBookmarks(); } catch (e) { console.error('[shell] setupBookmarks error', e); }
   });
+
+  // Listen for devtools open/close notifications from main and update tabs UI
+  try {
+    if ((window as any).containerShellAPI && typeof (window as any).containerShellAPI.onDevtoolsChange === 'function') {
+      (window as any).containerShellAPI.onDevtoolsChange((p: any) => {
+        try {
+          if (!p || !p.containerId || p.containerId !== containerId) return;
+          const idx = (p.tabIndex ?? 0);
+          const name = p.containerName ?? ((window as any).__containerName ?? '');
+          // Ensure currentTabs has slot
+          if (!currentTabs) currentTabs = [];
+          if (!currentTabs[idx]) currentTabs[idx] = { url: '', title: '' };
+          if (p.isOpen) {
+            currentTabs[idx].title = `Dev-${name}`;
+            try { currentTabs[idx].favicon = '/favicon.ico'; } catch {}
+          } else {
+            // restore to URL-based title (main will send context shortly, but do a best-effort)
+            currentTabs[idx].title = currentTabs[idx].url || '';
+            try { currentTabs[idx].favicon = null; } catch {}
+          }
+          try { renderTabs(currentTabs); } catch (e) { console.error('[shell] renderTabs after devtools change error', e); }
+        } catch (e) { console.error('[shell] onDevtoolsChange handler error', e); }
+      });
+    }
+  } catch (e) { /* ignore */ }
 });
 
 
