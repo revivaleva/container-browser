@@ -79,9 +79,13 @@ contextBridge.exposeInMainWorld('appAPI', {
 contextBridge.exposeInMainWorld('deviceAPI', {
   getDeviceId: () => ipcRenderer.invoke('auth.getDeviceId')
 });
-// expose validation helper
+// expose validation helper and quota consumption
 contextBridge.exposeInMainWorld('authAPI', {
-  validateToken: (opts?: any) => ipcRenderer.invoke('auth.validateToken', opts || {})
+  validateToken: (opts?: any) => ipcRenderer.invoke('auth.validateToken', opts || {}),
+  heartbeat: (opts?: any) => ipcRenderer.invoke('auth.heartbeat', opts || {}),
+  useQuota: (count?: number) => ipcRenderer.invoke('auth.use', { count: count || 1 }),
+  getSettings: () => ipcRenderer.invoke('auth.getSettings'),
+  saveSettings: (payload: any) => ipcRenderer.invoke('auth.saveSettings', payload)
 });
 
 // Export server settings/status API

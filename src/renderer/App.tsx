@@ -9,6 +9,7 @@ declare global {
       saveSettings: (payload: any) => Promise<any>;
       getStatus: () => Promise<any>;
       onStatus: (cb: (payload: any) => void) => () => void;
+      onOpenSettings?: (cb: () => void) => () => void;
     };
     containersAPI: {
       list: () => Promise<Container[]>;
@@ -21,6 +22,23 @@ declare global {
     prefsAPI: {
       get: (payload: { containerId: string; origin: string }) => Promise<any>;
       set: (payload: { containerId: string; origin: string; autoFill: 0|1; autoSaveForms: 0|1 }) => Promise<boolean>;
+    };
+    authAPI?: {
+      validateToken: (opts?: any) => Promise<any>;
+      useQuota?: (count?: number) => Promise<any>;
+      getSettings?: () => Promise<any>;
+      saveSettings?: (payload: any) => Promise<any>;
+    };
+    appAPI?: {
+      getToken: () => Promise<any>;
+      saveToken: (token: string) => Promise<any>;
+      clearToken: () => Promise<any>;
+      getVersion: () => Promise<string>;
+      checkForUpdates: () => Promise<any>;
+      exit: () => Promise<any>;
+    };
+    deviceAPI?: {
+      getDeviceId: () => Promise<any>;
     };
   }
 }
@@ -43,6 +61,7 @@ export default function App() {
   const [modalProxyPassword, setModalProxyPassword] = useState<string>('');
   const [modalProxyType, setModalProxyType] = useState<'http' | 'socks5'>('http');
   const [modalNote, setModalNote] = useState<string>('');
+  const [modalStatus, setModalStatus] = useState<string>('未使用');
   const [fpLocale, setFpLocale] = useState('ja-JP');
   const [fpAcceptLang, setFpAcceptLang] = useState('ja,en-US;q=0.8,en;q=0.7');
   const [fpTimezone, setFpTimezone] = useState('Asia/Tokyo');
@@ -184,26 +203,230 @@ export default function App() {
       webglRenderer: fpWebglRenderer || undefined,
     };
     if (!proxy) fingerprint.fakeIp = fpFakeIp;
-    const payload = proxy ? { id, name: modalContainerName, fingerprint, proxy } : { id, name: modalContainerName, fingerprint };
+    const payload = proxy ? { id, name: modalContainerName, note: modalNote || undefined, status: modalStatus, fingerprint, proxy } : { id, name: modalContainerName, note: modalNote || undefined, status: modalStatus, fingerprint };
     await window.containersAPI.update(payload);
-    await (window as any).containersAPI.setNote({ id, note: modalNote === '' ? null : modalNote });
     await refresh();
     setOpenSettingsId(null);
   }
 
   // Helper: check remaining quota before allowing new container creation
-  async function canCreateContainer(): Promise<boolean> {
+  async function canCreateContainer(): Promise<{ ok: boolean; message?: string }> {
     try {
-      const tokenResp = await (window as any).appAPI.getToken();
-      const validateResp = await (window as any).authAPI.validateToken();
-      if (validateResp && validateResp.ok && validateResp.data && typeof validateResp.data.remaining_quota === 'number') {
-        const remaining = validateResp.data.remaining_quota;
-        // count current containers
-        const current = list.length;
-        return current < remaining;
+      // Check if token is set
+      const tokenResp = await (window as any).appAPI?.getToken?.();
+      const hasToken = !!(tokenResp?.ok && tokenResp?.token);
+      
+      if (!hasToken) {
+        // No token - allow creation without restrictions
+        return { ok: true };
       }
-    } catch (e) {}
+      
+      // Token exists - check quota
+      const validateResp = await (window as any).authAPI.validateToken();
+      if (!validateResp || !validateResp.ok) {
+        // Token validation failed - still allow creation
+        console.warn('[containers] token validation failed, but allowing creation');
+        return { ok: true };
+      }
+      
+      if (!validateResp.data || typeof validateResp.data.remaining_quota !== 'number') {
+        // Can't determine quota - allow creation
+        return { ok: true };
+      }
+      
+      const remaining = validateResp.data.remaining_quota;
+      const current = list.length;
+      if (current >= remaining) {
+        return { ok: false, message: `同時作成数が上限に達しています（現在: ${current}個、上限: ${remaining}個）` };
+      }
+      return { ok: true };
+    } catch (e) {
+      // Error checking quota - allow creation anyway
+      console.warn('[containers] quota check error, allowing creation:', e);
+      return { ok: true };
+    }
+  }
+
+  // Helper: Setup heartbeat timer based on session_expires_at
+  function setupHeartbeatTimer() {
+    const expiryStr = localStorage.getItem('session_expires_at');
+    if (!expiryStr) return;
+    
+    const expiryTime = parseInt(expiryStr) * 1000; // Convert to ms
+    const now = Date.now();
+    const timeUntilExpiry = expiryTime - now;
+    const bufferTime = 5 * 60 * 1000; // 5 minutes before expiry
+    
+    // Cancel existing timer
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    
+    // Schedule heartbeat 5 minutes before expiry
+    const nextHeartbeatTime = timeUntilExpiry - bufferTime;
+    if (nextHeartbeatTime > 0) {
+      const timer = setTimeout(() => {
+        performHeartbeat();
+      }, Math.max(nextHeartbeatTime, 0));
+      setHeartbeatTimer(timer);
+      console.log('[heartbeat] scheduled in', nextHeartbeatTime / 1000, 'seconds');
+    } else {
+      // Already expired or about to expire, perform heartbeat now
+      performHeartbeat();
+    }
+  }
+
+  // Helper: Perform heartbeat to extend session
+  async function performHeartbeat() {
+    try {
+      console.log('[heartbeat] executing');
+      const validateResp = await (window as any).authAPI?.heartbeat?.();
+      if (validateResp?.ok && validateResp?.data) {
+        const newSessionExpiry = validateResp.data.session_expires_at;
+        localStorage.setItem('session_expires_at', newSessionExpiry.toString());
+        console.log('[heartbeat] success, session extended until', new Date(newSessionExpiry * 1000).toLocaleString('ja-JP'));
+        // Schedule next heartbeat
+        setupHeartbeatTimer();
+      } else {
+        console.warn('[heartbeat] failed', validateResp?.body?.code || validateResp?.error);
+        if (validateResp?.body?.code === 'BOUND_TO_OTHER') {
+          alert('別のPCでこのトークンが使用されています。再度ログインしてください。');
+          await (window as any).appAPI?.clearToken?.();
+          setTokenInfo({ hasToken: false });
+        }
+      }
+    } catch (e: any) {
+      console.error('[heartbeat] error', e);
+    }
+  }
+
+  // Helper: Check if session has expired
+  function checkSessionExpiry() {
+    const expiryStr = localStorage.getItem('session_expires_at');
+    if (!expiryStr) return false;
+    
+    const expiryTime = parseInt(expiryStr);
+    const now = Math.floor(Date.now() / 1000);
+    
+    if (now > expiryTime) {
+      console.warn('[session] expired, re-authenticating');
+      performHeartbeat(); // Attempt to re-authenticate
+      return true;
+    }
     return false;
+  }
+
+  // Helper: fetch token info (status and quota)
+  async function fetchTokenInfo() {
+    try {
+      const tokenResp = await (window as any).appAPI?.getToken?.();
+      const hasToken = !!(tokenResp?.ok && tokenResp?.token);
+      
+      if (!hasToken) {
+        // No token set - allow to work without restrictions
+        setTokenInfo({ hasToken: false });
+        localStorage.removeItem('session_expires_at');
+        localStorage.removeItem('remaining_quota');
+        console.log('[auth] no token set, working without quota restrictions');
+        return;
+      }
+
+      // Token exists - validate it
+      const validateResp = await (window as any).authAPI?.validateToken?.();
+      if (validateResp?.ok && validateResp?.data) {
+        // Save to localStorage
+        localStorage.setItem('session_expires_at', validateResp.data.session_expires_at.toString());
+        localStorage.setItem('remaining_quota', validateResp.data.remaining_quota.toString());
+        
+        setTokenInfo({
+          hasToken: true,
+          remaining_quota: validateResp.data.remaining_quota,
+          bound: validateResp.data.bound,
+          session_expires_at: validateResp.data.session_expires_at,
+          expires_at: validateResp.data.expires_at
+        });
+        
+        // Setup heartbeat timer
+        setupHeartbeatTimer();
+      } else {
+        // Token validation failed - but still allow usage
+        console.warn('[auth] token validation failed, but allowing to work');
+        setTokenInfo({
+          hasToken: true,
+          error: validateResp?.status ? `検証失敗 (${validateResp.status})` : '検証失敗'
+        });
+      }
+    } catch (e: any) {
+      console.warn('[auth] token check error, allowing to work anyway', e?.message);
+      setTokenInfo({ hasToken: false });
+    }
+  }
+
+  // Helper: authenticate with token
+  async function handleAuthenticate() {
+    if (!tokenInput.trim()) {
+      alert('トークンを入力してください');
+      return;
+    }
+    setIsAuthenticating(true);
+    try {
+      // Save token
+      const saveResp = await (window as any).appAPI?.saveToken?.(tokenInput.trim());
+      if (!saveResp?.ok) {
+        alert('トークンの保存に失敗しました');
+        setIsAuthenticating(false);
+        return;
+      }
+      
+      // Get device ID
+      const deviceResp = await (window as any).deviceAPI?.getDeviceId?.();
+      if (deviceResp?.ok && deviceResp?.deviceId) {
+        localStorage.setItem('deviceId', deviceResp.deviceId);
+      }
+      
+      // Validate token
+      const validateResp = await (window as any).authAPI?.validateToken?.();
+      if (validateResp?.ok && validateResp?.data) {
+        // Save to localStorage
+        localStorage.setItem('session_expires_at', validateResp.data.session_expires_at.toString());
+        localStorage.setItem('remaining_quota', validateResp.data.remaining_quota.toString());
+        
+        setTokenInfo({
+          hasToken: true,
+          remaining_quota: validateResp.data.remaining_quota,
+          bound: validateResp.data.bound,
+          session_expires_at: validateResp.data.session_expires_at,
+          expires_at: validateResp.data.expires_at
+        });
+        setTokenInput('');
+        alert('トークンを設定しました');
+        
+        // Setup heartbeat timer
+        setupHeartbeatTimer();
+      } else {
+        alert('トークンの検証に失敗しました: ' + (validateResp?.error || '不明なエラー'));
+        await (window as any).appAPI?.clearToken?.();
+        localStorage.removeItem('session_expires_at');
+        localStorage.removeItem('remaining_quota');
+        setTokenInfo({ hasToken: false, error: '検証失敗' });
+      }
+    } catch (e: any) {
+      alert('エラー: ' + (e?.message || '不明'));
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }
+
+  // Helper: clear token
+  async function handleClearToken() {
+    const ok = window.confirm('トークンを削除してもよろしいですか？');
+    if (!ok) return;
+    try {
+      await (window as any).appAPI?.clearToken?.();
+      setTokenInfo({ hasToken: false });
+      setTokenInput('');
+      alert('トークンを削除しました');
+    } catch (e: any) {
+      alert('削除に失敗しました: ' + (e?.message || '不明'));
+    }
   }
 
   useEffect(() => { refresh(); }, []);
@@ -223,6 +446,12 @@ export default function App() {
   const [exportPort, setExportPort] = useState<number>(3001);
   const [exportStatus, setExportStatus] = useState<{ running: boolean; port: number; error?: string } | null>(null);
   const [openAsSettingsSignal, setOpenAsSettingsSignal] = useState<boolean>(false);
+  const [tokenInfo, setTokenInfo] = useState<{ hasToken: boolean; remaining_quota?: number; bound?: boolean; session_expires_at?: number; expires_at?: number; error?: string } | null>(null);
+  const [tokenInput, setTokenInput] = useState<string>('');
+  const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
+  const [apiBaseInput, setApiBaseInput] = useState<string>('');
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [heartbeatTimer, setHeartbeatTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => { refresh(); }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
@@ -251,6 +480,21 @@ export default function App() {
         }
       } catch (e) { setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500); }
     })();
+    // load token info and check session expiry (optional - doesn't block if missing)
+    (async () => {
+      try {
+        // Check if session has expired
+        if (checkSessionExpiry()) {
+          console.log('[init] session expired, heartbeat triggered');
+        } else {
+          await fetchTokenInfo();
+          // Setup heartbeat timer
+          setupHeartbeatTimer();
+        }
+      } catch (e) {
+        console.log('[init] token check skipped, working without token');
+      }
+    })();
     // load export settings/status
     (async () => {
       try {
@@ -273,8 +517,11 @@ export default function App() {
     const unsub2 = window.exportAPI?.onOpenSettings?.(() => {
       try { setOpenAsSettingsSignal(true); } catch {}
     });
-    return () => { try { if (unsub) unsub(); } catch {} };
-  }, []);
+    return () => { 
+      try { if (unsub) unsub(); } catch {} 
+      try { if (heartbeatTimer) clearTimeout(heartbeatTimer); } catch {}
+    };
+  }, [heartbeatTimer]);
 
   // If this renderer was opened as a Settings window (main process adds ?settings=1),
   // render the Settings-only UI and skip the main dashboard.
@@ -285,6 +532,198 @@ export default function App() {
   const SettingsOnly = () => (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
       <h1>設定</h1>
+      
+      {/* Advanced API Settings (Troubleshooting only) */}
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8, backgroundColor: '#f9f9f9' }}>
+        <h3 
+          style={{ 
+            cursor: 'pointer', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 8,
+            fontSize: 12,
+            color: '#666',
+            margin: 0
+          }} 
+          onClick={() => setShowAdvanced(!showAdvanced)}
+        >
+          {showAdvanced ? '▼' : '▶'} トラブルシューティング
+        </h3>
+        {showAdvanced && (
+          <div style={{ marginTop: 12, padding: 12, backgroundColor: '#fff', borderRadius: 4, border: '1px solid #ddd' }}>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', marginBottom: 4, fontSize: 11, fontWeight: 'bold', color: '#666' }}>認証APIベースURL（カスタム設定用）</label>
+              <input 
+                type="text"
+                value={apiBaseInput}
+                onChange={e => setApiBaseInput(e.target.value)}
+                placeholder="https://xxx.execute-api.ap-northeast-1.amazonaws.com/prod"
+                style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 4, boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 11 }}
+              />
+              <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>
+                デフォルト: https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                onClick={async () => {
+                  try {
+                    const resp = await (window as any).authAPI?.getSettings?.();
+                    if (resp?.ok && resp?.data?.apiBase) {
+                      setApiBaseInput(resp.data.apiBase);
+                      alert('現在の設定を読み込みました');
+                    }
+                  } catch (e: any) {
+                    alert('読み込みに失敗: ' + (e?.message || '不明'));
+                  }
+                }}
+                style={{ padding: '4px 8px', fontSize: 11 }}
+              >
+                読み込み
+              </button>
+              <button 
+                onClick={async () => {
+                  if (!apiBaseInput.trim()) {
+                    alert('URLを入力してください');
+                    return;
+                  }
+                  try {
+                    const resp = await (window as any).authAPI?.saveSettings?.({ apiBase: apiBaseInput.trim() });
+                    if (resp?.ok) {
+                      alert('設定を保存しました');
+                    } else {
+                      alert('保存に失敗: ' + (resp?.error || '不明'));
+                    }
+                  } catch (e: any) {
+                    alert('保存に失敗: ' + (e?.message || '不明'));
+                  }
+                }}
+                style={{ padding: '4px 8px', fontSize: 11, backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Token Authentication Section */}
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
+        <h3>トークン認証</h3>
+        {tokenInfo?.hasToken && !tokenInfo?.error ? (
+          <div style={{ padding: 12, backgroundColor: '#d4edda', border: '1px solid #c3e6cb', borderRadius: 4, marginBottom: 12 }}>
+            <div style={{ color: '#155724', marginBottom: 8 }}>
+              <strong>✓ トークンが設定されています</strong>
+            </div>
+            <div style={{ fontSize: 12, color: '#155724', marginBottom: 8 }}>
+              トークン: {`${tokenInfo?.remaining_quota ? '●'.repeat(8) : ''}` || 'トークンID不明'}
+            </div>
+            <button 
+              onClick={handleClearToken}
+              style={{ padding: '6px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+            >
+              トークンを削除
+            </button>
+          </div>
+        ) : (
+          <div style={{ padding: 12, backgroundColor: '#f8d7da', border: '1px solid #f5c6cb', borderRadius: 4, marginBottom: 12 }}>
+            <div style={{ color: '#721c24', marginBottom: 8 }}>
+              <strong>⚠️ トークンが設定されていません</strong>
+            </div>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', marginBottom: 4, fontSize: 12, fontWeight: 'bold' }}>トークンを入力</label>
+            <input 
+              type="password"
+              value={tokenInput}
+              onChange={e => setTokenInput(e.target.value)}
+              placeholder="トークンを貼り付けてください"
+              style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 4, boxSizing: 'border-box' }}
+              disabled={isAuthenticating}
+            />
+          </div>
+          <button 
+            onClick={handleAuthenticate}
+            disabled={isAuthenticating || !tokenInput.trim()}
+            style={{ 
+              padding: '8px 16px', 
+              backgroundColor: '#0275d8', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 4, 
+              cursor: isAuthenticating ? 'not-allowed' : 'pointer',
+              opacity: isAuthenticating || !tokenInput.trim() ? 0.6 : 1
+            }}
+          >
+            {isAuthenticating ? '認証中...' : '認証'}
+          </button>
+        </div>
+      </section>
+
+      {/* License Info Section */}
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
+        <h3>ライセンス情報</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <button onClick={fetchTokenInfo} style={{ padding: '6px 12px', fontSize: 12 }}>
+            情報更新
+          </button>
+        </div>
+        {tokenInfo ? (
+          <div style={{ padding: 12, backgroundColor: '#f5f5f5', borderRadius: 4, fontSize: 14 }}>
+            {!tokenInfo.hasToken ? (
+              <div style={{ color: '#666' }}>
+                トークン未設定
+              </div>
+            ) : tokenInfo.error ? (
+              <div style={{ color: '#d9534f' }}>
+                <strong>エラー:</strong> {tokenInfo.error}
+              </div>
+            ) : (
+              <div>
+                <div style={{ marginBottom: 12, padding: 12, backgroundColor: '#ffffff', borderRadius: 4, border: '1px solid #e0e0e0' }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>同時作成可能数:</strong><br />
+                    <span style={{ fontSize: 20, fontWeight: 'bold', color: '#0275d8' }}>
+                      {tokenInfo.remaining_quota !== undefined ? tokenInfo.remaining_quota : '不明'}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
+                      現在 {list.length} 個使用中
+                    </span>
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: 8, fontSize: 13 }}>
+                  <strong>トークン状態:</strong> <span style={{ color: '#5cb85c' }}>✓ 有効</span>
+                </div>
+                <div style={{ marginBottom: 8, fontSize: 13 }}>
+                  <strong>バインド状態:</strong> <span style={{ color: tokenInfo.bound ? '#5cb85c' : '#d9534f' }}>
+                    {tokenInfo.bound ? '✓ 有効' : '✗ 未バインド'}
+                  </span>
+                </div>
+                {tokenInfo.session_expires_at && (
+                  <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>
+                    <strong>セッション有効期限:</strong><br />
+                    {new Date(tokenInfo.session_expires_at * 1000).toLocaleString('ja-JP')}
+                  </div>
+                )}
+                {tokenInfo.expires_at && (
+                  <div style={{ fontSize: 12, color: '#666' }}>
+                    <strong>トークン有効期限:</strong><br />
+                    {new Date(tokenInfo.expires_at * 1000).toLocaleString('ja-JP')}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ padding: 12, backgroundColor: '#f5f5f5', borderRadius: 4, color: '#666' }}>
+            「情報更新」ボタンをクリックして情報を取得してください
+          </div>
+        )}
+      </section>
+
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>Export Server 設定</h3>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
@@ -324,14 +763,72 @@ export default function App() {
   return isSettingsWindow ? <SettingsOnly /> : (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
 
+      {/* Info when token not set */}
+      {(!tokenInfo || !tokenInfo.hasToken) && (
+        <div style={{ padding: 12, backgroundColor: '#e7f3ff', border: '1px solid #b3d9ff', borderRadius: 8, color: '#004085' }}>
+          <strong>ℹ️ トークンが設定されていません</strong><br />
+          トークンなしで利用可能です。制限なくコンテナを作成できます。<br />
+          <span style={{ fontSize: 12, color: '#666' }}>トークンを設定して制限管理を有効にする場合は、設定画面で入力してください。</span>
+        </div>
+      )}
+
+      {/* Container Usage Status */}
+      {tokenInfo?.hasToken && !tokenInfo?.error && (
+        <div style={{ padding: 12, backgroundColor: '#e8f4f8', border: '1px solid #87ceeb', borderRadius: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ marginBottom: 8 }}>
+                <strong>コンテナ使用状況</strong>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, fontSize: 13 }}>
+                <div>
+                  <div style={{ color: '#666', fontSize: 11 }}>作成可能</div>
+                  <div style={{ fontSize: 18, fontWeight: 'bold', color: '#0275d8' }}>
+                    {tokenInfo.remaining_quota !== undefined ? tokenInfo.remaining_quota : '?'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#666', fontSize: 11 }}>使用中</div>
+                  <div style={{ fontSize: 18, fontWeight: 'bold', color: '#ffc107' }}>
+                    {list.length}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#666', fontSize: 11 }}>残可能</div>
+                  <div style={{ fontSize: 18, fontWeight: 'bold', color: '#28a745' }}>
+                    {tokenInfo.remaining_quota !== undefined ? Math.max(0, tokenInfo.remaining_quota - list.length) : '?'}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={fetchTokenInfo}
+              style={{ padding: '8px 12px', fontSize: 12, height: 'fit-content' }}
+            >
+              更新
+            </button>
+          </div>
+        </div>
+      )}
+
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="名前" />
           <button onClick={async ()=>{ 
-              const ok = await canCreateContainer();
-              if(!ok) return alert('同時作成数が上限に達しています');
-              await window.containersAPI.create({ name }); await refresh();
+              const check = await canCreateContainer();
+              if(!check.ok) return alert(check.message || '同時作成数が上限に達しています');
+              try {
+                await window.containersAPI.create({ name }); 
+                await refresh();
+              } catch (e: any) {
+                const errMsg = e?.message || String(e);
+                if (errMsg.includes('QUOTA_EXCEEDED') || errMsg.includes('Quota exceeded')) {
+                  alert('割り当ての消費に失敗しました。別のデバイスで既に使用されている可能性があります。');
+                } else {
+                  alert('コンテナ作成に失敗しました: ' + errMsg);
+                }
+              }
             }}>作成</button>
         </div>
       </section>
@@ -369,10 +866,13 @@ export default function App() {
         <ul>
           {list.map((c:any)=> (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ const raw = c.proxy?.server ?? ''; setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyType(detectProxyType(raw)); setModalProxyServer(extractHostPort(raw)); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ const raw = c.proxy?.server ?? ''; setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalStatus(c.status ?? '未使用'); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyType(detectProxyType(raw)); setModalProxyServer(extractHostPort(raw)); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
                   <label><strong>{c.name}</strong></label>
-                  <div style={{ color:'#666', fontSize:12 }}>{c.note ?? ''}</div>
+                  <div style={{ marginTop: 4, width: 'fit-content', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 'bold', color: 'white', backgroundColor: c.status === '稼働中' ? '#28a745' : c.status === '停止' ? '#dc3545' : '#6c757d' }}>
+                    {c.status ?? '未使用'}
+                  </div>
+                  <small style={{ display: 'block', marginTop: 4 }}>ID: {c.id}</small>
                 </div>
                 {/* per-container URL input removed */}
                 <div style={{ display:'flex', gap:8, marginLeft: 'auto' }}>
@@ -405,6 +905,7 @@ export default function App() {
                     setModalProxyUsername(c.proxy?.username ?? '');
                     setModalProxyPassword(c.proxy?.password ?? '');
                     setModalNote(c.note ?? '');
+                    setModalStatus(c.status ?? '未使用');
                   }}>設定</button>
                   <button style={{ marginLeft: 'auto', color: 'crimson' }} onClick={async ()=>{
                     if (!confirm(`コンテナ「${c.name}」を削除しますか？この操作は元に戻せません。`)) return;
@@ -413,7 +914,6 @@ export default function App() {
                   }}>削除</button>
                 </div>
               </div>
-              <small>ID: {c.id}</small>
 
               {openSettingsId === c.id && (
                 <div style={{ marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}>
@@ -427,6 +927,12 @@ export default function App() {
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr', gap:8, marginTop:8 }}>
                     <label>コンテナ名</label>
                     <input value={modalContainerName} onChange={e=>setModalContainerName(e.target.value)} />
+                    <label>ステータス</label>
+                    <select value={modalStatus} onChange={e=>setModalStatus(e.target.value)}>
+                      <option value="未使用">未使用</option>
+                      <option value="稼働中">稼働中</option>
+                      <option value="停止">停止</option>
+                    </select>
                     <label>メモ</label>
                     <textarea value={modalNote} onChange={e=>setModalNote(e.target.value)} style={{ width: '100%', minHeight: 80 }} />
                     <label>ロケール</label>

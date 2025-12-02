@@ -27,10 +27,13 @@ export type Fingerprint = {
   batteryCharging?: boolean;
 };
 
+export type ContainerStatus = '停止' | '稼働中' | '未使用';
+
 export type Container = {
   id: string;
   name: string;
-  note?: string;
+  note?: string;            // メモ（設定画面で表示）
+  status?: ContainerStatus;  // ステータス（コンテナ一覧で表示）
   userDataDir: string;      // プロファイル保存先
   partition: string;        // 'persist:container-<id>'
   userAgent?: string;

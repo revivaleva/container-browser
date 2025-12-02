@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
 import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows } from './containerManager';
 import './ipc';
-import { loadConfig, getExportSettings, setExportSettings } from './settings';
+import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings } from './settings';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint } from '../shared/types';
@@ -293,19 +293,29 @@ ipcMain.handle('auth.clearToken', async () => {
 });
 
 ipcMain.handle('auth.getDeviceId', async () => {
-  try { const id = getOrCreateDeviceId(); return { ok: true, deviceId: id }; } catch (e:any) { logger.error('[auth] getDeviceId error', e); return { ok: false, error: e?.message || String(e) }; }
+  try { 
+    const id = getOrCreateDeviceId(); 
+    logger.debug('[auth] getDeviceId', id);
+    return { ok: true, deviceId: id }; 
+  } catch (e:any) { 
+    logger.error('[auth] getDeviceId error', e); 
+    return { ok: false, error: e?.message || String(e) }; 
+  }
 });
 
-// Validate token against auth API (uses AUTH_API_BASE env var)
+// Validate token against auth API (uses AUTH_API_BASE env var or config)
 ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
   const MAX_RETRIES = 3;
-  const BASE_URL = process.env.AUTH_API_BASE || 'https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod';
-  const timeoutMs = Number(process.env.AUTH_API_TIMEOUT_MS || 5000);
+  const BASE_URL = getAuthApiBase();
+  const timeoutMs = getAuthTimeoutMs();
   try {
     const t = token || await getToken();
     if (!t) return { ok: false, code: 'NO_TOKEN' };
     const deviceId = getOrCreateDeviceId();
     const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
+    
+    // Get current container count
+    const containerCount = DB.listContainers().length;
 
     // helper to perform fetch with timeout
     const doFetch = async () => {
@@ -315,7 +325,11 @@ ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) =
         const res = await (global as any).fetch(url, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device_id: deviceId, device_info: { name: app.getName(), hostname: app.getName() } }),
+          body: JSON.stringify({ 
+            device_id: deviceId, 
+            device_info: { name: app.getName(), hostname: app.getName() },
+            current_container_count: containerCount
+          }),
           signal: ac.signal
         });
         clearTimeout(id);
@@ -331,10 +345,12 @@ ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) =
     while (true) {
       try {
         attempt++;
+        logger.debug('[auth] validateToken attempt', attempt, 'to', url);
         const { res, j } = await doFetch();
         if (!res.ok) {
           // 4xx -> do not retry
           if (res.status >= 400 && res.status < 500) {
+            logger.warn('[auth] validateToken 4xx error', res.status, j?.code || j?.error || 'unknown');
             return { ok: false, status: res.status, body: j };
           }
           // 5xx -> may retry
@@ -342,23 +358,78 @@ ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) =
         }
         // success
         const data = j && j.data ? j.data : j;
+        logger.info('[auth] validateToken success');
         return { ok: true, data };
       } catch (err:any) {
-        logger.warn('[auth] validateToken attempt failed', attempt, err?.message || String(err));
+        logger.warn('[auth] validateToken attempt failed', attempt, { message: err?.message, code: err?.code, errno: err?.errno });
         if (attempt >= MAX_RETRIES) {
-          logger.error('[auth] validateToken: exhausted retries', err);
-          return { ok: false, error: err?.message || String(err) };
+          logger.error('[auth] validateToken: exhausted retries after', MAX_RETRIES, 'attempts. URL:', url, 'Error:', err?.message);
+          return { ok: false, error: err?.message || String(err), details: { url, timeout: timeoutMs, attempts: MAX_RETRIES } };
         }
         // exponential backoff
         const backoff = 200 * Math.pow(2, attempt - 1);
+        logger.debug('[auth] validateToken retrying in', backoff, 'ms');
         await new Promise(r => setTimeout(r, backoff));
       }
     }
   } catch (err:any) {
-    logger.error('[auth] validateToken error', err);
+    logger.error('[auth] validateToken error', { message: err?.message, stack: err?.stack, url: getAuthApiBase() });
     return { ok: false, error: err?.message || String(err) };
   }
 });
+
+// Consume quota from token via auth API
+async function callAuthUse(token: string, deviceId: string, count: number = 1) {
+  const MAX_RETRIES = 3;
+  const BASE_URL = getAuthApiBase();
+  const timeoutMs = getAuthTimeoutMs();
+
+  const doFetch = async () => {
+    const ac = new AbortController();
+    const id = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const res = await (global as any).fetch(
+        (BASE_URL.replace(/\/$/, '')) + '/auth/use',
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: deviceId, count }),
+          signal: ac.signal
+        }
+      );
+      clearTimeout(id);
+      const j = await res.json().catch(() => null);
+      return { res, j };
+    } catch (err: any) {
+      clearTimeout(id);
+      throw err;
+    }
+  };
+
+  let attempt = 0;
+  while (true) {
+    try {
+      attempt++;
+      const { res, j } = await doFetch();
+      if (!res.ok) {
+        if (res.status >= 400 && res.status < 500) {
+          return { ok: false, status: res.status, body: j };
+        }
+        if (res.status >= 500) throw new Error(`server ${res.status}`);
+      }
+      const data = j && j.data ? j.data : j;
+      return { ok: true, data };
+    } catch (err: any) {
+      logger.warn('[auth] use attempt failed', attempt, err?.message || String(err));
+      if (attempt >= MAX_RETRIES) {
+        logger.error('[auth] use: exhausted retries', err);
+        return { ok: false, error: err?.message || String(err) };
+      }
+      const backoff = 200 * Math.pow(2, attempt - 1);
+      await new Promise(r => setTimeout(r, backoff));
+    }
+  }
+}
 
 ipcMain.handle('auth.getQuota', async () => {
   try {
@@ -374,6 +445,105 @@ ipcMain.handle('auth.getQuota', async () => {
     return { ok: false, message: 'not implemented' };
   } catch (e:any) { logger.error('[auth] getQuota error', e); return { ok:false, error: e?.message || String(e) }; }
 });
+// Heartbeat to keep session alive
+ipcMain.handle('auth.heartbeat', async (_e, { token }: { token?: string }) => {
+  const MAX_RETRIES = 3;
+  const BASE_URL = getAuthApiBase();
+  const timeoutMs = getAuthTimeoutMs();
+  try {
+    const t = token || await getToken();
+    if (!t) return { ok: false, code: 'NO_TOKEN' };
+    const deviceId = getOrCreateDeviceId();
+    const url = (BASE_URL.replace(/\/$/, '')) + '/auth/heartbeat';
+    
+    // Get current container count
+    const containerCount = DB.listContainers().length;
+
+    // helper to perform fetch with timeout
+    const doFetch = async () => {
+      const ac = new AbortController();
+      const id = setTimeout(() => ac.abort(), timeoutMs);
+      try {
+        const res = await (global as any).fetch(url, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            device_id: deviceId,
+            current_container_count: containerCount
+          }),
+          signal: ac.signal
+        });
+        clearTimeout(id);
+        const j = await res.json().catch(() => null);
+        return { res, j };
+      } catch (err:any) {
+        clearTimeout(id);
+        throw err;
+      }
+    };
+
+    let attempt = 0;
+    while (true) {
+      try {
+        attempt++;
+        logger.debug('[auth] heartbeat attempt', attempt, 'to', url);
+        const { res, j } = await doFetch();
+        if (!res.ok) {
+          if (res.status >= 400 && res.status < 500) {
+            logger.warn('[auth] heartbeat 4xx error', res.status, j?.code || j?.error || 'unknown');
+            return { ok: false, status: res.status, body: j };
+          }
+          if (res.status >= 500) throw new Error(`server ${res.status}`);
+        }
+        const data = j && j.data ? j.data : j;
+        logger.info('[auth] heartbeat success', { session_expires_at: data?.session_expires_at });
+        return { ok: true, data };
+      } catch (err:any) {
+        logger.warn('[auth] heartbeat attempt failed', attempt, { message: err?.message, code: err?.code });
+        if (attempt >= MAX_RETRIES) {
+          logger.error('[auth] heartbeat: exhausted retries after', MAX_RETRIES, 'attempts. Error:', err?.message);
+          return { ok: false, error: err?.message || String(err) };
+        }
+        const backoff = 200 * Math.pow(2, attempt - 1);
+        logger.debug('[auth] heartbeat retrying in', backoff, 'ms');
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+  } catch (err:any) {
+    logger.error('[auth] heartbeat error', { message: err?.message, stack: err?.stack });
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('auth.getSettings', async () => {
+  try {
+    const settings = getAuthSettings();
+    return { ok: true, data: settings };
+  } catch (e: any) {
+    logger.error('[auth] getSettings error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle('auth.saveSettings', async (_e, { apiBase }: { apiBase?: string }) => {
+  try {
+    if (apiBase) {
+      // Validate URL format
+      try {
+        new URL(apiBase);
+      } catch {
+        return { ok: false, error: 'Invalid URL format' };
+      }
+      setAuthSettings({ apiBase });
+      logger.info('[auth] saveSettings: apiBase updated', apiBase);
+    }
+    return { ok: true };
+  } catch (e: any) {
+    logger.error('[auth] saveSettings error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
 ipcMain.handle('app.exit', () => {
   try { isQuitting = true; app.quit(); return { ok: true }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });
@@ -765,9 +935,34 @@ ipcMain.handle('containers.setNote', (_e, { id, note }) => {
 ipcMain.on('renderer.log', (_e, msg) => {
   try { logger.info('[renderer]', msg); } catch { console.log('[renderer]', msg); }
 });
-ipcMain.handle('containers.create', (_e, { name, ua, locale, timezone, proxy }) => {
+ipcMain.handle('containers.create', async (_e, { name, ua, locale, timezone, proxy }) => {
   console.log('[ipc] containers.create', { name });
   const id = randomUUID();
+  
+  // Consume quota from token before creating container (only if token exists)
+  try {
+    const token = await getToken();
+    
+    // If no token, skip quota check and allow creation
+    if (!token) {
+      logger.debug('[containers.create] no token set, creating without quota check');
+    } else {
+      const deviceId = getOrCreateDeviceId();
+      const useResp = await callAuthUse(token, deviceId, 1);
+      if (!useResp.ok) {
+        const errorCode = useResp.status === 409 ? 'QUOTA_EXCEEDED' : 'AUTH_FAILED';
+        const errorMsg = useResp.status === 409 ? 'Quota exceeded' : (useResp.error || 'Failed to consume quota');
+        logger.warn('[containers.create] quota consumption failed', { code: errorCode, msg: errorMsg });
+        throw new Error(errorMsg);
+      }
+      logger.debug('[containers.create] quota consumed, remaining:', useResp.data?.remaining_quota);
+    }
+  } catch (err: any) {
+    logger.error('[containers.create] quota check failed', err);
+    throw err;
+  }
+
+  // Create container with fingerprint
   const fp: Fingerprint = {
     // ユーザ要望: Accept-Language 日本語固定 / timezone 日本時間固定
     // locale は ja-JP を既定（後で UI から変更可能）

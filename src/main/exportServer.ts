@@ -6,6 +6,7 @@ import os from 'node:os';
 import { DB } from './db';
 import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, getActiveWebContents } from './containerManager';
 import { getToken } from './tokenStore';
+import { getAuthApiBase, getAuthTimeoutMs } from './settings';
 import { session } from 'electron';
 import type { WebContents } from 'electron';
 import setCookieParser from 'set-cookie-parser';
@@ -136,10 +137,10 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             if (returnToken) returnedToken = token;
             
             // call auth.validate
-            const BASE_URL = process.env.AUTH_API_BASE || 'https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod';
+            const BASE_URL = getAuthApiBase();
             const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
             const ac = new AbortController();
-            const timeoutMs = 20000; // auth call timeout (part of overall 60s)
+            const timeoutMs = Math.max(20000, getAuthTimeoutMs() * 2); // auth call timeout (part of overall 60s)
             const idt = setTimeout(() => ac.abort(), timeoutMs);
             let resp;
             try {

@@ -15,6 +15,7 @@ export function initDB() {
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     note TEXT,
+    status TEXT DEFAULT '未使用',
     userDataDir TEXT NOT NULL,
     partition TEXT NOT NULL,
     userAgent TEXT,
@@ -80,8 +81,15 @@ export function initDB() {
     if (!hasFingerprint) {
       db.prepare('ALTER TABLE containers ADD COLUMN fingerprint TEXT').run();
     }
-      // migrate: add note column if missing
+      // migrate: add status column if missing (replaces note)
+      const hasStatus = cols.some(c => c.name === 'status');
       const hasNote = cols.some(c => c.name === 'note');
+      if (!hasStatus) {
+        try { 
+          db.prepare('ALTER TABLE containers ADD COLUMN status TEXT DEFAULT "未使用"').run(); 
+          // If note column exists, we can use it as reference but status is separate
+        } catch (e) { /* ignore */ }
+      }
       if (!hasNote) {
         try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
       }
@@ -111,11 +119,12 @@ export function initDB() {
 export const DB = {
   upsertContainer(c: Container) {
     const stmt = db.prepare(`
-      INSERT INTO containers (id,name,note,userDataDir,partition,userAgent,locale,timezone,fingerprint,proxy,createdAt,updatedAt,lastSessionId)
-      VALUES (@id,@name,@note,@userDataDir,@partition,@userAgent,@locale,@timezone,@fingerprint,@proxy,@createdAt,@updatedAt,@lastSessionId)
+      INSERT INTO containers (id,name,note,status,userDataDir,partition,userAgent,locale,timezone,fingerprint,proxy,createdAt,updatedAt,lastSessionId)
+      VALUES (@id,@name,@note,@status,@userDataDir,@partition,@userAgent,@locale,@timezone,@fingerprint,@proxy,@createdAt,@updatedAt,@lastSessionId)
       ON CONFLICT(id) DO UPDATE SET
         name=excluded.name,
         note=excluded.note,
+        status=excluded.status,
         userDataDir=excluded.userDataDir,
         partition=excluded.partition,
         userAgent=excluded.userAgent,
@@ -129,6 +138,7 @@ export const DB = {
     stmt.run({
       ...c,
       note: (c as any).note ?? null,
+      status: c.status ?? '未使用',
       fingerprint: c.fingerprint ? JSON.stringify(c.fingerprint) : null,
       proxy: c.proxy ? JSON.stringify(c.proxy) : null,
     });
@@ -138,6 +148,7 @@ export const DB = {
     return rows.map((r:any)=> ({
       ...r,
       note: r.note ?? undefined,
+      status: r.status ?? '未使用',
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
     }));
@@ -148,6 +159,7 @@ export const DB = {
     return {
       ...r,
       note: r.note ?? undefined,
+      status: r.status ?? '未使用',
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
     } as Container;
