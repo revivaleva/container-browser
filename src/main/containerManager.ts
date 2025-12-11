@@ -86,20 +86,155 @@ export async function openContainerWindow(container: Container, startUrl?: strin
 
   // プロキシ
   if (container.proxy?.server) {
-    await ses.setProxy({ proxyRules: container.proxy.server });
-    ses.on('login', (_e, _w, _d, cb) => {
-      if (container.proxy?.username) cb(container.proxy.username, container.proxy.password ?? '');
+    // Store credentials for use in onBeforeSendHeaders (案B)
+    const proxyUsername = container.proxy.username;
+    const proxyPassword = container.proxy.password;
+    
+    // Normalize proxy server format for Electron
+    // Electron expects format like "http=host:port;https=host:port" or just "host:port"
+    // NOTE: Electron's setProxy does NOT support embedded credentials in URL format
+    // We must use plain host:port and rely on the login event for authentication
+    let proxyRules = container.proxy.server;
+    
+    // Extract host:port from proxyRules if it contains = or ://
+    let hostPort = proxyRules;
+    if (proxyRules.includes('=')) {
+      // Extract from http=host:port or https=host:port
+      const match = proxyRules.match(/(?:https?|socks5)=([^;]+)/i);
+      if (match) {
+        hostPort = match[1].trim();
+        // Remove any embedded credentials (username:password@host:port -> host:port)
+        hostPort = hostPort.replace(/^[^@]+@/, '');
+      }
+    } else if (proxyRules.includes('://')) {
+      // Extract from http://host:port or socks5://host:port
+      hostPort = proxyRules.replace(/^[^:]+:\/\//, '');
+      // Remove any embedded credentials
+      hostPort = hostPort.replace(/^[^@]+@/, '');
+    } else {
+      // Already in host:port format, but may contain embedded credentials
+      hostPort = proxyRules.replace(/^[^@]+@/, '');
+    }
+    
+    // Use plain host:port format (no embedded credentials)
+    // Authentication will be handled via login event
+    if (!proxyRules.includes('=') && !proxyRules.includes('://')) {
+      proxyRules = `http=${hostPort};https=${hostPort}`;
+      console.log('[main] normalized proxy format', { original: container.proxy.server, normalized: proxyRules, hostPort });
+    } else {
+      // Rebuild proxy rules with clean host:port
+      proxyRules = `http=${hostPort};https=${hostPort}`;
+      console.log('[main] cleaned proxy format', { original: container.proxy.server, normalized: proxyRules, hostPort });
+    }
+    
+    console.log('[main] setting proxy for container', container.id, { 
+      server: container.proxy.server, 
+      normalized: proxyRules,
+      hasUsername: !!proxyUsername, 
+      hasPassword: !!proxyPassword 
     });
+    
+    try {
+      // 案C: proxyBypassRulesを設定してローカル通信をバイパス
+      await ses.setProxy({ 
+        proxyRules,
+        proxyBypassRules: 'localhost,127.0.0.1,<local>'
+      });
+      console.log('[main] proxy set successfully for container', container.id, { 
+        proxyRules,
+        proxyBypassRules: 'localhost,127.0.0.1,<local>'
+      });
+      
+      // Verify proxy is actually set by checking the session's proxy configuration
+      try {
+        const proxyConfig = await ses.resolveProxy('https://www.google.com');
+        console.log('[main] resolved proxy for test URL', { 
+          containerId: container.id,
+          resolvedProxy: proxyConfig,
+          expectedProxy: proxyRules
+        });
+      } catch (e) {
+        console.warn('[main] failed to resolve proxy for verification', e);
+      }
+    } catch (e) {
+      console.error('[main] failed to set proxy for container', container.id, e);
+    }
   } else {
+    console.log('[main] no proxy configured for container', container.id, 'using system proxy');
     await ses.setProxy({ mode: 'system' });
   }
 
-  // Accept-Language を上書き
+  // Accept-Language を上書き + Proxy-Authorization ヘッダーを追加（案B）
   try {
     const acceptLang = container.fingerprint?.acceptLanguage || 'ja,en-US;q=0.8,en;q=0.7';
     ses.webRequest.onBeforeSendHeaders((details, cb) => {
       const headers = { ...details.requestHeaders, 'Accept-Language': acceptLang } as any;
+      
+      // 案B: Proxy-Authorization ヘッダーを強制付与
+      // HTTP/HTTPS リクエストのみ処理（ローカルやchrome-extensionはスキップ）
+      if ((details.url.startsWith('http://') || details.url.startsWith('https://')) 
+          && !details.url.startsWith('http://localhost') 
+          && !details.url.startsWith('https://localhost')
+          && container.proxy?.username 
+          && container.proxy?.password) {
+        const token = Buffer.from(`${container.proxy.username}:${container.proxy.password}`).toString('base64');
+        headers['Proxy-Authorization'] = `Basic ${token}`;
+        console.log('[main] added Proxy-Authorization header', {
+          url: details.url,
+          containerId: container.id,
+          hasToken: !!token
+        });
+      }
+      
+      // Log first few requests to debug proxy usage
+      if (details.url && !details.url.startsWith('chrome-extension://') && !details.url.startsWith('devtools://') && !details.url.startsWith('http://localhost')) {
+        const isFirstRequest = !(ses as any).__requestCount;
+        (ses as any).__requestCount = ((ses as any).__requestCount || 0) + 1;
+        if (isFirstRequest || (ses as any).__requestCount <= 5) {
+          // Check if request is going through proxy by examining the request
+          const proxyInfo = container.proxy?.server ? {
+            proxyServer: container.proxy.server,
+            hasCredentials: !!(container.proxy.username && container.proxy.password),
+            hasProxyAuthHeader: !!headers['Proxy-Authorization']
+          } : null;
+          console.log('[main] webRequest onBeforeSendHeaders', {
+            url: details.url,
+            method: details.method,
+            containerId: container.id,
+            hasProxy: !!container.proxy?.server,
+            proxyInfo,
+            requestCount: (ses as any).__requestCount
+          });
+        }
+      }
       cb({ requestHeaders: headers });
+    });
+    // Detect 407 Proxy Authentication Required and log it
+    // Note: We cannot modify Proxy-Authorization header directly via webRequest API
+    // The login event should handle this, but if it doesn't fire, we log the 407 for debugging
+    ses.webRequest.onHeadersReceived((details, cb) => {
+      if (details.statusCode === 407 && container.proxy?.username) {
+        console.log('[main] received 407 Proxy Authentication Required', {
+          url: details.url,
+          containerId: container.id,
+          statusCode: details.statusCode,
+          responseHeaders: details.responseHeaders,
+          proxyAuthenticate: details.responseHeaders?.['proxy-authenticate'] || details.responseHeaders?.['Proxy-Authenticate']
+        });
+        console.warn('[main] WARNING: 407 received but login event may not have fired. This indicates a potential Electron bug or configuration issue.');
+      }
+      cb({});
+    });
+    // Log request errors
+    ses.webRequest.onErrorOccurred((details) => {
+      if (details.url && !details.url.startsWith('chrome-extension://') && !details.url.startsWith('devtools://')) {
+        console.error('[main] webRequest onErrorOccurred', {
+          url: details.url,
+          error: details.error,
+          containerId: container.id,
+          hasProxy: !!container.proxy?.server
+        });
+      }
     });
   } catch {}
 
@@ -115,9 +250,17 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       partition: part,
       contextIsolation: true,
       nodeIntegration: false,
-      preload: shellPreloadPath
+      preload: shellPreloadPath,
+      backgroundThrottling: false // バックグラウンドでも読み込みを継続
     }
   });
+  
+  // Set containerId on shell window's webContents for app.on('login') handler
+  try {
+    (win.webContents as any)._containerId = container.id;
+  } catch (e) {
+    console.error('[main] failed to set containerId on shell webContents', e);
+  }
   // set window icon if available
   try {
     const ico = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
@@ -125,6 +268,12 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   } catch (e) { console.error('[main] set container window icon error', e); }
   // mark this window as a container shell so main can detect and close it reliably
   try { (win as any).__isContainerShell = true; (win as any).__containerId = container.id; } catch {}
+  // Set containerId on shell window's webContents for app.on('login') handler
+  try {
+    (win.webContents as any)._containerId = container.id;
+  } catch (e) {
+    console.error('[main] failed to set containerId on shell webContents', e);
+  }
   // hide menu bar for the container shell window (remove File/Edit menus)
   try { win.removeMenu(); win.setAutoHideMenuBar(true); } catch {}
 
@@ -176,7 +325,15 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   // BrowserView を作成（実ページ）
   const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
   const createView = (u: string) => {
-    const v = new BrowserView({ webPreferences: { partition: part, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath } });
+    const v = new BrowserView({ webPreferences: { partition: part, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
+    
+    // Set containerId on view's webContents for app.on('login') handler
+    try {
+      (v.webContents as any)._containerId = container.id;
+    } catch (e) {
+      console.error('[main] failed to set containerId on view webContents', e);
+    }
+    
     const layoutView = () => {
       const [w, h] = win.getContentSize();
       const bar = BAR_HEIGHT;
@@ -205,6 +362,30 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: url, tabs });
           }
         } catch (e) { console.error('[main] sendCtx from view did-navigate error', e); }
+      });
+      v.webContents.on('did-finish-load', () => {
+        try {
+          const entry = openedById.get(container.id);
+          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+          const url = v.webContents.getURL();
+          console.log('[main] view did-finish-load url=', url, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
+        } catch (e) { console.error('[main] did-finish-load handler error', e); }
+      });
+      v.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        try {
+          const entry = openedById.get(container.id);
+          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+          console.error('[main] view did-fail-load', {
+            url: validatedURL,
+            errorCode,
+            errorDescription,
+            isMainFrame,
+            containerId: container.id,
+            sessionId,
+            tabIndex,
+            proxy: container.proxy ? { server: container.proxy.server, hasUsername: !!container.proxy.username, hasPassword: !!container.proxy.password } : null
+          });
+        } catch (e) { console.error('[main] did-fail-load handler error', e); }
       });
       v.webContents.on('page-title-updated', (_e, title) => {
         try {
@@ -457,7 +638,15 @@ export function createTab(containerId: string, url: string) {
   }
   const { win } = entry;
   const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
-  const v = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath } });
+  const v = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
+  
+  // Set containerId on view's webContents for app.on('login') handler
+  try {
+    (v.webContents as any)._containerId = containerId;
+  } catch (e) {
+    console.error('[main] failed to set containerId on createTab view webContents', e);
+  }
+  
   const layoutView = () => {
     const [w, h] = win.getContentSize();
     const bar = BAR_HEIGHT; // use global BAR_HEIGHT so views align with shell UI
@@ -509,8 +698,9 @@ export function closeTab(containerId: string, index: number) {
   // If this is the only view, create a new blank view first so renderer always has a view
   if (entry.views.length === 1) {
     try {
+      const container = DB.getContainer(containerId);
       const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
-      const vNew = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath } });
+      const vNew = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
       const layoutViewNew = () => {
         try {
           const [w, h] = entry.win.getContentSize();
@@ -520,7 +710,7 @@ export function closeTab(containerId: string, index: number) {
       };
       entry.win.on('resize', layoutViewNew);
       layoutViewNew();
-      try { vNew.webContents.setZoomFactor(container.fingerprint?.deviceScaleFactor || 1.0); } catch {}
+      try { vNew.webContents.setZoomFactor(container?.fingerprint?.deviceScaleFactor || 1.0); } catch {}
       vNew.webContents.loadURL('about:blank').catch(()=>{});
       entry.views.push(vNew);
       // set the new view visible before removing the old one
@@ -554,9 +744,10 @@ export function closeTab(containerId: string, index: number) {
   // If all tabs closed, create a new blank tab to avoid empty view
   if (entry.views.length === 0) {
     try {
+      const container = DB.getContainer(containerId);
       // create a new BrowserView similar to createTab
       const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
-      const v2 = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath } });
+      const v2 = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
       const layoutView2 = () => {
         try {
           const [w, h] = entry.win.getContentSize();
@@ -566,7 +757,7 @@ export function closeTab(containerId: string, index: number) {
       };
       entry.win.on('resize', layoutView2);
       layoutView2();
-      try { v2.webContents.setZoomFactor(container.fingerprint?.deviceScaleFactor || 1.0); } catch {}
+      try { v2.webContents.setZoomFactor(container?.fingerprint?.deviceScaleFactor || 1.0); } catch {}
       v2.webContents.loadURL('about:blank').catch(()=>{});
       entry.views.push(v2);
       entry.activeIndex = 0;

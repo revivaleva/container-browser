@@ -567,6 +567,63 @@ async function checkForUpdatesInteractive() {
   }
 }
 
+// バックグラウンドでもページ読み込みを確実に実行するためのChromiumフラグ
+// API呼び出しでコンテナを立ち上げた際に、ウィンドウ非表示でも読み込みが進むようにする
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
+// Register global login handler for proxy authentication (案A)
+// This must be registered before app.whenReady() to catch all login events
+app.on('login', (event, webContents, request, authInfo, callback) => {
+  console.log('[login] fired', {
+    isProxy: authInfo.isProxy,
+    host: authInfo.host,
+    port: authInfo.port,
+    scheme: authInfo.scheme,
+    realm: authInfo.realm,
+    webContentsId: webContents.id
+  });
+  
+  // プロキシ以外の認証はスルー
+  if (!authInfo.isProxy) {
+    console.log('[login] not a proxy authentication request, ignoring');
+    return;
+  }
+  
+  event.preventDefault();
+  
+  // webContentsからcontainerIdを取得
+  // containerManagerでWebContentsにcontainerIdを設定している想定
+  const containerId: string | undefined = (webContents as any)._containerId;
+  
+  if (!containerId) {
+    console.warn('[login] no containerId found for webContents', { webContentsId: webContents.id });
+    return;
+  }
+  
+  // コンテナのプロキシ設定を取得
+  try {
+    const container = DB.getContainer(containerId);
+    if (!container || !container.proxy || !container.proxy.username || !container.proxy.password) {
+      console.warn('[login] no proxy credentials found for container', { containerId });
+      return;
+    }
+    
+    console.log('[login] providing proxy credentials', {
+      containerId,
+      username: container.proxy.username,
+      passwordLength: container.proxy.password.length,
+      proxyHost: authInfo.host,
+      proxyPort: authInfo.port
+    });
+    
+    callback(container.proxy.username, container.proxy.password);
+  } catch (e) {
+    console.error('[login] error getting proxy credentials', e);
+  }
+});
+
 app.whenReady().then(async () => {
   try {
     console.log('[DEBUG] App ready event triggered');
@@ -774,6 +831,29 @@ app.whenReady().then(async () => {
     } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
   });
 
+  // 移行機能: コンテナのパスを更新
+  ipcMain.handle('migration.updatePaths', async (_e, { oldBasePath, newBasePath }: { oldBasePath: string; newBasePath: string }) => {
+    try {
+      const updatedCount = DB.updateContainerPaths(oldBasePath, newBasePath);
+      logger.info(`[migration] Updated ${updatedCount} container paths from ${oldBasePath} to ${newBasePath}`);
+      return { ok: true, updatedCount };
+    } catch (e: any) {
+      logger.error('[migration] updatePaths error:', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
+  // 移行機能: 現在のuserDataパスを取得
+  ipcMain.handle('migration.getUserDataPath', () => {
+    try {
+      const userDataPath = app.getPath('userData');
+      return { ok: true, path: userDataPath };
+    } catch (e: any) {
+      logger.error('[migration] getUserDataPath error:', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
   // Register F11 global shortcut to toggle DevTools for focused view/window
   try {
     globalShortcut.register('F11', () => {
@@ -913,6 +993,22 @@ app.on('will-quit', () => {
 ipcMain.handle('containers.list', () => {
   console.log('[ipc] containers.list');
   return DB.listContainers();
+});
+ipcMain.handle('containers.get', (_e, { id }: { id: string }) => {
+  console.log('[ipc] containers.get', { id });
+  const container = DB.getContainer(id);
+  if (!container) {
+    throw new Error('container not found');
+  }
+  return container;
+});
+ipcMain.handle('containers.getByName', (_e, { name }: { name: string }) => {
+  console.log('[ipc] containers.getByName', { name });
+  const container = DB.getContainerByName(name);
+  if (!container) {
+    throw new Error('container not found');
+  }
+  return container;
 });
 ipcMain.handle('containers.setNote', (_e, { id, note }) => {
   try {
@@ -1070,6 +1166,8 @@ ipcMain.handle('proxy.test', async (_e, { proxy }) => {
   try {
     if (!proxy || !proxy.server) return { ok: false, errorCode: 'no_proxy', error: 'no proxy' };
     const server = String(proxy.server).trim();
+    const username = proxy.username ? String(proxy.username) : undefined;
+    const password = proxy.password ? String(proxy.password) : undefined;
     const net = await import('node:net');
 
     // helper: parse host:port pair
@@ -1149,7 +1247,13 @@ ipcMain.handle('proxy.test', async (_e, { proxy }) => {
       const s = net.createConnection({ host: phost, port: pport }, () => {
         // attempt HTTP CONNECT to example.com:443 to verify tunnel
         try {
-          const connectReq = `CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n`;
+          let connectReq = `CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n`;
+          // Add Proxy-Authorization header if credentials are provided
+          if (username && password) {
+            const auth = Buffer.from(`${username}:${password}`).toString('base64');
+            connectReq += `Proxy-Authorization: Basic ${auth}\r\n`;
+          }
+          connectReq += `\r\n`;
           s.write(connectReq);
           let acc = '';
           const onData = (d: Buffer) => {

@@ -84,6 +84,7 @@ export default function App() {
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
   const [editBmTitle, setEditBmTitle] = useState<string>('');
   const [editBmUrl, setEditBmUrl] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // site prefs
   const [selectedContainerId, setSelectedContainerId] = useState<string>('');
@@ -91,6 +92,13 @@ export default function App() {
   const [autoFill, setAutoFill] = useState<boolean>(false);
   const [autoSaveForms, setAutoSaveForms] = useState<boolean>(false);
   const selected = useMemo(()=> list.find((c:any)=> c.id === selectedContainerId), [list, selectedContainerId]);
+  
+  // 検索でフィルタリングされたコンテナ一覧
+  const filteredList = useMemo(() => {
+    if (!searchQuery.trim()) return list;
+    const query = searchQuery.toLowerCase().trim();
+    return list.filter((c: any) => c.name?.toLowerCase().includes(query));
+  }, [list, searchQuery]);
 
   async function refresh() {
     const l = await window.containersAPI.list();
@@ -838,33 +846,32 @@ export default function App() {
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>ブックマーク</h3>
         <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-          <div style={{ flex:1, display:'flex', gap:8, alignItems:'center' }}>
-            <select style={{ flex:1 }} value={selectedBookmarkId ?? ''} onChange={e=> setSelectedBookmarkId(e.target.value || null)}>
-              <option value="">-- ブックマークを選択 --</option>
-              {bookmarks.map((b:any)=> (
-                <option key={b.id} value={b.id}>{b.title} ({b.url})</option>
-              ))}
-            </select>
-            
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <div style={{ flex:1, display:'flex', gap:8, alignItems:'center', overflow:'auto' }}>
-                {/* ブックマークバー（クリックで選択） */}
-                {bookmarks.map((b:any)=> (
-                  <button key={b.id}
-                    style={{ whiteSpace:'nowrap', background: selectedBookmarkId === b.id ? '#eef' : undefined }}
-                    onClick={()=> setSelectedBookmarkId(b.id)}>{b.title}</button>
-                ))}
-              </div>
-            </div>
+          <div style={{ flex:1, display:'flex', gap:8, alignItems:'center', overflow:'auto' }}>
+            {/* ブックマークバー（クリックで選択） */}
+            {bookmarks.map((b:any)=> (
+              <button key={b.id}
+                style={{ whiteSpace:'nowrap', background: selectedBookmarkId === b.id ? '#eef' : undefined }}
+                onClick={()=> setSelectedBookmarkId(b.id)}>{b.title}</button>
+            ))}
           </div>
         </div>
 
-        <h3>コンテナ一覧</h3>
-        {list.length === 0 && <p>コンテナがありません。</p>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <h3 style={{ margin: 0 }}>コンテナ一覧</h3>
+          <button onClick={refresh} style={{ padding: '4px 12px', fontSize: 14, cursor: 'pointer' }} title="コンテナ一覧を更新">🔄 更新</button>
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="コンテナ名で検索..."
+            style={{ width: '100%', padding: '6px 12px', border: '1px solid #ddd', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' }}
+          />
+        </div>
+        {filteredList.length === 0 && <p>{searchQuery ? '検索結果がありません。' : 'コンテナがありません。'}</p>}
         <ul>
-          {list.map((c:any)=> (
+          {filteredList.map((c:any)=> (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                 <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ const raw = c.proxy?.server ?? ''; setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalStatus(c.status ?? '未使用'); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyType(detectProxyType(raw)); setModalProxyServer(extractHostPort(raw)); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
@@ -873,6 +880,11 @@ export default function App() {
                     {c.status ?? '未使用'}
                   </div>
                   <small style={{ display: 'block', marginTop: 4 }}>ID: {c.id}</small>
+                  {c.createdAt && (
+                    <small style={{ display: 'block', marginTop: 4, color: '#666' }}>
+                      作成日時: {new Date(c.createdAt).toLocaleString('ja-JP')}
+                    </small>
+                  )}
                 </div>
                 {/* per-container URL input removed */}
                 <div style={{ display:'flex', gap:8, marginLeft: 'auto' }}>
@@ -977,7 +989,11 @@ export default function App() {
                     <label>プロキシ接続テスト</label>
                     <div style={{ display:'flex', gap:8 }}>
                       <button onClick={async ()=>{
-                        const proxy = { server: normalizeProxyString(modalProxyType, modalProxyServer) };
+                        const proxy = { 
+                          server: normalizeProxyString(modalProxyType, modalProxyServer),
+                          username: modalProxyUsername || undefined,
+                          password: modalProxyPassword || undefined
+                        };
                         console.log('[renderer] proxy.test ->', proxy);
                         const res = await (window as any).proxyAPI.test({ proxy });
                         console.log('[renderer] proxy.test result ->', res);

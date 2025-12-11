@@ -3,6 +3,8 @@ import logger from '../shared/logger';
 
 contextBridge.exposeInMainWorld('containersAPI', {
   list: () => ipcRenderer.invoke('containers.list'),
+  get: (payload: { id: string }) => ipcRenderer.invoke('containers.get', payload),
+  getByName: (payload: { name: string }) => ipcRenderer.invoke('containers.getByName', payload),
   setNote: (payload: { id: string; note: string | null }) => ipcRenderer.invoke('containers.setNote', payload),
   create: (payload: any) => ipcRenderer.invoke('containers.create', payload),
   open: (payload: any) => ipcRenderer.invoke('containers.open', payload),
@@ -109,4 +111,14 @@ contextBridge.exposeInMainWorld('exportAPI', {
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)
 contextBridge.exposeInMainWorld('debugAPI', {
   log: (msg: any) => { try { ipcRenderer.send('renderer.log', msg); } catch { } }
+});
+
+// 移行機能API
+contextBridge.exposeInMainWorld('migrationAPI', {
+  exportCredentials: () => ipcRenderer.invoke('migration.exportCredentials'),
+  importCredentials: (payload: { credentials: Array<{ containerId: string; origin: string; username: string; password: string }> }) => 
+    ipcRenderer.invoke('migration.importCredentials', payload),
+  updatePaths: (payload: { oldBasePath: string; newBasePath: string }) => 
+    ipcRenderer.invoke('migration.updatePaths', payload),
+  getUserDataPath: () => ipcRenderer.invoke('migration.getUserDataPath')
 });

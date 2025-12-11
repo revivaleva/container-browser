@@ -3,14 +3,16 @@ import { URL } from 'node:url';
 import { promises as fsp, existsSync, cpSync, rmSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { app } from 'electron';
 import { DB } from './db';
 import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, getActiveWebContents } from './containerManager';
-import { getToken } from './tokenStore';
+import { getToken, getOrCreateDeviceId } from './tokenStore';
 import { getAuthApiBase, getAuthTimeoutMs } from './settings';
 import { session } from 'electron';
 import type { WebContents } from 'electron';
 import setCookieParser from 'set-cookie-parser';
-import crypto from 'node:crypto';
+import crypto, { randomUUID } from 'node:crypto';
+import type { Container, Fingerprint, ProxyConfig } from '../shared/types';
 
 const locks = new Set<string>();
 
@@ -119,7 +121,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         const startAll = Date.now();
         try {
           const c = DB.getContainer(id);
-          if (!c) throw new Error('container not found');
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
           // ensure opened and restored (open via API should be single-tab)
           if (!isContainerOpen(id)) {
             await openContainerWindow(c, undefined, { restore: true, singleTab: true });
@@ -228,13 +230,13 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           locks.add(contextId);
           const tstart = Date.now();
           try {
-            // resolve container
-            const c = DB.getContainer(contextId);
-            if (!c) throw new Error('container not found');
-            // ensure container open (when opened via API prefer single-tab)
-            if (!isContainerOpen(contextId)) {
-              await openContainerWindow(c, undefined, { restore: true, singleTab: true });
-            }
+          // resolve container
+          const c = DB.getContainer(contextId);
+          if (!c) throw new Error('container not found');
+          // ensure container open (when opened via API prefer single-tab)
+          if (!isContainerOpen(contextId)) {
+            await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+          }
             // get active webContents
             const wc = getActiveWebContents(contextId);
             if (!wc) return jsonResponse(res, 404, { ok: false, error: 'no active webContents' });
@@ -328,6 +330,131 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               } catch (e:any) {
                 const msg = String(e?.message || e);
                 if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                return jsonResponse(res, 500, { ok: false, error: msg });
+              }
+            } else if (command === 'setFileInput') {
+              // ファイル入力を設定するコマンド
+              const selector = body.selector;
+              const fileUrl = body.fileUrl;
+              const fileName = body.fileName || 'file.jpg';
+              const fileType = body.fileType || 'image/jpeg';
+
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              if (!fileUrl) return jsonResponse(res, 400, { ok: false, error: 'missing fileUrl' });
+
+              if (options.waitForSelector) {
+                const ok = await waitForSelector(options.waitForSelector, timeoutMs);
+                if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
+              }
+
+              try {
+                // 1. Google Drive URLを実際の画像URLに変換
+                let actualFileUrl = fileUrl;
+                if (fileUrl.includes('drive.google.com/file/d/')) {
+                  const match = fileUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+                  if (match && match[1]) {
+                    actualFileUrl = `https://drive.google.com/uc?export=view&id=${match[1]}`;
+                  }
+                }
+
+                // 2. URLからファイルを取得（Node.js側で実行）
+                let response: Response;
+                try {
+                  response = await (global as any).fetch(actualFileUrl);
+                } catch (fetchError: any) {
+                  return jsonResponse(res, 500, { 
+                    ok: false, 
+                    error: `Failed to fetch file: ${String(fetchError?.message || fetchError)}` 
+                  });
+                }
+
+                if (!response.ok) {
+                  return jsonResponse(res, 500, { 
+                    ok: false, 
+                    error: `Failed to fetch file: HTTP ${response.status}` 
+                  });
+                }
+
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                const base64Data = buffer.toString('base64');
+
+                // 3. ElectronのwebContentsでファイル入力を設定
+                const script = `
+                  (function(sel, base64Data, name, type) {
+                    try {
+                      const input = document.querySelector(sel);
+                      if (!input) throw new Error('selector not found');
+                      if (input.type !== 'file') throw new Error('element is not a file input');
+                      
+                      // Base64データをBlobに変換
+                      const byteCharacters = atob(base64Data);
+                      const byteNumbers = new Array(byteCharacters.length);
+                      for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                      }
+                      const byteArray = new Uint8Array(byteNumbers);
+                      const blob = new Blob([byteArray], { type: type });
+                      const file = new File([blob], name, { type: type });
+                      
+                      // DataTransferを使用してファイルを設定
+                      try {
+                        const dataTransfer = new DataTransfer();
+                        dataTransfer.items.add(file);
+                        input.files = dataTransfer.files;
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        return { success: true, selector: sel, fileName: name, fileType: type };
+                      } catch (dtError) {
+                        // DataTransferが失敗した場合、直接filesを設定する方法を試す
+                        // 注意: これはブラウザのセキュリティ制約により動作しない可能性が高い
+                        throw new Error('DataTransfer failed: ' + String(dtError?.message || dtError));
+                      }
+                    } catch (e) {
+                      throw new Error(String(e?.message || e));
+                    }
+                  })(${JSON.stringify(selector)}, ${JSON.stringify(base64Data)}, ${JSON.stringify(fileName)}, ${JSON.stringify(fileType)});
+                `;
+
+                try {
+                  const result = await wc.executeJavaScript(script, true);
+                  if (result && (result as any).success) {
+                    return jsonResponse(res, 200, { 
+                      ok: true, 
+                      result: {
+                        success: true,
+                        selector,
+                        fileName,
+                        fileType
+                      }
+                    });
+                  } else {
+                    return jsonResponse(res, 500, { 
+                      ok: false, 
+                      error: 'Failed to set file input: unexpected result' 
+                    });
+                  }
+                } catch (jsError: any) {
+                  const msg = String(jsError?.message || jsError);
+                  if (msg.includes('selector not found')) {
+                    return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                  }
+                  if (msg.includes('not a file input')) {
+                    return jsonResponse(res, 400, { ok: false, error: 'element is not a file input' });
+                  }
+                  if (msg.includes('DataTransfer failed')) {
+                    // セキュリティ制約により失敗した場合の詳細なエラーメッセージ
+                    return jsonResponse(res, 500, { 
+                      ok: false, 
+                      error: 'Failed to set file input: browser security restrictions prevent programmatic file input setting. This is expected behavior in browsers.' 
+                    });
+                  }
+                  return jsonResponse(res, 500, { ok: false, error: `Failed to set file input: ${msg}` });
+                }
+              } catch (e: any) {
+                const msg = String(e?.message || e);
+                if (msg.includes('Failed to fetch')) {
+                  return jsonResponse(res, 500, { ok: false, error: `Failed to fetch file: ${msg}` });
+                }
                 return jsonResponse(res, 500, { ok: false, error: msg });
               }
             } else {
@@ -443,6 +570,195 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         const p = body.path || u.searchParams.get('path');
         if (!p) return jsonResponse(res, 400, { ok: false, error: 'missing path' });
         try { rmSync(String(p), { recursive: true, force: true }); return jsonResponse(res, 200, { ok: true }); } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+      }
+
+      // Create container endpoint
+      if (req.method === 'POST' && u.pathname === '/internal/containers/create') {
+        try {
+          const body = await parseBody(req);
+          const name = String(body && body.name || '').trim();
+          const proxy: ProxyConfig | null = body.proxy ? {
+            server: String(body.proxy.server || ''),
+            username: body.proxy.username ? String(body.proxy.username) : undefined,
+            password: body.proxy.password ? String(body.proxy.password) : undefined
+          } : null;
+
+          if (!name) return jsonResponse(res, 400, { ok: false, error: 'missing name' });
+          if (proxy && !proxy.server) return jsonResponse(res, 400, { ok: false, error: 'proxy.server is required when proxy is provided' });
+
+          const id = randomUUID();
+
+          // Consume quota from token before creating container (only if token exists)
+          try {
+            const token = await getToken();
+            
+            // If no token, skip quota check and allow creation
+            if (token) {
+              const deviceId = getOrCreateDeviceId();
+              const BASE_URL = getAuthApiBase();
+              const timeoutMs = getAuthTimeoutMs();
+              
+              const ac = new AbortController();
+              const idt = setTimeout(() => ac.abort(), timeoutMs);
+              try {
+                const useResp = await (global as any).fetch(
+                  (BASE_URL.replace(/\/$/, '')) + '/auth/use',
+                  {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId, count: 1 }),
+                    signal: ac.signal
+                  }
+                );
+                clearTimeout(idt);
+                if (!useResp.ok) {
+                  const errorCode = useResp.status === 409 ? 'QUOTA_EXCEEDED' : 'AUTH_FAILED';
+                  const errorMsg = useResp.status === 409 ? 'Quota exceeded' : 'Failed to consume quota';
+                  return jsonResponse(res, useResp.status === 409 ? 409 : 401, { ok: false, error: errorMsg, errorCode });
+                }
+              } catch (err: any) {
+                clearTimeout(idt);
+                if (err.name === 'AbortError') {
+                  return jsonResponse(res, 504, { ok: false, error: 'auth timeout' });
+                }
+                throw err;
+              }
+            }
+          } catch (err: any) {
+            const msg = String(err?.message || err);
+            return jsonResponse(res, 500, { ok: false, error: msg });
+          }
+
+          // Create container with fingerprint
+          const fp: Fingerprint = {
+            acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
+            locale: 'ja-JP',
+            timezone: 'Asia/Tokyo',
+            platform: 'Win32',
+            hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random()*4)],
+            deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random()*5)],
+            canvasNoise: true,
+            screenWidth: 2560,
+            screenHeight: 1440,
+            viewportWidth: 1280,
+            viewportHeight: 800,
+            colorDepth: 24,
+            maxTouchPoints: 0,
+            deviceScaleFactor: 1.0,
+            cookieEnabled: true,
+            connectionType: '4g',
+            batteryLevel: 1,
+            batteryCharging: true,
+            fakeIp: undefined,
+          };
+          const c: Container = {
+            id,
+            name,
+            userDataDir: path.join(app.getPath('userData'), 'profiles', id),
+            partition: `persist:container-${id}`,
+            userAgent: undefined,
+            locale: 'ja-JP',
+            timezone: 'Asia/Tokyo',
+            fingerprint: fp,
+            proxy: proxy,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            lastSessionId: null
+          };
+          DB.upsertContainer(c);
+
+          // Open the container window
+          try {
+            await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+          } catch (openErr: any) {
+            console.error('[exportServer] failed to open container window', openErr);
+            // Continue even if opening fails - container is created
+          }
+
+          return jsonResponse(res, 200, { ok: true, container: c });
+        } catch (e:any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Set proxy for container endpoint (プロキシ変更専用API)
+      if (req.method === 'POST' && u.pathname === '/internal/containers/set-proxy') {
+        try {
+          const body = await parseBody(req);
+          const name = String(body && body.name || '').trim();
+          const id = String(body && body.id || '').trim();
+          
+          if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
+          
+          // Find container by name or id
+          const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
+          if (!container) {
+            return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+          }
+
+          // Parse proxy config
+          const proxy: ProxyConfig | null = body.proxy ? {
+            server: String(body.proxy.server || ''),
+            username: body.proxy.username ? String(body.proxy.username) : undefined,
+            password: body.proxy.password ? String(body.proxy.password) : undefined
+          } : (body.proxy === null ? null : undefined);
+
+          if (proxy && !proxy.server) {
+            return jsonResponse(res, 400, { ok: false, error: 'proxy.server is required when proxy is provided' });
+          }
+
+          // Update container with proxy only
+          const updated: Container = {
+            ...container,
+            proxy: proxy !== undefined ? proxy : container.proxy,
+            updatedAt: Date.now(),
+          };
+          
+          DB.upsertContainer(updated);
+          console.log('[exportServer] set proxy for container', { containerId: container.id, containerName: container.name, hasProxy: !!proxy });
+
+          return jsonResponse(res, 200, { ok: true, container: updated });
+        } catch (e:any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Update container endpoint
+      if (req.method === 'POST' && u.pathname === '/internal/containers/update') {
+        try {
+          const body = await parseBody(req);
+          const name = String(body && body.name || '').trim();
+          const id = String(body && body.id || '').trim();
+          
+          if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
+          
+          // Find container by name or id
+          const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
+          if (!container) {
+            return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+          }
+
+          // Parse proxy config if provided (for backward compatibility, but prefer set-proxy endpoint)
+          const proxy: ProxyConfig | null = body.proxy ? {
+            server: String(body.proxy.server || ''),
+            username: body.proxy.username ? String(body.proxy.username) : undefined,
+            password: body.proxy.password ? String(body.proxy.password) : undefined
+          } : (body.proxy === null ? null : undefined);
+
+          // Update container
+          const updated: Container = {
+            ...container,
+            ...(body.name ? { name: String(body.name).trim() } : {}),
+            ...(proxy !== undefined ? { proxy } : {}),
+            updatedAt: Date.now(),
+          };
+          
+          DB.upsertContainer(updated);
+
+          return jsonResponse(res, 200, { ok: true, container: updated });
+        } catch (e:any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
       }
 
       // Close container endpoint: idempotent

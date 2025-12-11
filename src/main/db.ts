@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
+import fs from 'node:fs';
 import { app } from 'electron';
 import type { Container, CredentialRow, SitePref, TabEntry } from '@shared/types';
 
@@ -7,8 +8,25 @@ let db: Database.Database;
 
 export function initDB() {
   const dbPath = path.join(app.getPath('userData'), 'data.db');
-  db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
+  const dbDir = path.dirname(dbPath);
+  
+  // データベースディレクトリが存在しない場合は作成
+  if (!fs.existsSync(dbDir)) {
+    try {
+      fs.mkdirSync(dbDir, { recursive: true });
+    } catch (err) {
+      const error = err as Error;
+      throw new Error(`Failed to create database directory: ${dbDir}. Error: ${error.message}`);
+    }
+  }
+  
+  try {
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+  } catch (err) {
+    const error = err as Error & { code?: string };
+    throw new Error(`Failed to initialize database at ${dbPath}. Error code: ${error.code || 'unknown'}, Message: ${error.message}`);
+  }
 
   db.exec(`
   CREATE TABLE IF NOT EXISTS containers (
@@ -217,6 +235,9 @@ export const DB = {
   getCredential(containerId: string, origin: string): CredentialRow | undefined {
     return db.prepare('SELECT * FROM credentials WHERE containerId=? AND origin=?').get(containerId, origin);
   },
+  listAllCredentials(): CredentialRow[] {
+    return db.prepare('SELECT * FROM credentials ORDER BY containerId, origin').all() as CredentialRow[];
+  },
   upsertSitePref(pref: SitePref) {
     db.prepare(`INSERT INTO site_prefs(containerId,origin,autoFill,autoSaveForms)
                 VALUES(@containerId,@origin,@autoFill,@autoSaveForms)
@@ -248,5 +269,21 @@ export const DB = {
       }
     });
     tx(ids);
+  },
+  // 移行機能: コンテナのuserDataDirパスを更新
+  updateContainerPaths(oldBasePath: string, newBasePath: string) {
+    const containers = db.prepare('SELECT id, userDataDir FROM containers').all() as Array<{ id: string; userDataDir: string }>;
+    let updatedCount = 0;
+    const tx = db.transaction(() => {
+      for (const c of containers) {
+        if (c.userDataDir.startsWith(oldBasePath)) {
+          const newPath = c.userDataDir.replace(oldBasePath, newBasePath);
+          db.prepare('UPDATE containers SET userDataDir=? WHERE id=?').run(newPath, c.id);
+          updatedCount++;
+        }
+      }
+    });
+    tx();
+    return updatedCount;
   }
 };
