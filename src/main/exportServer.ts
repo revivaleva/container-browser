@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { URL } from 'node:url';
-import { promises as fsp, existsSync, cpSync, rmSync, mkdirSync } from 'node:fs';
+import { promises as fsp, existsSync, cpSync, rmSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { app } from 'electron';
@@ -13,6 +13,13 @@ import type { WebContents } from 'electron';
 import setCookieParser from 'set-cookie-parser';
 import crypto, { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint, ProxyConfig } from '../shared/types';
+import logger from '../shared/logger';
+
+type MediaSelectorRule = { selector: string; type: 'image' | 'video' };
+type MediaUrlItem = { url: string; type: 'image' | 'video'; selector: string };
+
+const MAX_MEDIA_FILES = 100;
+const MAX_MEDIA_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 
 const locks = new Set<string>();
 
@@ -102,6 +109,197 @@ function determineProfilePath(container: any): string | null {
     if (existsSync(p)) return p;
   }
   return null;
+}
+
+function isValidFolderName(name: string): boolean {
+  if (typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  return !trimmed.includes('..') && !/[\\/]/.test(trimmed);
+}
+
+function isHttpUrl(u: string): boolean {
+  try {
+    const parsed = new URL(u);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function getFileExtension(url: string, type: 'image' | 'video'): string {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const ext = pathname.split('.').pop()?.toLowerCase();
+    if (ext && /^[a-z0-9]{2,5}$/.test(ext)) {
+      return ext;
+    }
+  } catch { /* ignore */ }
+  return type === 'video' ? 'mp4' : 'jpg';
+}
+
+function getMediaType(filepath: string): string {
+  const ext = path.extname(filepath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime'
+  };
+  return mimeMap[ext] || 'application/octet-stream';
+}
+
+function getFileSize(filepath: string): number {
+  try {
+    const st = statSync(filepath);
+    return st.size;
+  } catch {
+    return 0;
+  }
+}
+
+async function downloadFile(
+  url: string,
+  destFolder: string,
+  index: number,
+  type: 'image' | 'video',
+  timeoutMs: number
+): Promise<{ success: boolean; filename: string; error?: string }> {
+  try {
+    const ext = getFileExtension(url, type);
+    const filename = `media_${index}.${ext}`;
+    const filepath = path.join(destFolder, filename);
+    const controller = AbortSignal.timeout(timeoutMs);
+    const response = await fetch(url, { signal: controller });
+    if (!response.ok) {
+      return { success: false, filename, error: `HTTP ${response.status}` };
+    }
+    const contentLength = response.headers.get('content-length');
+    if (contentLength) {
+      const len = Number(contentLength);
+      if (!Number.isNaN(len) && len > MAX_MEDIA_FILE_SIZE) {
+        return { success: false, filename, error: 'file too large' };
+      }
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > MAX_MEDIA_FILE_SIZE) {
+      return { success: false, filename, error: 'file too large' };
+    }
+    await fsp.writeFile(filepath, buffer);
+    return { success: true, filename };
+  } catch (err: any) {
+    const msg = String(err?.message || err);
+    if (msg.toLowerCase().includes('abort')) {
+      return { success: false, filename: `media_${index}`, error: 'timeout' };
+    }
+    return { success: false, filename: `media_${index}`, error: msg };
+  }
+}
+
+async function downloadAndSaveMedia(
+  urls: MediaUrlItem[],
+  destFolder: string,
+  folderName: string,
+  timeoutMs: number
+): Promise<{
+  ok: boolean;
+  folder_path: string;
+  files: Array<{
+    index: number;
+    type: string;
+    filename: string;
+    local_path: string | null;
+    file_size?: number;
+    media_type?: string;
+    success: boolean;
+    error_message?: string;
+  }>;
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    paths_comma_separated: string;
+    total_bytes: number;
+  };
+  error_detail?: { message: string; code?: string };
+}> {
+  const fullPath = path.resolve(destFolder, folderName);
+  try {
+    mkdirSync(fullPath, { recursive: true });
+  } catch (err: any) {
+    return {
+      ok: false,
+      folder_path: fullPath,
+      files: [],
+    summary: { total: 0, succeeded: 0, failed: 0, paths_comma_separated: '', total_bytes: 0 },
+    error_detail: { message: String(err?.message || 'Failed to create directory'), code: err?.code },
+    };
+  }
+
+  const files: Array<{
+    index: number;
+    type: string;
+    filename: string;
+    local_path: string | null;
+    file_size?: number;
+    media_type?: string;
+    success: boolean;
+    error_message?: string;
+  }> = [];
+  const successPaths: string[] = [];
+  let succeeded = 0;
+  let failed = 0;
+  let totalBytes = 0;
+
+  for (let index = 0; index < urls.length; index++) {
+    const item = urls[index];
+    const result = await downloadFile(item.url, fullPath, index, item.type, timeoutMs);
+    if (result.success) {
+      const fullFilePath = path.join(fullPath, result.filename);
+      const fileSize = getFileSize(fullFilePath);
+      const mediaType = getMediaType(fullFilePath);
+      totalBytes += fileSize;
+      files.push({
+        index,
+        type: item.type,
+        filename: result.filename,
+        local_path: fullFilePath,
+        file_size: fileSize,
+        media_type: mediaType,
+        success: true,
+      });
+      successPaths.push(fullFilePath);
+      succeeded += 1;
+    } else {
+      files.push({
+        index,
+        type: item.type,
+        filename: result.filename,
+        local_path: null,
+        success: false,
+        error_message: result.error,
+      });
+      failed += 1;
+    }
+  }
+
+  return {
+    ok: failed === 0,
+    folder_path: fullPath,
+    files,
+    summary: {
+      total: urls.length,
+      succeeded,
+      failed,
+      paths_comma_separated: successPaths.join(','),
+      total_bytes: totalBytes,
+    },
+  };
 }
 
 export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_PORT) || 3001) {
@@ -255,7 +453,75 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
 
             let navigationOccurred = false;
             let evalResult: any = undefined;
-            if (command === 'navigate') {
+            if (command === 'save_media') {
+              const destinationFolder = String(options.destination_folder || '').trim();
+              const folderName = String(options.folder_name || '').trim();
+              const selectorsRaw = Array.isArray(options.selectors) ? options.selectors : [];
+              const selectorRules: MediaSelectorRule[] = selectorsRaw
+                .map((r: any) => {
+                  const selector = typeof r?.selector === 'string' ? r.selector : '';
+                  const type = r?.type === 'video' ? 'video' : r?.type === 'image' ? 'image' : '';
+                  if (!selector || !type) return null;
+                  return { selector, type };
+                })
+                .filter((v): v is MediaSelectorRule => !!v);
+              const mediaTimeoutMs = Number(options.timeoutMs || 60000);
+              if (!destinationFolder) return jsonResponse(res, 400, { ok: false, error: 'Invalid destination folder' });
+              if (!isValidFolderName(folderName)) return jsonResponse(res, 400, { ok: false, error: 'Invalid folder name' });
+              if (!selectorRules.length) return jsonResponse(res, 400, { ok: false, error: 'Invalid selectors' });
+
+              logger.info('[container.save_media.start]', { contextId, folderName, selectorCount: selectorRules.length, timeoutMs: mediaTimeoutMs });
+
+              const extractScript = `(async (selectors)=>{const mediaUrls=[];const seen=new Set();for(const rule of selectors){try{const elements=document.querySelectorAll(rule.selector);for(const el of elements){let url=null;const tag=(el.tagName||'').toUpperCase();if(tag==='IMG'&&el.src){url=el.src;}else if(tag==='VIDEO'){if(el.poster){url=el.poster;}const source=el.querySelector('source[src]');if(source&&source.src){url=source.src;}if(!url&&el.src){url=el.src;}}else if(tag==='SOURCE'&&el.src){url=el.src;}if(url&&typeof url==='string'&&url.startsWith('http')){const key=rule.type+'|'+url;if(!seen.has(key)){seen.add(key);mediaUrls.push({url,type:rule.type,selector:rule.selector});}}}}catch(e){/* ignore selector errors */}}return{didAction:mediaUrls.length>0,urls:mediaUrls,count:mediaUrls.length};})(${JSON.stringify(selectorRules)});`;
+              let extracted: { didAction: boolean; urls: MediaUrlItem[]; count: number } | null = null;
+              try {
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Operation timeout')), mediaTimeoutMs));
+                extracted = await Promise.race([wc.executeJavaScript(extractScript, true), timeoutPromise]) as { didAction: boolean; urls: MediaUrlItem[]; count: number };
+              } catch (e: any) {
+                logger.error('[container.save_media.error]', { contextId, error: e?.message || e });
+                const msg = String(e?.message || e);
+                if (msg.toLowerCase().includes('timeout')) {
+                  return jsonResponse(res, 504, { ok: false, error: 'Operation timeout' });
+                }
+                return jsonResponse(res, 500, { ok: false, error: 'Failed to extract media URLs' });
+              }
+
+              if (!extracted) return jsonResponse(res, 500, { ok: false, error: 'Failed to extract media URLs' });
+
+              const urls = Array.isArray(extracted.urls) ? extracted.urls.filter((u) => isHttpUrl(u.url)).slice(0, MAX_MEDIA_FILES + 1) : [];
+              if (urls.length > MAX_MEDIA_FILES) {
+                return jsonResponse(res, 400, { ok: false, error: 'Too many media files' });
+              }
+
+              logger.debug('[container.save_media.urls_extracted]', { contextId, urlCount: urls.length });
+
+              if (urls.length === 0) {
+                const emptyPath = path.resolve(destinationFolder, folderName);
+                return jsonResponse(res, 200, {
+                  ok: true,
+                  folder_path: emptyPath,
+                  files: [],
+                  summary: { total: 0, succeeded: 0, failed: 0, paths_comma_separated: '', total_bytes: 0 },
+                });
+              }
+
+              const downloadResult = await downloadAndSaveMedia(urls, destinationFolder, folderName, mediaTimeoutMs);
+              if (!downloadResult.files.length && !downloadResult.ok) {
+                const message = downloadResult.error_detail?.message || 'Failed to create directory';
+                return jsonResponse(res, 500, { ok: false, error: message, errorDetail: downloadResult.error_detail });
+              }
+
+              const statusCode = downloadResult.ok ? 200 : 200;
+              logger.info('[container.save_media.download_complete]', {
+                contextId,
+                succeeded: downloadResult.summary.succeeded,
+                failed: downloadResult.summary.failed,
+                totalBytes: downloadResult.summary.total_bytes,
+                elapsedMs: Date.now() - tstart,
+              });
+
+              return jsonResponse(res, statusCode, downloadResult);
+            } else if (command === 'navigate') {
               const url = String(body.url || '');
               if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
               try {
@@ -557,6 +823,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             return jsonResponse(res, 200, out);
           } catch (e:any) {
             const msg = String(e?.message || e);
+            if (msg.toLowerCase().includes('container not found')) return jsonResponse(res, 404, { ok: false, error: 'Context not found' });
             if (msg && msg.toLowerCase().includes('timeout')) return jsonResponse(res, 504, { ok: false, error: 'timeout' });
             return jsonResponse(res, 500, { ok: false, error: msg });
           } finally { locks.delete(contextId); }

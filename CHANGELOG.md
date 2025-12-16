@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.5.1] - 2025-01-XX
+## [0.5.2] - 2025-01-XX
+
+### Added
+- **Media Download Feature**: Added `save_media` command to `/internal/exec` endpoint
+  - Extracts image and video URLs from web pages using CSS selectors
+  - Supports `<img>`, `<video>`, and `<source>` elements
+  - Downloads media files to specified local directory with automatic file naming
+  - Returns detailed download results including file paths, sizes, and MIME types
+  - Supports partial failure handling (continues downloading even if some files fail)
+  - Maximum 100 files per request, 500MB per file limit
+  - Configurable timeout (default 60 seconds)
+  - Automatic file extension detection from URLs or content type
+
+### Changed
+- **Documentation**: Updated PROJECT_OVERVIEW.md with `save_media` command documentation
+  - Added request/response examples
+  - Added feature descriptions and usage notes
+
+### Technical
+- Enhanced export server with media download utilities
+- Added file size and MIME type detection
+- Improved error handling for download operations
+- Added URL validation and deduplication
+
+## [0.5.1] - 2025-12-12
 
 ### Added
 - **Export Server API Enhancements**: Added new REST API endpoints for container management

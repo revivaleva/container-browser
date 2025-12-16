@@ -33,14 +33,14 @@ curl -X POST http://127.0.0.1:3001/internal/export-restored/close \
 ## POST /internal/exec
 
 ### Purpose
-Remote DOM automation for a container view. Supports navigating, typing, and evaluating arbitrary JS (!click / scroll commands were removed in favor of `eval` scripts).
+Remote DOM automation for a container view. Supports navigating, typing, evaluating arbitrary JS, and saving media files from the page (!click / scroll commands were removed in favor of `eval` scripts).
 
 ### Request
 ```
 POST /internal/exec
 Body: {
   "contextId": "<containerId>",
-  "command": "navigate" | "type" | "eval",
+  "command": "navigate" | "type" | "eval" | "save_media",
   "url": "<target url>",                   // when command === "navigate"
   "selector": "<css or xpath selector>",   // when command === "type"
   "text": "<text to inject>",              // when command === "type"
@@ -52,7 +52,20 @@ Body: {
     "waitForSelector": "article[data-testid=\"tweet\"]",
     "returnHtml": "trim" | "full" | true,
     "returnCookies": true,
-    "screenshot": true
+    "screenshot": true,
+    // when command === "save_media"
+    "destination_folder": "./storage/media/threads",
+    "folder_name": "nanogarden77203_123456789",
+    "selectors": [
+      {
+        "selector": "article img[src*='http']",
+        "type": "image"
+      },
+      {
+        "selector": "article video",
+        "type": "video"
+      }
+    ]
   }
 }
 ```
@@ -61,6 +74,7 @@ Body: {
 - `navigate`: calls `wc.loadURL(url)` and optionally waits for a selector.  
 - `type`: focuses the selector, sets `.value = text`, and dispatches `input`.  
 - `eval`: takes a JSON-stringified expression (client should `JSON.stringify(expr)`), runs it directly via `wc.executeJavaScript(exprStr, true)`, and returns `result`.  
+- `save_media`: extracts image/video URLs from the page using CSS selectors, downloads them to a local directory, and returns download results. Supports `<img>`, `<video>`, and `<source>` tags. Maximum 100 files per request, 500MB per file limit.  
 - All commands share options: `timeoutMs`, `waitForSelector`, HTML/cookie/screenshot collection.  
 - HTML sanitization removes styles/scripts/comments, clears `data:` URLs, strips `class`/`style` attributes, and (in `trim` mode) returns `<body>` innerHTML up to 64KB while logging length.  
 - Errors include `errorDetail` with `message`, `stack`, `line`, `column`, `snippet`, `context`, `exprId`, and `sourceSnippet`.
@@ -93,6 +107,94 @@ curl -s -X POST http://127.0.0.1:3001/internal/exec \
     "text":"example search"
   }'
 ```
+
+### Example: save media files from page
+```
+curl -X POST http://127.0.0.1:3001/internal/exec \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contextId": "nanogarden77203",
+    "command": "save_media",
+    "options": {
+      "destination_folder": "./storage/media/threads",
+      "folder_name": "nanogarden77203_123456789",
+      "selectors": [
+        {"selector": "article img[src*=\"http\"]", "type": "image"},
+        {"selector": "article video", "type": "video"},
+        {"selector": "article video source[src*=\"http\"]", "type": "video"}
+      ],
+      "timeoutMs": 60000
+    }
+  }'
+```
+
+**Response (success):**
+```json
+{
+  "ok": true,
+  "folder_path": "./storage/media/threads/nanogarden77203_123456789",
+  "files": [
+    {
+      "index": 0,
+      "type": "image",
+      "filename": "media_0.jpg",
+      "local_path": "./storage/media/threads/nanogarden77203_123456789/media_0.jpg",
+      "file_size": 245632,
+      "media_type": "image/jpeg",
+      "success": true
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "succeeded": 1,
+    "failed": 0,
+    "paths_comma_separated": "./storage/media/threads/nanogarden77203_123456789/media_0.jpg",
+    "total_bytes": 245632
+  }
+}
+```
+
+**Response (partial failure):**
+```json
+{
+  "ok": false,
+  "folder_path": "./storage/media/threads/nanogarden77203_123456789",
+  "files": [
+    {
+      "index": 0,
+      "type": "image",
+      "filename": "media_0.jpg",
+      "local_path": "./storage/media/threads/nanogarden77203_123456789/media_0.jpg",
+      "file_size": 245632,
+      "media_type": "image/jpeg",
+      "success": true
+    },
+    {
+      "index": 1,
+      "type": "video",
+      "filename": "media_1.mp4",
+      "local_path": null,
+      "success": false,
+      "error_message": "Connection timeout after 60000ms"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "succeeded": 1,
+    "failed": 1,
+    "paths_comma_separated": "./storage/media/threads/nanogarden77203_123456789/media_0.jpg",
+    "total_bytes": 245632
+  }
+}
+```
+
+**Notes:**
+- Extracts URLs from `<img src>`, `<video poster>`, `<video src>`, and `<source src>` elements.
+- Downloads files sequentially with timeout support (default 60s).
+- Automatically determines file extensions from URLs or defaults to `.jpg` (image) / `.mp4` (video).
+- Creates destination directory if it doesn't exist.
+- Returns partial results even if some downloads fail.
+- Maximum 100 files per request, 500MB per file.
 
 ## データ移行機能
 
