@@ -655,5 +655,125 @@ const updated = await window.containersAPI.update({
 });
 ```
 
+## デプロイ手順
+
+### 概要
+
+Container Browser のインストーラーを S3/CDN にアップロードして、URL からダウンロード可能にする手順です。
+
+### 前提条件
+
+- AWS CLI がインストール・設定済み
+- S3 バケット `container-browser-updates` へのアクセス権限
+- CloudFront Distribution ID `E1Q66ASB5AODYF` への無効化権限
+- ビルド済みのインストーラー（`dist/nsis-web/` ディレクトリ）
+
+### 自動デプロイ（GitHub Actions）
+
+**推奨方法**: main ブランチへの push で自動的にデプロイが実行されます。
+
+1. コードをコミット・プッシュ
+2. GitHub Actions が自動的にビルド・デプロイを実行
+3. デプロイ完了後、以下の URL からダウンロード可能:
+   - `https://updates.threadsbooster.jp/nsis-web/ContainerBrowser-Web-Setup.exe` (固定URL)
+   - `https://updates.threadsbooster.jp/nsis-web/Container-Browser-Web-Setup-{version}.exe` (バージョン付き)
+
+### 手動デプロイ
+
+ローカルから直接デプロイする場合：
+
+```powershell
+# 既にビルド済みの dist/nsis-web を使用してデプロイ
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\update-release.ps1 `
+  -Bucket container-browser-updates `
+  -DistributionId E1Q66ASB5AODYF `
+  -Cdn https://updates.threadsbooster.jp `
+  -SourceDir "dist/nsis-web" `
+  -SkipBuild
+```
+
+### ファイル配置の仕様
+
+デプロイスクリプトは以下のようにファイルを配置します：
+
+| ファイル | S3 パス | CDN URL |
+|---------|---------|---------|
+| **インストーラー (.exe)** | `s3://container-browser-updates/nsis-web/Container-Browser-Web-Setup-{version}.exe` | `https://updates.threadsbooster.jp/nsis-web/Container-Browser-Web-Setup-{version}.exe` |
+| **固定名インストーラー** | `s3://container-browser-updates/nsis-web/ContainerBrowser-Web-Setup.exe` | `https://updates.threadsbooster.jp/nsis-web/ContainerBrowser-Web-Setup.exe` |
+| **パッケージ (.nsis.7z)** | `s3://container-browser-updates/nsis-web/container-browser-{version}-x64.nsis.7z` | `https://updates.threadsbooster.jp/nsis-web/container-browser-{version}-x64.nsis.7z` |
+| **マニフェスト** | `s3://container-browser-updates/latest.yml` | `https://updates.threadsbooster.jp/latest.yml` |
+
+**重要**: `.exe` と `.nsis.7z` は同じ `nsis-web/` ディレクトリに配置されます。これは、インストーラーが自分と同じディレクトリからパッケージファイルを探すためです。
+
+### トラブルシューティング
+
+#### インストーラー実行時に「Access Denied (403)」エラー
+
+**症状:**
+```
+Unable to download application package from 
+https://updates.threadsbooster.jp/nsis-web/container-browser-0.5.3-x64.nsis.7z 
+(status: Access Forbidden (403))
+```
+
+**原因:**
+- `.nsis.7z` ファイルが `nsis-web/` ディレクトリに配置されていない
+- CloudFront のキャッシュが古い
+
+**解決方法:**
+
+1. **S3 の配置を確認:**
+   ```powershell
+   aws s3 ls s3://container-browser-updates/nsis-web/ | Select-String -Pattern "0.5.3"
+   ```
+
+2. **ファイルが存在しない場合、手動でコピー:**
+   ```powershell
+   aws s3 cp s3://container-browser-updates/container-browser-0.5.3-x64.nsis.7z s3://container-browser-updates/nsis-web/container-browser-0.5.3-x64.nsis.7z --content-type 'application/octet-stream' --cache-control 'public,max-age=300'
+   ```
+
+3. **CloudFront キャッシュを無効化:**
+   ```powershell
+   aws cloudfront create-invalidation --distribution-id E1Q66ASB5AODYF --paths "/nsis-web/container-browser-0.5.3-x64.nsis.7z" "/latest.yml"
+   ```
+
+4. **アクセス確認:**
+   ```powershell
+   curl -I https://updates.threadsbooster.jp/nsis-web/container-browser-0.5.3-x64.nsis.7z
+   ```
+   - HTTP 200 OK が返ってくることを確認
+
+**根本的な解決:**
+- デプロイスクリプト（`update-release.ps1`）は既に修正済みのため、通常のデプロイ手順に従えば問題は発生しません
+- 詳細は `docs/ci/CI_TROUBLESHOOTING.md` を参照してください
+
+### 検証手順
+
+デプロイ完了後、以下を確認してください：
+
+1. **マニフェストの確認:**
+   ```powershell
+   curl -s https://updates.threadsbooster.jp/latest.yml
+   ```
+   - バージョンが正しいか
+   - URL が CDN を指しているか（S3 直リンクではないか）
+
+2. **インストーラーのダウンロード確認:**
+   ```powershell
+   curl -I https://updates.threadsbooster.jp/nsis-web/Container-Browser-Web-Setup-0.5.3.exe
+   ```
+   - HTTP 200 OK が返ってくることを確認
+
+3. **パッケージファイルのダウンロード確認:**
+   ```powershell
+   curl -I https://updates.threadsbooster.jp/nsis-web/container-browser-0.5.3-x64.nsis.7z
+   ```
+   - HTTP 200 OK が返ってくることを確認
+
+### 関連ドキュメント
+
+- 詳細なトラブルシューティング: `docs/ci/CI_TROUBLESHOOTING.md`
+- リリースチェックリスト: `docs/release_checklist.md`
+
 
 

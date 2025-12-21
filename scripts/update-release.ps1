@@ -123,7 +123,7 @@ $latestContent = $latestContent -replace 'https?://container-browser-updates\.s3
 
 # Rewrite manifest entries:
 # - installer (.exe) -> CDN nsis-web/ path
-# - package (.nsis.7z) -> CDN root
+# - package (.nsis.7z) -> CDN nsis-web/ path (installer expects package in same directory as .exe)
 $latestContent = [regex]::Replace(
   $latestContent,
   '(^\s*-\s*url:\s*)(?:\"?)(?!https?://)([\w\-\.\s]+?\.exe)(?:\"?)',
@@ -133,15 +133,22 @@ $latestContent = [regex]::Replace(
 $latestContent = [regex]::Replace(
   $latestContent,
   '(^\s*-\s*url:\s*)(?:\"?)(?!https?://)([\w\-\.\s]+?\.nsis\.7z)(?:\"?)',
-  '${1}' + $cdnBase + '/${2}',
+  '${1}' + $cdnBase + '/nsis-web/${2}',
   'Multiline'
 )
 
 # Also rewrite path/file entries that reference exe or nsis.7z
+# Both .exe and .nsis.7z should point to nsis-web/ directory
 $latestContent = [regex]::Replace(
   $latestContent,
-  '(^\s*(?:path|file):\s*)(?:\"?)(?!https?://)(?:.*?)([^"\r\n]+?\.(?:exe|nsis\.7z))(?:\"?)$',
-  '${1}' + $cdnBase + '/${2}',
+  '(^\s*(?:path|file):\s*)(?:\"?)(?!https?://)(?:.*?)([^"\r\n]+?\.exe)(?:\"?)$',
+  '${1}' + $cdnBase + '/nsis-web/${2}',
+  'Multiline'
+)
+$latestContent = [regex]::Replace(
+  $latestContent,
+  '(^\s*(?:path|file):\s*)(?:\"?)(?!https?://)(?:.*?)([^"\r\n]+?\.nsis\.7z)(?:\"?)$',
+  '${1}' + $cdnBase + '/nsis-web/${2}',
   'Multiline'
 )
 
@@ -179,14 +186,16 @@ try {
   Write-Host 'WARNING: validate_latest_no_s3 failed; uploaded latest.yml may contain s3 references.'
 }
 # Upload artifacts with enforced placement:
-# - .nsis.7z -> S3 root (so clients can range GET from CDN root)
+# - .nsis.7z -> nsis-web/ (installer expects package in same directory as .exe)
 # - .exe -> nsis-web/ (no versioned exe in root)
+# Note: Both .exe and .nsis.7z are placed in nsis-web/ so the installer can find the package
+#       in the same directory as the installer executable.
 Get-ChildItem -LiteralPath $nsisDir -File | Where-Object { $_.Name -ne 'latest.yml' } | ForEach-Object {
   $local = $_.FullName
   $key = $_.Name
   if ($key -match '\.nsis\.7z$') {
-    Write-Host ("Uploading package {0} -> s3://{1}/{2}" -f $local, $Bucket, $key)
-    aws s3 cp $local ("s3://$Bucket/" + $key) --no-progress --content-type 'application/octet-stream' --cache-control 'public,max-age=300' | Out-Null
+    Write-Host ("Uploading package {0} -> s3://{1}/nsis-web/{2}" -f $local, $Bucket, $key)
+    aws s3 cp $local ("s3://$Bucket/nsis-web/" + $key) --no-progress --content-type 'application/octet-stream' --cache-control 'public,max-age=300' | Out-Null
   } elseif ($key -match '\.exe$') {
     Write-Host ("Uploading installer {0} -> s3://{1}/nsis-web/{2}" -f $local, $Bucket, $key)
     aws s3 cp $local ("s3://$Bucket/nsis-web/" + $key) --no-progress --content-type 'application/x-msdownload' --cache-control 'public,max-age=300' | Out-Null

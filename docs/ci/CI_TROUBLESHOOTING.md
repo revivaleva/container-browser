@@ -138,4 +138,73 @@
 
 付記: 今回の対応では `latest.yml` の書換えと CloudFront 側の設定調整で解決しました。将来のリリース時も上記手順に従ってください。
 
+---
+
+## 2025-12-21 - .nsis.7z ファイルの配置場所問題
+
+### 問題の概要
+インストーラー実行時に「Access Denied (403)」エラーが発生し、`.nsis.7z` パッケージファイルのダウンロードに失敗する。
+
+**エラーメッセージ例:**
+```
+Unable to download application package from 
+https://updates.threadsbooster.jp/nsis-web/container-browser-0.5.3-x64.nsis.7z 
+(status: Access Forbidden (403))
+```
+
+### 根本原因
+- インストーラー（`.exe`）は、自分と同じディレクトリ（`nsis-web/`）から `.nsis.7z` パッケージファイルを探す
+- しかし、デプロイスクリプトは `.nsis.7z` を S3 ルートに配置していた
+- そのため、インストーラーが `nsis-web/container-browser-0.5.3-x64.nsis.7z` にアクセスしようとして 403 エラーが発生
+
+### 修正内容
+`scripts/update-release.ps1` を修正し、`.nsis.7z` ファイルも `nsis-web/` ディレクトリに配置するように変更：
+
+**変更前:**
+- `.nsis.7z` → S3 ルート (`s3://container-browser-updates/container-browser-0.5.3-x64.nsis.7z`)
+- `.exe` → `nsis-web/` (`s3://container-browser-updates/nsis-web/Container-Browser-Web-Setup-0.5.3.exe`)
+
+**変更後:**
+- `.nsis.7z` → `nsis-web/` (`s3://container-browser-updates/nsis-web/container-browser-0.5.3-x64.nsis.7z`)
+- `.exe` → `nsis-web/` (`s3://container-browser-updates/nsis-web/Container-Browser-Web-Setup-0.5.3.exe`)
+
+### ファイル配置の最終的な方針
+**すべてのインストーラー関連ファイルは `nsis-web/` ディレクトリに配置:**
+- `.exe` ファイル（インストーラー）
+- `.nsis.7z` ファイル（パッケージ）
+- `latest.yml` は S3 ルートに配置（CDN ルートからアクセス可能）
+
+**理由:**
+- インストーラーは自分と同じディレクトリからパッケージファイルを探すため、両方を同じ場所に配置する必要がある
+- `latest.yml` は CDN ルートからアクセス可能にする必要があるため、S3 ルートに配置
+
+### トラブルシューティング
+もし同様のエラーが発生した場合：
+
+1. **S3 の配置を確認:**
+   ```powershell
+   aws s3 ls s3://container-browser-updates/nsis-web/ | Select-String -Pattern "0.5.3"
+   ```
+
+2. **CDN 経由でのアクセステスト:**
+   ```powershell
+   curl -I https://updates.threadsbooster.jp/nsis-web/container-browser-0.5.3-x64.nsis.7z
+   ```
+   - HTTP 200 OK が返ってくることを確認
+
+3. **CloudFront キャッシュの無効化:**
+   ```powershell
+   aws cloudfront create-invalidation --distribution-id E1Q66ASB5AODYF --paths "/nsis-web/container-browser-0.5.3-x64.nsis.7z" "/latest.yml"
+   ```
+
+4. **手動でファイルをコピー（緊急時）:**
+   ```powershell
+   aws s3 cp s3://container-browser-updates/container-browser-0.5.3-x64.nsis.7z s3://container-browser-updates/nsis-web/container-browser-0.5.3-x64.nsis.7z --content-type 'application/octet-stream' --cache-control 'public,max-age=300'
+   ```
+
+### 今後のリリース時の注意事項
+- デプロイスクリプト（`update-release.ps1`）は既に修正済みのため、通常のデプロイ手順に従えば問題は発生しない
+- GitHub Actions の自動デプロイでも正しく動作するはず
+- 手動デプロイの場合も、修正済みのスクリプトを使用すれば問題なし
+
 
