@@ -3,6 +3,7 @@ node_modules/
 dist/
 out/
 build/
+!build/installer.nsh
 *.log
 
 # Framework caches
