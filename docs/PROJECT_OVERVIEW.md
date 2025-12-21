@@ -33,16 +33,16 @@ curl -X POST http://127.0.0.1:3001/internal/export-restored/close \
 ## POST /internal/exec
 
 ### Purpose
-Remote DOM automation for a container view. Supports navigating, typing, evaluating arbitrary JS, and saving media files from the page (!click / scroll commands were removed in favor of `eval` scripts).
+Remote DOM automation for a container view. Supports navigating, typing, evaluating arbitrary JS, saving media files from the page, and native mouse/keyboard input simulation.
 
 ### Request
 ```
 POST /internal/exec
 Body: {
   "contextId": "<containerId>",
-  "command": "navigate" | "type" | "eval" | "save_media",
+  "command": "navigate" | "type" | "eval" | "save_media" | "click" | "clickAndType",
   "url": "<target url>",                   // when command === "navigate"
-  "selector": "<css or xpath selector>",   // when command === "type"
+  "selector": "<css or xpath selector>",   // when command === "type" | "click" | "clickAndType"
   "text": "<text to inject>",              // when command === "type"
   "eval": "<js expression>",               // when command === "eval"
   "exprId": "<optional id for debugging>",
@@ -73,6 +73,8 @@ Body: {
 ### Features
 - `navigate`: calls `wc.loadURL(url)` and optionally waits for a selector.  
 - `type`: focuses the selector, sets `.value = text`, and dispatches `input`.  
+- `click`: executes DOM `click()` on a selector with focus. Triggers native click event via `element.focus()` and `element.click()`.  
+- `clickAndType`: executes `click`, waits 50ms, then injects a random alphabet key (A-Z) via Electron `sendInputEvent()` (keyDown → char → keyUp). Provides system-level keyboard input simulation on the focused element.  
 - `eval`: takes a JSON-stringified expression (client should `JSON.stringify(expr)`), runs it directly via `wc.executeJavaScript(exprStr, true)`, and returns `result`.  
 - `save_media`: extracts image/video URLs from the page using CSS selectors, downloads them to a local directory, and returns download results. Supports `<img>`, `<video>`, and `<source>` tags. Maximum 100 files per request, 500MB per file limit.  
 - All commands share options: `timeoutMs`, `waitForSelector`, HTML/cookie/screenshot collection.  
@@ -84,18 +86,6 @@ Body: {
 - Each `contextId` is locked per request (`locks` set), preventing simultaneous re-use.  
 - On error, locks are cleared to avoid deadlocks.
 
-### Example: eval with HTML trim
-```
-curl -s -X POST http://127.0.0.1:3001/internal/exec \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "contextId":"335f2182-a060-4fc7-99e6-b873c8971d56",
-    "command":"eval",
-    "eval":"document.title",
-    "options":{"timeoutMs":15000,"returnHtml":"trim","waitForSelector":"article[data-testid=\"tweet\"]"}
-  }'
-```
-
 ### Example: type into an input
 ```
 curl -s -X POST http://127.0.0.1:3001/internal/exec \
@@ -105,6 +95,64 @@ curl -s -X POST http://127.0.0.1:3001/internal/exec \
     "command":"type",
     "selector":"input[name=\"q\"]",
     "text":"example search"
+  }'
+```
+
+### Example: click on an element
+```
+curl -s -X POST http://127.0.0.1:3001/internal/exec \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contextId":"335f2182-a060-4fc7-99e6-b873c8971d56",
+    "command":"click",
+    "selector":"button.submit"
+  }'
+```
+
+### Example: click and type random character
+Focuses element via `click()`, then injects system-level keyboard input (random A-Z):
+```
+curl -s -X POST http://127.0.0.1:3001/internal/exec \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contextId":"335f2182-a060-4fc7-99e6-b873c8971d56",
+    "command":"clickAndType",
+    "selector":"input[type=\"text\"]"
+  }'
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "command": "clickAndType",
+  "navigationOccurred": false,
+  "url": "https://example.com",
+  "title": "Example Page",
+  "elapsedMs": 120
+}
+```
+
+The `clickAndType` command:
+1. Finds the element via CSS selector or XPath
+2. Calls `element.focus()` and `element.click()` (DOM level)
+3. Waits 50ms for focus to settle
+4. Generates a random uppercase letter (A-Z)
+5. Injects keyboard input via Electron `sendInputEvent()`:
+   - `keyDown` with the character
+   - `char` with lowercase variant (for proper input reception)
+   - `keyUp` with the character
+6. This simulates natural keyboard input at the system level, avoiding browser security restrictions
+
+### Example: eval with HTML trim
+```
+curl -s -X POST http://127.0.0.1:3001/internal/exec \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "contextId":"335f2182-a060-4fc7-99e6-b873c8971d56",
+    "command":"eval",
+    "eval":"document.title",
+    "options":{"timeoutMs":15000,"returnHtml":"trim","waitForSelector":"article[data-testid=\"tweet\"]"}
   }'
 ```
 

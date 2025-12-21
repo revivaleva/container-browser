@@ -536,6 +536,45 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 }
                 navigationOccurred = true;
               } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+            } else if (command === 'click' || command === 'clickAndType') {
+              const selector = body.selector;
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              if (options.waitForSelector) {
+                const ok = await waitForSelector(options.waitForSelector, timeoutMs);
+                if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
+              }
+              try {
+                // Step 1: Execute DOM click() to focus and trigger click event
+                let clickScript: string;
+                if (typeof selector === 'string' && selector.startsWith('xpath:')) {
+                  const xp = selector.slice(6);
+                  clickScript = `(function(){const node = document.evaluate(${JSON.stringify(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(!node) throw new Error('selector not found'); node.focus(); node.click(); return true;})();`;
+                } else {
+                  clickScript = `(function(sel){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.focus(); el.click(); return true;})(${JSON.stringify(selector)});`;
+                }
+                await wc.executeJavaScript(clickScript, true);
+
+                // Step 2: If clickAndType, send keyboard input via sendInputEvent() after a small delay
+                if (command === 'clickAndType') {
+                  // Wait a bit to ensure focus is settled
+                  await new Promise(resolve => setTimeout(resolve, 50));
+
+                  // Generate random uppercase letter (A-Z)
+                  const randomChar = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+                  
+                  // Send keyboard input via sendInputEvent: keyDown -> char -> keyUp
+                  // Use lowercase for char event to ensure input receives the character
+                  const charLower = randomChar.toLowerCase();
+                  
+                  wc.sendInputEvent({ type: 'keyDown', keyCode: randomChar });
+                  wc.sendInputEvent({ type: 'char', keyCode: charLower });
+                  wc.sendInputEvent({ type: 'keyUp', keyCode: randomChar });
+                }
+              } catch (e:any) {
+                const msg = String(e?.message || e);
+                if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                return jsonResponse(res, 500, { ok: false, error: msg });
+              }
             } else if (command === 'type' || command === 'eval') {
               const selector = body.selector;
               if (command === 'type' && !selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
