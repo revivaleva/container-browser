@@ -116,8 +116,15 @@ contextBridge.exposeInMainWorld('debugAPI', {
 // 移行機能API
 contextBridge.exposeInMainWorld('migrationAPI', {
   exportCredentials: () => ipcRenderer.invoke('migration.exportCredentials'),
+  exportAll: () => ipcRenderer.invoke('migration.exportAll'),
+  exportComplete: (payload?: { includeProfiles?: boolean }) => 
+    ipcRenderer.invoke('migration.exportComplete', payload || {}),
   importCredentials: (payload: { credentials: Array<{ containerId: string; origin: string; username: string; password: string }> }) => 
     ipcRenderer.invoke('migration.importCredentials', payload),
+  importAll: (payload: { data: any; updatePaths?: { oldBasePath: string; newBasePath: string }; containerIdMapping?: Record<string, string> }) => 
+    ipcRenderer.invoke('migration.importAll', payload),
+  importComplete: (payload?: { containerIdMapping?: Record<string, string> }) => 
+    ipcRenderer.invoke('migration.importComplete', payload || {}),
   updatePaths: (payload: { oldBasePath: string; newBasePath: string }) => 
     ipcRenderer.invoke('migration.updatePaths', payload),
   getUserDataPath: () => ipcRenderer.invoke('migration.getUserDataPath')
