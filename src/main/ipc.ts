@@ -169,6 +169,40 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
     // DBデータをエクスポート（直接関数を呼び出し）
     const allContainers = DB.listContainers();
     
+    // エクスポート対象コンテナリストを読み込む
+    const exportListPath = path.join(app.getPath('userData'), 'export-container-list.txt');
+    let allowedContainerIds: Set<string> | null = null;
+    let allowedContainerNames: Set<string> | null = null;
+    
+    if (fs.existsSync(exportListPath)) {
+      try {
+        const listContent = fs.readFileSync(exportListPath, 'utf-8');
+        const lines = listContent.split('\n')
+          .map(line => line.trim())
+          .filter(line => line && !line.startsWith('#')); // 空行とコメント行を除外
+        
+        if (lines.length > 0) {
+          allowedContainerIds = new Set<string>();
+          allowedContainerNames = new Set<string>();
+          
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) {
+              // IDまたは名前として追加
+              allowedContainerIds.add(trimmed);
+              allowedContainerNames.add(trimmed.toLowerCase());
+            }
+          }
+          
+          console.log(`[migration] エクスポート対象リストから ${lines.length}件のエントリを読み込みました`);
+          sendProgress(`エクスポート対象リストから ${lines.length}件を読み込み`);
+        }
+      } catch (e) {
+        console.warn(`[migration] エクスポート対象リストの読み込みに失敗:`, e);
+        sendProgress(`警告: エクスポート対象リストの読み込みに失敗しました`);
+      }
+    }
+    
     // Bannedグループのコンテナを除外（名前またはnoteに"Banned"が含まれる）
     const isBannedContainer = (container: Container) => {
       const name = (container.name || '').toLowerCase();
@@ -176,12 +210,33 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       return name.includes('banned') || note.includes('banned');
     };
     
-    const containers = allContainers.filter(c => !isBannedContainer(c));
+    // エクスポート対象のフィルタリング
+    let filteredContainers = allContainers.filter(c => !isBannedContainer(c));
+    
+    // エクスポート対象リストが存在する場合は、リストに含まれるコンテナのみを対象にする
+    if (allowedContainerIds && allowedContainerNames) {
+      filteredContainers = filteredContainers.filter(c => {
+        // IDまたは名前でマッチ
+        return allowedContainerIds!.has(c.id) || allowedContainerNames!.has(c.name.toLowerCase());
+      });
+      console.log(`[migration] エクスポート対象リストに基づいて ${filteredContainers.length}件のコンテナを選択しました`);
+      sendProgress(`エクスポート対象: ${filteredContainers.length}件のコンテナ`);
+    }
+    
+    const containers = filteredContainers;
     const bannedContainers = allContainers.filter(c => isBannedContainer(c));
+    const excludedContainers = allContainers.filter(c => 
+      !isBannedContainer(c) && !containers.some(ec => ec.id === c.id)
+    );
     
     if (bannedContainers.length > 0) {
       console.log(`[migration] Bannedグループのコンテナ ${bannedContainers.length}件をエクスポートから除外しました`);
       sendProgress(`Bannedグループのコンテナ ${bannedContainers.length}件を除外`);
+    }
+    
+    if (excludedContainers.length > 0 && allowedContainerIds) {
+      console.log(`[migration] エクスポート対象リストに含まれないコンテナ ${excludedContainers.length}件を除外しました`);
+      sendProgress(`リスト外のコンテナ ${excludedContainers.length}件を除外`);
     }
     
     // Bannedグループを除外したコンテナIDのセットを作成
@@ -223,7 +278,8 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       },
       summary: {
         containers: containers.length,
-        containersExcluded: bannedContainers.length,
+        containersExcluded: bannedContainers.length + (excludedContainers?.length || 0),
+        containersTotal: allContainers.length,
         sessions: sessions.length,
         tabs: tabs.length,
         bookmarks: bookmarks.length,
