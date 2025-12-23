@@ -17,7 +17,102 @@ function extractPartitionDirName(partition: string): string | null {
 }
 
 /**
- * プロファイルフォルダをZIP圧縮（profiles + Partitions を含む）
+ * エクスポートから除外するディレクトリ/ファイルパターン
+ * ログイン状態維持に不要なキャッシュや一時ファイルを除外
+ */
+const EXCLUDE_PATTERNS = [
+  // キャッシュディレクトリ（巨大なファイルが含まれる可能性）
+  '**/Cache/**',
+  '**/Code Cache/**',
+  '**/GPUCache/**',
+  '**/Service Worker/**',
+  '**/ServiceWorker/**',
+  '**/Media Cache/**',
+  '**/ShaderCache/**',
+  '**/VideoDecodeStats/**',
+  
+  // 一時ファイル・ロックファイル
+  '**/SingletonLock',
+  '**/LOCK',
+  '**/lockfile',
+  '**/*.tmp',
+  '**/*.temp',
+  '**/*.log',
+  
+  // ダウンロード履歴（通常は不要）
+  '**/History*',
+  '**/Top Sites*',
+  '**/Favicons*',
+  
+  // その他の不要なファイル
+  '**/Current Session',
+  '**/Current Tabs',
+  '**/Last Session',
+  '**/Last Tabs',
+  '**/Preferences.bak',
+  '**/Secure Preferences.bak',
+];
+
+/**
+ * ファイル/ディレクトリが除外対象かどうかを判定
+ */
+function shouldExclude(filePath: string, basePath: string): boolean {
+  const relativePath = path.relative(basePath, filePath).replace(/\\/g, '/');
+  const fileName = path.basename(filePath);
+  
+  for (const pattern of EXCLUDE_PATTERNS) {
+    // シンプルなパターンマッチング（glob風）
+    const regex = new RegExp(
+      pattern
+        .replace(/\*\*/g, '.*')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\//g, '/')
+    );
+    
+    if (regex.test(relativePath) || regex.test(fileName)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * ディレクトリを再帰的にアーカイブに追加（除外パターンを適用）
+ */
+function addDirectoryFiltered(
+  archive: archiver.Archiver,
+  sourcePath: string,
+  archivePath: string,
+  basePath: string
+): void {
+  try {
+    const entries = fs.readdirSync(sourcePath, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const fullPath = path.join(sourcePath, entry.name);
+      const archiveEntryPath = path.join(archivePath, entry.name);
+      
+      // 除外チェック
+      if (shouldExclude(fullPath, basePath)) {
+        continue;
+      }
+      
+      if (entry.isDirectory()) {
+        // ディレクトリの場合は再帰的に処理
+        addDirectoryFiltered(archive, fullPath, archiveEntryPath, basePath);
+      } else {
+        // ファイルの場合は追加
+        archive.file(fullPath, { name: archiveEntryPath });
+      }
+    }
+  } catch (e) {
+    console.warn(`[profileExporter] Failed to process directory ${sourcePath}:`, e);
+  }
+}
+
+/**
+ * プロファイルフォルダをZIP圧縮（profiles + Partitions を含む、キャッシュ等を除外）
  */
 export async function zipProfiles(containerIds: string[], outputPath: string): Promise<{ success: number; error: number; totalSize: number }> {
   return new Promise((resolve, reject) => {
@@ -53,26 +148,27 @@ export async function zipProfiles(containerIds: string[], outputPath: string): P
       let hasProfile = false;
       let hasPartition = false;
 
-      // profiles/${containerId} を追加
+      // profiles/${containerId} を追加（フィルタリング適用）
       const profilePath = path.join(profilesDir, containerId);
       if (fs.existsSync(profilePath)) {
         try {
-          archive.directory(profilePath, `profiles/${containerId}`);
+          addDirectoryFiltered(archive, profilePath, `profiles/${containerId}`, profilePath);
           hasProfile = true;
+          console.log(`[profileExporter] Added profile ${containerId} (with exclusions)`);
         } catch (e) {
           console.warn(`[profileExporter] Failed to add profile ${containerId}:`, e);
         }
       }
 
-      // Partitions/container-${containerId} を追加
+      // Partitions/container-${containerId} を追加（フィルタリング適用）
       const partitionDirName = extractPartitionDirName(container.partition);
       if (partitionDirName) {
         const partitionPath = path.join(partitionsDir, partitionDirName);
         if (fs.existsSync(partitionPath)) {
           try {
-            archive.directory(partitionPath, `Partitions/${partitionDirName}`);
+            addDirectoryFiltered(archive, partitionPath, `Partitions/${partitionDirName}`, partitionPath);
             hasPartition = true;
-            console.log(`[profileExporter] Added partition ${partitionDirName} for container ${containerId}`);
+            console.log(`[profileExporter] Added partition ${partitionDirName} for container ${containerId} (with exclusions)`);
           } catch (e) {
             console.warn(`[profileExporter] Failed to add partition ${partitionDirName}:`, e);
           }

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import { DB } from './db';
 import { zipAllProfiles, extractProfiles } from './profileExporter';
+import archiver from 'archiver';
 
 const SERVICE = 'ContainerBrowserVault';
 
@@ -253,7 +254,7 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       // DBデータをZIPに追加
       archive.file(dbJsonPath, { name: 'data.json' });
 
-      // プロファイルとPartitionsをZIPに追加
+      // プロファイルとPartitionsをZIPに追加（キャッシュ等を除外）
       if (includeProfiles) {
         const containers = DB.listContainers();
         const profilesDir = path.join(userDataPath, 'profiles');
@@ -263,6 +264,72 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
         let profileErrorCount = 0;
         let partitionErrorCount = 0;
 
+        // エクスポートから除外するパターン（profileExporter.tsと同じ）
+        const EXCLUDE_PATTERNS = [
+          '**/Cache/**',
+          '**/Code Cache/**',
+          '**/GPUCache/**',
+          '**/Service Worker/**',
+          '**/ServiceWorker/**',
+          '**/Media Cache/**',
+          '**/ShaderCache/**',
+          '**/VideoDecodeStats/**',
+          '**/SingletonLock',
+          '**/LOCK',
+          '**/lockfile',
+          '**/*.tmp',
+          '**/*.temp',
+          '**/*.log',
+          '**/History*',
+          '**/Top Sites*',
+          '**/Favicons*',
+          '**/Current Session',
+          '**/Current Tabs',
+          '**/Last Session',
+          '**/Last Tabs',
+          '**/Preferences.bak',
+          '**/Secure Preferences.bak',
+        ];
+
+        const shouldExclude = (filePath: string, basePath: string): boolean => {
+          const relativePath = path.relative(basePath, filePath).replace(/\\/g, '/');
+          const fileName = path.basename(filePath);
+          for (const pattern of EXCLUDE_PATTERNS) {
+            const regex = new RegExp(
+              pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*').replace(/\//g, '/')
+            );
+            if (regex.test(relativePath) || regex.test(fileName)) {
+              return true;
+            }
+          }
+          return false;
+        };
+
+        const addDirectoryFiltered = (
+          archive: archiver.Archiver,
+          sourcePath: string,
+          archivePath: string,
+          basePath: string
+        ): void => {
+          try {
+            const entries = fs.readdirSync(sourcePath, { withFileTypes: true });
+            for (const entry of entries) {
+              const fullPath = path.join(sourcePath, entry.name);
+              const archiveEntryPath = path.join(archivePath, entry.name);
+              if (shouldExclude(fullPath, basePath)) {
+                continue;
+              }
+              if (entry.isDirectory()) {
+                addDirectoryFiltered(archive, fullPath, archiveEntryPath, basePath);
+              } else {
+                archive.file(fullPath, { name: archiveEntryPath });
+              }
+            }
+          } catch (e) {
+            console.warn(`[migration] Failed to process directory ${sourcePath}:`, e);
+          }
+        };
+
         // partition文字列から実体ディレクトリ名を抽出するヘルパー
         const extractPartitionDirName = (partition: string): string | null => {
           if (!partition || typeof partition !== 'string') return null;
@@ -271,27 +338,28 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
         };
 
         for (const container of containers) {
-          // profiles/${container.id} を追加
+          // profiles/${container.id} を追加（フィルタリング適用）
           const profilePath = path.join(profilesDir, container.id);
           if (fs.existsSync(profilePath)) {
             try {
-              archive.directory(profilePath, `profiles/${container.id}`);
+              addDirectoryFiltered(archive, profilePath, `profiles/${container.id}`, profilePath);
               profileCount++;
+              console.log(`[migration] Added profile ${container.id} (with exclusions)`);
             } catch (e) {
               console.warn(`[migration] Failed to add profile ${container.id}:`, e);
               profileErrorCount++;
             }
           }
 
-          // Partitions/container-${container.id} を追加
+          // Partitions/container-${container.id} を追加（フィルタリング適用）
           const partitionDirName = extractPartitionDirName(container.partition);
           if (partitionDirName) {
             const partitionPath = path.join(partitionsDir, partitionDirName);
             if (fs.existsSync(partitionPath)) {
               try {
-                archive.directory(partitionPath, `Partitions/${partitionDirName}`);
+                addDirectoryFiltered(archive, partitionPath, `Partitions/${partitionDirName}`, partitionPath);
                 partitionCount++;
-                console.log(`[migration] Added partition ${partitionDirName} for container ${container.id}`);
+                console.log(`[migration] Added partition ${partitionDirName} for container ${container.id} (with exclusions)`);
               } catch (e) {
                 console.warn(`[migration] Failed to add partition ${partitionDirName}:`, e);
                 partitionErrorCount++;
