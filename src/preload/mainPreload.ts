@@ -119,6 +119,14 @@ contextBridge.exposeInMainWorld('migrationAPI', {
   exportAll: () => ipcRenderer.invoke('migration.exportAll'),
   exportComplete: (payload?: { includeProfiles?: boolean }) => 
     ipcRenderer.invoke('migration.exportComplete', payload || {}),
+  // エクスポート進捗イベントリスナー
+  onExportProgress: (callback: (progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => void) => {
+    ipcRenderer.on('migration.exportProgress', (_event, data) => callback(data));
+    // クリーンアップ関数を返す
+    return () => {
+      ipcRenderer.removeAllListeners('migration.exportProgress');
+    };
+  },
   importCredentials: (payload: { credentials: Array<{ containerId: string; origin: string; username: string; password: string }> }) => 
     ipcRenderer.invoke('migration.importCredentials', payload),
   importAll: (payload: { data: any; updatePaths?: { oldBasePath: string; newBasePath: string }; containerIdMapping?: Record<string, string> }) => 

@@ -225,6 +225,26 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       const output = fs.createWriteStream(outputZipPath);
       const archive = archiver('zip', { zlib: { level: 6 } });
       let profilesInfo: { success: number; error: number; totalSize: number } | null = null;
+      let totalFiles = 0;
+      let processedFiles = 0;
+      let currentContainerIndex = 0;
+      let totalContainers = 0;
+
+      // 進捗を送信する関数
+      const sendProgress = (message: string, progress?: { current: number; total: number; percent: number }) => {
+        try {
+          const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+          if (mainWindow) {
+            mainWindow.webContents.send('migration.exportProgress', {
+              message,
+              progress,
+              timestamp: Date.now()
+            });
+          }
+        } catch (e) {
+          // 進捗送信エラーは無視
+        }
+      };
 
       output.on('close', () => {
         // 一時ファイルを削除
@@ -233,6 +253,8 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
         } catch (e) {
           console.warn('[migration] Failed to cleanup temp file:', e);
         }
+
+        sendProgress('エクスポート完了', { current: 100, total: 100, percent: 100 });
 
         resolve({
           ok: true,
@@ -246,12 +268,31 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       });
 
       archive.on('error', (err: any) => {
+        sendProgress(`エラー: ${err?.message || String(err)}`);
         resolve({ ok: false, error: err?.message || String(err) });
+      });
+
+      // アーカイブの進捗イベント
+      archive.on('progress', (progress) => {
+        const percent = progress.entries ? Math.round((progress.entries.processed / progress.entries.total) * 100) : 0;
+        sendProgress(
+          `アーカイブ中... ${(progress.bytes.processed / 1024 / 1024).toFixed(2)} MB / ${(progress.bytes.total / 1024 / 1024).toFixed(2)} MB`,
+          progress.entries ? { current: progress.entries.processed, total: progress.entries.total, percent } : undefined
+        );
+      });
+
+      // 各ファイルが追加されたとき
+      archive.on('entry', (entry) => {
+        processedFiles++;
+        if (processedFiles % 100 === 0 || processedFiles === 1) {
+          sendProgress(`ファイル処理中... ${processedFiles}件`);
+        }
       });
 
       archive.pipe(output);
 
       // DBデータをZIPに追加
+      sendProgress('データベースデータをZIPに追加中...');
       archive.file(dbJsonPath, { name: 'data.json' });
 
       // プロファイルとPartitionsをZIPに追加（キャッシュ等を除外）
@@ -337,17 +378,26 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
           return m ? m[1] : null;
         };
 
-        for (const container of containers) {
+        totalContainers = containers.length;
+        sendProgress(`エクスポート開始: ${totalContainers}個のコンテナを処理します`);
+
+        for (let i = 0; i < containers.length; i++) {
+          const container = containers[i];
+          currentContainerIndex = i + 1;
+          sendProgress(`コンテナ処理中: ${container.name || container.id} (${currentContainerIndex}/${totalContainers})`);
+
           // profiles/${container.id} を追加（フィルタリング適用）
           const profilePath = path.join(profilesDir, container.id);
           if (fs.existsSync(profilePath)) {
             try {
+              sendProgress(`  プロファイル追加中: ${container.id}`);
               addDirectoryFiltered(archive, profilePath, `profiles/${container.id}`, profilePath);
               profileCount++;
               console.log(`[migration] Added profile ${container.id} (with exclusions)`);
             } catch (e) {
               console.warn(`[migration] Failed to add profile ${container.id}:`, e);
               profileErrorCount++;
+              sendProgress(`  警告: プロファイル ${container.id} の追加に失敗`);
             }
           }
 
@@ -357,12 +407,14 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
             const partitionPath = path.join(partitionsDir, partitionDirName);
             if (fs.existsSync(partitionPath)) {
               try {
+                sendProgress(`  Partition追加中: ${partitionDirName}`);
                 addDirectoryFiltered(archive, partitionPath, `Partitions/${partitionDirName}`, partitionPath);
                 partitionCount++;
                 console.log(`[migration] Added partition ${partitionDirName} for container ${container.id} (with exclusions)`);
               } catch (e) {
                 console.warn(`[migration] Failed to add partition ${partitionDirName}:`, e);
                 partitionErrorCount++;
+                sendProgress(`  警告: Partition ${partitionDirName} の追加に失敗`);
               }
             } else {
               console.warn(`[migration] Partition not found: ${partitionPath}`);
@@ -371,6 +423,8 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
             console.warn(`[migration] Invalid partition format: ${container.partition}`);
           }
         }
+
+        sendProgress(`コンテナ処理完了: プロファイル ${profileCount}件, Partitions ${partitionCount}件`);
 
         profilesInfo = { 
           success: profileCount + partitionCount, 
