@@ -6,6 +6,7 @@ import { app } from 'electron';
 import { DB } from './db';
 import { zipAllProfiles, extractProfiles } from './profileExporter';
 import archiver from 'archiver';
+import type { Container } from '../shared/types';
 
 const SERVICE = 'ContainerBrowserVault';
 
@@ -166,14 +167,33 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
     const outputZipPath = result.filePath;
 
     // DBデータをエクスポート（直接関数を呼び出し）
-    const containers = DB.listContainers();
-    const sessions = DB.listAllSessions();
-    const tabs = DB.listAllTabs();
-    const bookmarks = DB.listBookmarks();
-    const sitePrefs = DB.listAllSitePrefs();
+    const allContainers = DB.listContainers();
+    
+    // Bannedグループのコンテナを除外（名前またはnoteに"Banned"が含まれる）
+    const isBannedContainer = (container: Container) => {
+      const name = (container.name || '').toLowerCase();
+      const note = (container.note || '').toLowerCase();
+      return name.includes('banned') || note.includes('banned');
+    };
+    
+    const containers = allContainers.filter(c => !isBannedContainer(c));
+    const bannedContainers = allContainers.filter(c => isBannedContainer(c));
+    
+    if (bannedContainers.length > 0) {
+      console.log(`[migration] Bannedグループのコンテナ ${bannedContainers.length}件をエクスポートから除外しました`);
+      sendProgress(`Bannedグループのコンテナ ${bannedContainers.length}件を除外`);
+    }
+    
+    // Bannedグループを除外したコンテナIDのセットを作成
+    const bannedContainerIds = new Set(bannedContainers.map(c => c.id));
+    
+    const sessions = DB.listAllSessions().filter(s => !bannedContainerIds.has(s.containerId));
+    const tabs = DB.listAllTabs().filter(t => !bannedContainerIds.has(t.containerId));
+    const bookmarks = DB.listBookmarks().filter(b => !bannedContainerIds.has(b.containerId));
+    const sitePrefs = DB.listAllSitePrefs().filter(sp => !bannedContainerIds.has(sp.containerId));
     
     const credentials: Array<{ containerId: string; origin: string; username: string; password: string }> = [];
-    const credentialRows = DB.listAllCredentials();
+    const credentialRows = DB.listAllCredentials().filter(row => !bannedContainerIds.has(row.containerId));
     for (const row of credentialRows) {
       try {
         const password = await keytar.getPassword(SERVICE, row.keytarAccount);
@@ -203,6 +223,7 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       },
       summary: {
         containers: containers.length,
+        containersExcluded: bannedContainers.length,
         sessions: sessions.length,
         tabs: tabs.length,
         bookmarks: bookmarks.length,
@@ -274,10 +295,26 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
 
       // アーカイブの進捗イベント
       archive.on('progress', (progress) => {
-        const percent = progress.entries ? Math.round((progress.entries.processed / progress.entries.total) * 100) : 0;
+        // progress.entries が undefined の場合があるため、安全にアクセス
+        const entries = progress.entries || {};
+        const bytes = progress.bytes || {};
+        const percent = entries.total && entries.processed !== undefined 
+          ? Math.round((entries.processed / entries.total) * 100) 
+          : (bytes.total && bytes.processed !== undefined 
+            ? Math.round((bytes.processed / bytes.total) * 100) 
+            : 0);
+        
+        const sizeInfo = bytes.processed !== undefined && bytes.total !== undefined
+          ? `${(bytes.processed / 1024 / 1024).toFixed(2)} MB / ${(bytes.total / 1024 / 1024).toFixed(2)} MB`
+          : bytes.processed !== undefined
+          ? `${(bytes.processed / 1024 / 1024).toFixed(2)} MB`
+          : '処理中...';
+        
         sendProgress(
-          `アーカイブ中... ${(progress.bytes.processed / 1024 / 1024).toFixed(2)} MB / ${(progress.bytes.total / 1024 / 1024).toFixed(2)} MB`,
-          progress.entries ? { current: progress.entries.processed, total: progress.entries.total, percent } : undefined
+          `アーカイブ中... ${sizeInfo}${percent > 0 ? ` (${percent}%)` : ''}`,
+          entries.total && entries.processed !== undefined 
+            ? { current: entries.processed, total: entries.total, percent } 
+            : undefined
         );
       });
 
@@ -297,7 +334,8 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
 
       // プロファイルとPartitionsをZIPに追加（キャッシュ等を除外）
       if (includeProfiles) {
-        const containers = DB.listContainers();
+        // Bannedグループを除外したコンテナのみを処理（既にフィルタリング済み）
+        const containersToExport = containers;
         const profilesDir = path.join(userDataPath, 'profiles');
         const partitionsDir = path.join(userDataPath, 'Partitions');
         let profileCount = 0;
@@ -378,11 +416,11 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
           return m ? m[1] : null;
         };
 
-        totalContainers = containers.length;
-        sendProgress(`エクスポート開始: ${totalContainers}個のコンテナを処理します`);
+        totalContainers = containersToExport.length;
+        sendProgress(`エクスポート開始: ${totalContainers}個のコンテナを処理します${bannedContainers.length > 0 ? ` (Bannedグループ ${bannedContainers.length}件を除外)` : ''}`);
 
-        for (let i = 0; i < containers.length; i++) {
-          const container = containers[i];
+        for (let i = 0; i < containersToExport.length; i++) {
+          const container = containersToExport[i];
           currentContainerIndex = i + 1;
           sendProgress(`コンテナ処理中: ${container.name || container.id} (${currentContainerIndex}/${totalContainers})`);
 
