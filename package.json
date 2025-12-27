@@ -1,6 +1,6 @@
 {
   "name": "container-browser",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Container Browser",
   "author": "revivaleva",
   "private": true,
@@ -11,7 +11,9 @@
     "postinstall": "electron-builder install-app-deps && npm rebuild better-sqlite3 --update-binary || true",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "dist": "electron-builder --win --x64"
+    "dist": "electron-builder --win --x64 --publish never",
+    "dist:dir": "electron-builder --win --x64 --dir",
+    "dist:offline": "electron-builder --win --x64 --publish never -c.win.target=nsis"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",
@@ -64,7 +66,11 @@
       "sign": null,
       "artifactName": "Container-Browser-Web-Setup-${version}.${ext}",
       "target": [
-        "nsis-web"
+        "nsis-web",
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        }
       ],
       "icon": "build-resources/icon.ico"
     },
