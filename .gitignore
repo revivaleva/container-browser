@@ -1,10 +1,14 @@
-﻿# Build / dependencies
+# Build / dependencies
 node_modules/
 dist/
+dist_update_*/
+dist_offline_*/
 out/
 build/
 !build/installer.nsh
 *.log
+logs/
+scripts/logs/
 
 # Framework caches
 .cache/
