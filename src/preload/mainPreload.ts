@@ -11,7 +11,10 @@ contextBridge.exposeInMainWorld('containersAPI', {
   openByName: (payload: any) => ipcRenderer.invoke('containers.openByName', payload),
   delete: (payload: any) => ipcRenderer.invoke('containers.delete', payload),
   update: (payload: any) => ipcRenderer.invoke('containers.update', payload),
-  saveCredential: (payload: any) => ipcRenderer.invoke('vault.saveCredential', payload)
+  saveCredential: (payload: any) => ipcRenderer.invoke('vault.saveCredential', payload),
+  compare: (payload: { successName: string; failNameOrId: string }) => ipcRenderer.invoke('containers.compare', payload),
+  clearCache: (payload: { id: string }) => ipcRenderer.invoke('containers.clearCache', payload),
+  clearAllData: (payload: { id: string }) => ipcRenderer.invoke('containers.clearAllData', payload)
 });
 
 // (containerShellAPI is defined below together with tabsAPI; do not duplicate exposeInMainWorld)
@@ -108,6 +111,12 @@ contextBridge.exposeInMainWorld('exportAPI', {
   }
 });
 
+// Graphics/GPU settings API
+contextBridge.exposeInMainWorld('graphicsAPI', {
+  getSettings: () => ipcRenderer.invoke('graphics.getSettings'),
+  saveSettings: (payload: any) => ipcRenderer.invoke('graphics.saveSettings', payload)
+});
+
 // Debug: allow renderer to forward arbitrary log messages to the main process (will appear in terminal)
 contextBridge.exposeInMainWorld('debugAPI', {
   log: (msg: any) => { try { ipcRenderer.send('renderer.log', msg); } catch { } }
@@ -133,6 +142,14 @@ contextBridge.exposeInMainWorld('migrationAPI', {
     ipcRenderer.invoke('migration.importAll', payload),
   importComplete: (payload?: { containerIdMapping?: Record<string, string> }) => 
     ipcRenderer.invoke('migration.importComplete', payload || {}),
+  // インポート進捗イベントリスナー
+  onImportProgress: (callback: (progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => void) => {
+    ipcRenderer.on('migration.importProgress', (_event, data) => callback(data));
+    // クリーンアップ関数を返す
+    return () => {
+      ipcRenderer.removeAllListeners('migration.importProgress');
+    };
+  },
   updatePaths: (payload: { oldBasePath: string; newBasePath: string }) => 
     ipcRenderer.invoke('migration.updatePaths', payload),
   getUserDataPath: () => ipcRenderer.invoke('migration.getUserDataPath')

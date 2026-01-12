@@ -13,9 +13,18 @@ type AuthConfig = {
   timeoutMs?: number;
 };
 
+type GraphicsConfig = {
+  graphicsMode?: 'auto' | 'disable';  // HWアクセラレーション ON/OFF
+  angleMode?: 'default' | 'd3d11' | 'gl' | 'warp';  // ANGLEバックエンド
+  disableHttp2?: boolean;  // HTTP/2無効化
+  disableQuic?: boolean;  // HTTP/3（QUIC）無効化
+  debugGpu?: boolean;  // GPU診断ログ
+};
+
 type AppConfig = {
   exportServer?: ExportConfig;
   auth?: AuthConfig;
+  graphics?: GraphicsConfig;
 };
 
 const DEFAULT: AppConfig = { 
@@ -23,6 +32,13 @@ const DEFAULT: AppConfig = {
   auth: {
     apiBase: 'https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod',
     timeoutMs: 5000
+  },
+  graphics: {
+    graphicsMode: 'auto',
+    angleMode: 'default',
+    disableHttp2: false,
+    disableQuic: false,
+    debugGpu: false
   }
 };
 
@@ -85,6 +101,17 @@ export function getAuthApiBase(): string {
 
 export function getAuthTimeoutMs(): number {
   return Number(process.env.AUTH_API_TIMEOUT_MS || getAuthSettings().timeoutMs || DEFAULT.auth?.timeoutMs || 5000);
+}
+
+export function getGraphicsSettings(): GraphicsConfig {
+  const c = loadConfig();
+  return c.graphics || DEFAULT.graphics!;
+}
+
+export function setGraphicsSettings(s: Partial<GraphicsConfig>) {
+  const cur = loadConfig();
+  const next: AppConfig = Object.assign({}, cur, { graphics: Object.assign({}, cur.graphics || DEFAULT.graphics, s) });
+  return saveConfig(next);
 }
 
 

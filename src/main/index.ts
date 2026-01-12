@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session } from 'electron';
 import { dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
@@ -6,12 +6,84 @@ import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
 import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows } from './containerManager';
 import './ipc';
-import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings } from './settings';
+import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings, getGraphicsSettings, setGraphicsSettings } from './settings';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint } from '../shared/types';
 import logger from '../shared/logger';
 import { saveToken, getToken, clearToken, getOrCreateDeviceId } from './tokenStore';
+
+// LOG_ONLY_PROXY=1時、console.log/warn/errorを上書きしてフィルタリング（直接consoleを使っている箇所も対象）
+const LOG_ONLY_PROXY = process.env.LOG_ONLY_PROXY === '1';
+if (LOG_ONLY_PROXY) {
+  const isProxyRelatedLog = (...args: any[]): boolean => {
+    const firstArg = args[0];
+    if (typeof firstArg === 'string') {
+      // [main]プレフィックスは除外（プロキシ関連でない限り）
+      if (firstArg.includes('[main]')) {
+        const allArgs = args.map(a => String(a)).join(' ');
+        if (!/proxy|Proxy|PROXY|setProxy/i.test(allArgs)) {
+          return false;
+        }
+      }
+      return /\[proxy-check\]|\[x-net\]|\[login\]|proxy|Proxy|PROXY|setProxy|onboarding\/task\.json/i.test(firstArg);
+    }
+    const allArgs = args.map(a => String(a)).join(' ');
+    // [main]プレフィックスは除外（プロキシ関連でない限り）
+    if (/\[main\]/i.test(allArgs) && !/proxy|Proxy|PROXY|setProxy/i.test(allArgs)) {
+      return false;
+    }
+    return /\[proxy-check\]|\[x-net\]|\[login\]|proxy|Proxy|PROXY|setProxy|onboarding\/task\.json/i.test(allArgs);
+  };
+  
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  
+  console.log = (...args: any[]) => {
+    if (isProxyRelatedLog(...args)) {
+      originalLog(...args);
+    }
+  };
+  
+  console.warn = (...args: any[]) => {
+    if (isProxyRelatedLog(...args)) {
+      originalWarn(...args);
+    }
+  };
+  
+  console.error = (...args: any[]) => {
+    if (isProxyRelatedLog(...args)) {
+      originalError(...args);
+    }
+  };
+}
+
+// Proxy認証情報の管理: partition -> { username, password }
+export const proxyCredentialsByPartition = new Map<string, { username: string; password: string }>();
+// host:portキーでも認証情報を引けるようにする（net.request等でwebContentsがない場合に使用）
+export const proxyCredentialsByHostPort = new Map<string, { username: string; password: string }>();
+
+// グローバルな未処理例外ハンドラー: ERR_TUNNEL_CONNECTION_FAILED エラーを無視（エラーダイアログを表示しない）
+process.on('uncaughtException', (error: Error) => {
+  const errorMsg = error.message || String(error);
+  if (errorMsg.includes('ERR_TUNNEL_CONNECTION_FAILED')) {
+    // プロキシ接続エラーは診断機能の失敗であり、コンテナの動作に影響しないため無視
+    return;
+  }
+  // その他のエラーは通常通り処理（ログ出力のみ、エラーダイアログは表示しない）
+  console.error('[main] uncaughtException (non-fatal)', error);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  const errorMsg = reason instanceof Error ? reason.message : String(reason);
+  if (errorMsg.includes('ERR_TUNNEL_CONNECTION_FAILED')) {
+    // プロキシ接続エラーは診断機能の失敗であり、コンテナの動作に影響しないため無視
+    return;
+  }
+  // その他のエラーは通常通り処理（ログ出力のみ、エラーダイアログは表示しない）
+  console.error('[main] unhandledRejection (non-fatal)', reason);
+});
 
 // Helper: after opening DevTools in detached mode, find the DevTools window and set its title/icon
 function adjustDevtoolsWindowForWebContents(targetWC: Electron.WebContents) {
@@ -573,61 +645,233 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
-// Register global login handler for proxy authentication (案A)
-// This must be registered before app.whenReady() to catch all login events
-app.on('login', (event, webContents, request, authInfo, callback) => {
-  console.log('[login] fired', {
-    isProxy: authInfo.isProxy,
-    host: authInfo.host,
-    port: authInfo.port,
-    scheme: authInfo.scheme,
-    realm: authInfo.realm,
-    webContentsId: webContents.id
-  });
-  
-  // プロキシ以外の認証はスルー
-  if (!authInfo.isProxy) {
-    console.log('[login] not a proxy authentication request, ignoring');
-    return;
+// グラフィクス/HWアクセラレーション設定（Xログイン問題の切り分け用）
+// 環境変数 > 設定ファイル > デフォルト の優先順位
+// 設定変更後はアプリ再起動が必要。
+const graphicsSettings = getGraphicsSettings();
+const GRAPHICS_MODE = process.env.GRAPHICS_MODE || graphicsSettings.graphicsMode || 'auto';
+const ANGLE_MODE = process.env.ANGLE_MODE || graphicsSettings.angleMode || 'default';
+const DISABLE_HTTP2 = process.env.DISABLE_HTTP2 === '1' || graphicsSettings.disableHttp2 === true;
+const DISABLE_QUIC = process.env.DISABLE_QUIC === '1' || graphicsSettings.disableQuic === true;
+const DEBUG_GPU = process.env.DEBUG_GPU === '1' || graphicsSettings.debugGpu === true;
+
+if (GRAPHICS_MODE === 'disable') {
+  app.disableHardwareAcceleration();
+  if (DEBUG_GPU) {
+    console.log('[gpu] Hardware acceleration disabled via GRAPHICS_MODE=disable');
   }
-  
-  event.preventDefault();
-  
-  // webContentsからcontainerIdを取得
-  // containerManagerでWebContentsにcontainerIdを設定している想定
-  const containerId: string | undefined = (webContents as any)._containerId;
-  
-  if (!containerId) {
-    console.warn('[login] no containerId found for webContents', { webContentsId: webContents.id });
-    return;
+}
+
+if (ANGLE_MODE !== 'default') {
+  // 有効な値: d3d11, gl, warp
+  app.commandLine.appendSwitch('use-angle', ANGLE_MODE);
+  if (DEBUG_GPU) {
+    console.log('[gpu] ANGLE backend set to:', ANGLE_MODE);
   }
-  
-  // コンテナのプロキシ設定を取得
+}
+
+if (DISABLE_HTTP2) {
+  app.commandLine.appendSwitch('disable-http2');
+  if (DEBUG_GPU) {
+    console.log('[gpu] HTTP/2 disabled via DISABLE_HTTP2=1');
+  }
+}
+
+if (DISABLE_QUIC) {
+  app.commandLine.appendSwitch('disable-quic');
+  if (DEBUG_GPU) {
+    console.log('[net] quic', { disableQuic: true });
+  }
+}
+
+// WebRTC非プロキシUDP禁止を全てのBrowserWindow/BrowserViewに適用（window.open/popup対策）
+app.on('browser-window-created', (_event, win) => {
   try {
-    const container = DB.getContainer(containerId);
-    if (!container || !container.proxy || !container.proxy.username || !container.proxy.password) {
-      console.warn('[login] no proxy credentials found for container', { containerId });
+    if (win && win.webContents) {
+      win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+      console.log('[main] setWebRTCIPHandlingPolicy applied via browser-window-created');
+    }
+  } catch (e) {
+    console.error('[main] failed to setWebRTCIPHandlingPolicy in browser-window-created', e);
+  }
+});
+
+// Register global login handler for proxy authentication (唯一の正)
+// process全体で1回だけ登録され、partition -> credentials Mapから認証情報を取得
+// This must be registered before app.whenReady() to catch all login events
+let appLoginHandlerRegistered = false;
+if (!appLoginHandlerRegistered) {
+  appLoginHandlerRegistered = true;
+  app.on('login', (event, webContents, request, authInfo, callback) => {
+    // プロキシ以外の認証はスルー（詳細ログは出さない）
+    if (!authInfo.isProxy) {
       return;
     }
     
-    console.log('[login] providing proxy credentials', {
-      containerId,
-      username: container.proxy.username,
-      passwordLength: container.proxy.password.length,
-      proxyHost: authInfo.host,
-      proxyPort: authInfo.port
-    });
+    // プロキシ認証の場合のみ処理
+    event.preventDefault();
     
-    callback(container.proxy.username, container.proxy.password);
-  } catch (e) {
-    console.error('[login] error getting proxy credentials', e);
-  }
-});
+    // 詳細ログ: warmup中に認証イベントが発火しているかを確認
+    const loginLogData: any = {
+      isProxy: authInfo.isProxy,
+      host: authInfo.host,
+      port: authInfo.port,
+      scheme: authInfo.scheme,
+      webContentsId: webContents?.id ?? null,
+      requestUrl: request?.url ?? null
+    };
+    
+    // webContentsからpartitionを取得し、Mapから認証情報を取得
+    try {
+      let partition: string | undefined;
+      let creds: { username: string; password: string } | undefined;
+      
+      // 方法0（最優先）: host:portキーでlookup（warmup中も確実に動作）
+      if (authInfo.host && authInfo.port) {
+        const hostPort = `${authInfo.host}:${authInfo.port}`;
+        loginLogData.hostPortLookup = hostPort;
+        creds = proxyCredentialsByHostPort.get(hostPort);
+        if (creds) {
+          loginLogData.credentialsSource = 'hostPort';
+        }
+      }
+      
+      // 方法1: webContents._containerId から逆引き（フォールバック）
+      if (!creds) {
+        const containerId: string | undefined = webContents ? (webContents as any)._containerId : undefined;
+        if (containerId) {
+          loginLogData.containerId = containerId;
+          try {
+            const container = DB.getContainer(containerId);
+            if (container && container.partition) {
+              partition = container.partition;
+              loginLogData.partition = partition;
+              creds = proxyCredentialsByPartition.get(partition);
+              if (creds) {
+                loginLogData.credentialsSource = 'partition';
+              }
+            }
+          } catch (e) {
+            loginLogData.getContainerError = e instanceof Error ? e.message : String(e);
+          }
+        }
+      }
+      
+      // 方法2: getWebPreferences() が利用可能な場合（フォールバック）
+      if (!creds && webContents && typeof webContents.getWebPreferences === 'function') {
+        try {
+          partition = webContents.getWebPreferences()?.partition;
+          if (partition) {
+            loginLogData.partition = partition;
+            creds = proxyCredentialsByPartition.get(partition);
+            if (creds) {
+              loginLogData.credentialsSource = 'partition';
+            }
+          }
+        } catch (e) {
+          // getWebPreferences() がエラーを投げる場合もあるので無視
+        }
+      }
+      
+      // 方法3: webContents.session から取得（フォールバック）
+      if (!creds && webContents?.session) {
+        const sessionPartition = (webContents.session as any).partition;
+        if (sessionPartition) {
+          partition = sessionPartition;
+          loginLogData.partition = partition;
+          creds = proxyCredentialsByPartition.get(partition);
+          if (creds) {
+            loginLogData.credentialsSource = 'partition';
+          }
+        }
+      }
+      
+      // 認証情報が見つかった場合
+      if (creds) {
+        loginLogData.credentialsProvided = true;
+        loginLogData.hasUsername = !!creds.username;
+        loginLogData.hasPassword = !!creds.password;
+        // パスワードはログに出力しない（マスク）
+        // warmup中のlogin発火を可視化するため、詳細ログを出力
+        console.log('[login] Proxy authentication - credentials provided', {
+          requestUrl: loginLogData.requestUrl,
+          host: loginLogData.host,
+          port: loginLogData.port,
+          credentialsSource: loginLogData.credentialsSource,
+          credentialsProvided: true,
+          hasUsername: loginLogData.hasUsername,
+          hasPassword: loginLogData.hasPassword,
+          webContentsId: loginLogData.webContentsId,
+          containerId: loginLogData.containerId
+        });
+        callback(creds.username, creds.password);
+        return;
+      }
+      
+      // 認証情報が見つからなかった場合
+      loginLogData.credentialsProvided = false;
+      loginLogData.availablePartitions = Array.from(proxyCredentialsByPartition.keys());
+      loginLogData.availableHostPorts = Array.from(proxyCredentialsByHostPort.keys());
+      // warmup中のlogin発火を可視化するため、詳細ログを出力
+      console.warn('[login] Proxy authentication - NO credentials found', {
+        requestUrl: loginLogData.requestUrl,
+        host: loginLogData.host,
+        port: loginLogData.port,
+        credentialsSource: loginLogData.credentialsSource || 'none',
+        credentialsProvided: false,
+        webContentsId: loginLogData.webContentsId,
+        containerId: loginLogData.containerId,
+        availablePartitions: loginLogData.availablePartitions.length,
+        availableHostPorts: loginLogData.availableHostPorts.length
+      });
+      
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      console.error('[login] Proxy authentication - ERROR getting credentials', {
+        ...loginLogData,
+        error: errorMsg
+      });
+    }
+  });
+}
 
 app.whenReady().then(async () => {
   try {
     console.log('[DEBUG] App ready event triggered');
     logger.info('[DEBUG] App ready event triggered');
+    
+    // GPU診断ログ（DEBUG_GPU=1 の時のみ詳細に出力）
+    if (DEBUG_GPU) {
+      try {
+        console.log('[gpu] settings', {
+          GRAPHICS_MODE,
+          ANGLE_MODE,
+          DISABLE_HTTP2,
+          DISABLE_QUIC,
+          DEBUG_GPU: true
+        });
+        
+        const featureStatus = app.getGPUFeatureStatus();
+        console.log('[gpu] featureStatus', JSON.stringify(featureStatus, null, 2));
+        
+        const gpuInfo = app.getGPUInfo('basic');
+        // 必要最小限の項目だけ抽出（大きなオブジェクトなので）
+        const gpuInfoSummary = {
+          vendorId: gpuInfo.auxAttributes?.vendorId,
+          deviceId: gpuInfo.auxAttributes?.deviceId,
+          vendorString: gpuInfo.auxAttributes?.vendorString,
+          deviceString: gpuInfo.auxAttributes?.deviceString,
+          driverVersion: gpuInfo.auxAttributes?.driverVersion,
+          driverDate: gpuInfo.auxAttributes?.driverDate,
+          glVersion: gpuInfo.auxAttributes?.glVersion,
+          glVendor: gpuInfo.auxAttributes?.glVendor,
+          glRenderer: gpuInfo.auxAttributes?.glRenderer
+        };
+        console.log('[gpu] gpuInfo.basic (summary)', JSON.stringify(gpuInfoSummary, null, 2));
+      } catch (e) {
+        console.error('[gpu] failed to get GPU info', e);
+      }
+    }
     
     console.log('[DEBUG] Initializing database...');
     initDB();
@@ -831,6 +1075,37 @@ app.whenReady().then(async () => {
     } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
   });
 
+  // Graphics/GPU設定のIPCハンドラ
+  ipcMain.handle('graphics.getSettings', () => {
+    try {
+      const settings = getGraphicsSettings();
+      return { ok: true, data: settings };
+    } catch (e: any) {
+      logger.error('[graphics] getSettings error', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
+  ipcMain.handle('graphics.saveSettings', async (_e, { graphicsMode, angleMode, disableHttp2, disableQuic, debugGpu }: { graphicsMode?: string; angleMode?: string; disableHttp2?: boolean; disableQuic?: boolean; debugGpu?: boolean }) => {
+    try {
+      const updates: any = {};
+      if (graphicsMode !== undefined) updates.graphicsMode = graphicsMode;
+      if (angleMode !== undefined) updates.angleMode = angleMode;
+      if (disableHttp2 !== undefined) updates.disableHttp2 = disableHttp2;
+      if (disableQuic !== undefined) updates.disableQuic = disableQuic;
+      if (debugGpu !== undefined) updates.debugGpu = debugGpu;
+      
+      const ok = setGraphicsSettings(updates);
+      if (ok) {
+        logger.info('[graphics] saveSettings: updated', updates);
+      }
+      return { ok };
+    } catch (e: any) {
+      logger.error('[graphics] saveSettings error', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
   // 移行機能: コンテナのパスを更新
   ipcMain.handle('migration.updatePaths', async (_e, { oldBasePath, newBasePath }: { oldBasePath: string; newBasePath: string }) => {
     try {
@@ -1009,6 +1284,115 @@ ipcMain.handle('containers.getByName', (_e, { name }: { name: string }) => {
     throw new Error('container not found');
   }
   return container;
+});
+// コンテナ設定比較機能
+ipcMain.handle('containers.compare', (_e, { successName, failNameOrId }: { successName: string; failNameOrId: string }) => {
+  try {
+    console.log('[ipc] containers.compare', { successName, failNameOrId });
+    const success = DB.getContainerByName(successName);
+    const fail = DB.getContainerByName(failNameOrId) || DB.getContainer(failNameOrId);
+    
+    if (!success) {
+      return { ok: false, error: `成功したコンテナ "${successName}" が見つかりません` };
+    }
+    
+    if (!fail) {
+      return { ok: false, error: `失敗したコンテナ "${failNameOrId}" が見つかりません` };
+    }
+    
+    // 比較結果を生成
+    const differences: string[] = [];
+    const details: any = {
+      success: {
+        id: success.id,
+        name: success.name,
+        partition: success.partition,
+        userAgent: success.userAgent,
+        locale: success.locale,
+        timezone: success.timezone,
+        proxy: success.proxy ? {
+          server: success.proxy.server,
+          hasUsername: !!success.proxy.username,
+          hasPassword: !!success.proxy.password
+        } : null,
+        fingerprint: success.fingerprint
+      },
+      fail: {
+        id: fail.id,
+        name: fail.name,
+        partition: fail.partition,
+        userAgent: fail.userAgent,
+        locale: fail.locale,
+        timezone: fail.timezone,
+        proxy: fail.proxy ? {
+          server: fail.proxy.server,
+          hasUsername: !!fail.proxy.username,
+          hasPassword: !!fail.proxy.password
+        } : null,
+        fingerprint: fail.fingerprint
+      },
+      differences: []
+    };
+    
+    // 各フィールドを比較
+    const compareField = (field: string, successVal: any, failVal: any) => {
+      if (JSON.stringify(successVal) !== JSON.stringify(failVal)) {
+        differences.push(field);
+        details.differences.push({
+          field,
+          success: successVal,
+          fail: failVal
+        });
+      }
+    };
+    
+    compareField('partition', success.partition, fail.partition);
+    compareField('userAgent', success.userAgent, fail.userAgent);
+    compareField('locale', success.locale, fail.locale);
+    compareField('timezone', success.timezone, fail.timezone);
+    compareField('proxy.server', success.proxy?.server, fail.proxy?.server);
+    compareField('proxy.hasUsername', !!success.proxy?.username, !!fail.proxy?.username);
+    compareField('proxy.hasPassword', !!success.proxy?.password, !!fail.proxy?.password);
+    
+    // Fingerprintの比較
+    if (success.fingerprint && fail.fingerprint) {
+      compareField('fingerprint.acceptLanguage', success.fingerprint.acceptLanguage, fail.fingerprint.acceptLanguage);
+      compareField('fingerprint.viewportWidth', success.fingerprint.viewportWidth, fail.fingerprint.viewportWidth);
+      compareField('fingerprint.viewportHeight', success.fingerprint.viewportHeight, fail.fingerprint.viewportHeight);
+      compareField('fingerprint.deviceScaleFactor', success.fingerprint.deviceScaleFactor, fail.fingerprint.deviceScaleFactor);
+      compareField('fingerprint.screenWidth', success.fingerprint.screenWidth, fail.fingerprint.screenWidth);
+      compareField('fingerprint.screenHeight', success.fingerprint.screenHeight, fail.fingerprint.screenHeight);
+      compareField('fingerprint.colorDepth', success.fingerprint.colorDepth, fail.fingerprint.colorDepth);
+      compareField('fingerprint.connectionType', success.fingerprint.connectionType, fail.fingerprint.connectionType);
+      compareField('fingerprint.canvasNoise', success.fingerprint.canvasNoise, fail.fingerprint.canvasNoise);
+      compareField('fingerprint.fakeIp', success.fingerprint.fakeIp, fail.fingerprint.fakeIp);
+    } else if (success.fingerprint !== fail.fingerprint) {
+      differences.push('fingerprint');
+      details.differences.push({
+        field: 'fingerprint',
+        success: success.fingerprint ? 'あり' : 'なし',
+        fail: fail.fingerprint ? 'あり' : 'なし'
+      });
+    }
+    
+    console.log('[ipc] containers.compare result', {
+      successName: success.name,
+      failName: fail.name,
+      differencesCount: differences.length,
+      differences
+    });
+    
+    return {
+      ok: true,
+      successName: success.name,
+      failName: fail.name,
+      differences,
+      details
+    };
+  } catch (e: any) {
+    console.error('[ipc] containers.compare error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
 });
 ipcMain.handle('containers.setNote', (_e, { id, note }) => {
   try {

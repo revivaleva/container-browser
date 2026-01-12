@@ -28,6 +28,42 @@ ipcMain.handle('vault.getCredential', async (_e, { containerId, origin }) => {
 ipcMain.handle('prefs.set', async (_e, pref) => { DB.upsertSitePref(pref); return true; });
 ipcMain.handle('prefs.get', async (_e, { containerId, origin }) => DB.getSitePref(containerId, origin) ?? null);
 
+// Clear container cache (HTTP cache only, preserves cookies and session data)
+ipcMain.handle('containers.clearCache', async (_e, { id }: { id: string }) => {
+  try {
+    const { clearContainerCache } = await import('./containerManager');
+    const result = clearContainerCache(id);
+    return { ok: result };
+  } catch (e: any) {
+    console.error('[main] containers.clearCache error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+// Clear storage for X domains (for recovery from 400 errors)
+ipcMain.handle('containers.clearStorageForX', async (_e, { id }: { id: string }) => {
+  try {
+    const { clearContainerStorageForX } = await import('./containerManager');
+    const result = await clearContainerStorageForX(id);
+    return { ok: result };
+  } catch (e: any) {
+    console.error('[main] containers.clearStorageForX error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+// Clear all storage data (cookies, localStorage, IndexedDB, etc.) for a container
+ipcMain.handle('containers.clearAllData', async (_e, { id }: { id: string }) => {
+  try {
+    const { clearContainerAllData } = await import('./containerManager');
+    const result = await clearContainerAllData(id);
+    return { ok: result };
+  } catch (e: any) {
+    console.error('[main] containers.clearAllData error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
 ipcMain.handle('bookmarks.list', async () => {
   return DB.listBookmarks();
 });
@@ -565,8 +601,20 @@ ipcMain.handle('migration.importCredentials', async (_e, { credentials }: { cred
 });
 
 // 移行機能: 全データのインポート（内部関数）
-async function importAllData(data: any, updatePaths?: { oldBasePath: string; newBasePath: string }, containerIdMapping?: Record<string, string>) {
+async function importAllData(data: any, updatePaths?: { oldBasePath: string; newBasePath: string }, containerIdMapping?: Record<string, string>, sendProgress?: (message: string, progress?: { current: number; total: number; percent: number }) => void) {
   try {
+    const progressCallback = sendProgress || (() => {});
+    console.log('[migration] importAllData: データインポートを開始します', {
+      hasContainers: !!data.containers,
+      containersCount: data.containers?.length || 0,
+      hasSessions: !!data.sessions,
+      hasTabs: !!data.tabs,
+      hasBookmarks: !!data.bookmarks,
+      hasSitePrefs: !!data.sitePrefs,
+      hasCredentials: !!data.credentials,
+      updatePaths,
+      hasContainerIdMapping: !!containerIdMapping
+    });
     const { app } = require('electron');
     const path = require('path');
     const results = {
@@ -580,7 +628,11 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
 
     // コンテナのインポート
     if (data.containers && Array.isArray(data.containers)) {
-      for (const container of data.containers) {
+      const containersCount = data.containers.length;
+      console.log('[migration] importAllData: コンテナのインポートを開始します (件数:', containersCount, ')');
+      progressCallback(`コンテナをインポートしています... (0/${containersCount})`, { current: 0, total: containersCount, percent: 0 });
+      for (let i = 0; i < data.containers.length; i++) {
+        const container = data.containers[i];
         try {
           // コンテナIDのマッピング適用
           const originalId = container.id;
@@ -662,16 +714,28 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
             console.log(`[migration] Imported container: ${container.name} (${newId})`);
           }
           results.containers.success++;
+          const percent = Math.round(((i + 1) / containersCount) * 100);
+          progressCallback(`コンテナをインポートしています... (${i + 1}/${containersCount})`, { current: i + 1, total: containersCount, percent });
         } catch (e) {
           console.warn(`[migration] Failed to import container ${container.id}:`, e);
           results.containers.error++;
+          const percent = Math.round(((i + 1) / containersCount) * 100);
+          progressCallback(`コンテナインポート中にエラー: ${container.name || container.id}`, { current: i + 1, total: containersCount, percent });
         }
+      }
+      if (containersCount > 0) {
+        progressCallback(`コンテナのインポートが完了しました (成功: ${results.containers.success}, エラー: ${results.containers.error})`, { current: containersCount, total: containersCount, percent: 100 });
       }
     }
 
     // セッションのインポート
     if (data.sessions && Array.isArray(data.sessions)) {
-      for (const session of data.sessions) {
+      const sessionsCount = data.sessions.length;
+      if (sessionsCount > 0) {
+        progressCallback(`セッションをインポートしています... (0/${sessionsCount})`, { current: 0, total: sessionsCount, percent: 0 });
+      }
+      for (let i = 0; i < data.sessions.length; i++) {
+        const session = data.sessions[i];
         try {
           const newContainerId = containerIdMapping && containerIdMapping[session.containerId] 
             ? containerIdMapping[session.containerId] 
@@ -681,16 +745,32 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
             DB.closeSession(session.id, session.closedAt);
           }
           results.sessions.success++;
+          if (sessionsCount > 0) {
+            const percent = Math.round(((i + 1) / sessionsCount) * 100);
+            progressCallback(`セッションをインポートしています... (${i + 1}/${sessionsCount})`, { current: i + 1, total: sessionsCount, percent });
+          }
         } catch (e) {
           console.warn(`[migration] Failed to import session ${session.id}:`, e);
           results.sessions.error++;
+          if (sessionsCount > 0) {
+            const percent = Math.round(((i + 1) / sessionsCount) * 100);
+            progressCallback(`セッションインポート中にエラー`, { current: i + 1, total: sessionsCount, percent });
+          }
         }
+      }
+      if (sessionsCount > 0) {
+        progressCallback(`セッションのインポートが完了しました (成功: ${results.sessions.success}, エラー: ${results.sessions.error})`, { current: sessionsCount, total: sessionsCount, percent: 100 });
       }
     }
 
     // タブのインポート
     if (data.tabs && Array.isArray(data.tabs)) {
-      for (const tab of data.tabs) {
+      const tabsCount = data.tabs.length;
+      if (tabsCount > 0) {
+        progressCallback(`タブをインポートしています... (0/${tabsCount})`, { current: 0, total: tabsCount, percent: 0 });
+      }
+      for (let i = 0; i < data.tabs.length; i++) {
+        const tab = data.tabs[i];
         try {
           const newContainerId = containerIdMapping && containerIdMapping[tab.containerId] 
             ? containerIdMapping[tab.containerId] 
@@ -700,50 +780,68 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
             containerId: newContainerId
           });
           results.tabs.success++;
+          if (tabsCount > 0) {
+            const percent = Math.round(((i + 1) / tabsCount) * 100);
+            progressCallback(`タブをインポートしています... (${i + 1}/${tabsCount})`, { current: i + 1, total: tabsCount, percent });
+          }
         } catch (e) {
           console.warn(`[migration] Failed to import tab:`, e);
           results.tabs.error++;
+          if (tabsCount > 0) {
+            const percent = Math.round(((i + 1) / tabsCount) * 100);
+            progressCallback(`タブインポート中にエラー`, { current: i + 1, total: tabsCount, percent });
+          }
         }
+      }
+      if (tabsCount > 0) {
+        progressCallback(`タブのインポートが完了しました (成功: ${results.tabs.success}, エラー: ${results.tabs.error})`, { current: tabsCount, total: tabsCount, percent: 100 });
       }
     }
 
     // ブックマークのインポート
     if (data.bookmarks && Array.isArray(data.bookmarks)) {
+      const bookmarksCount = data.bookmarks.length;
+      if (bookmarksCount > 0) {
+        progressCallback(`ブックマークをインポートしています... (0/${bookmarksCount})`, { current: 0, total: bookmarksCount, percent: 0 });
+      }
       const existingBookmarks = DB.listBookmarks();
       const existingIds = new Set(existingBookmarks.map(b => b.id));
       
-      for (const bookmark of data.bookmarks) {
+      for (let i = 0; i < data.bookmarks.length; i++) {
+        const bookmark = data.bookmarks[i];
         try {
           const newContainerId = containerIdMapping && bookmark.containerId && containerIdMapping[bookmark.containerId] 
             ? containerIdMapping[bookmark.containerId] 
             : (bookmark.containerId || '');
           // 既存のブックマークをチェック
-          if (!existingIds.has(bookmark.id)) {
-            // 新規追加
-            DB.addBookmark({
-              id: bookmark.id,
-              containerId: newContainerId,
-              title: bookmark.title,
-              url: bookmark.url,
-              createdAt: bookmark.createdAt || Date.now()
-            });
-            results.bookmarks.success++;
-          } else {
-            // 既存の場合は更新（タイトルとURLを更新）
-            // addBookmarkは既存IDの場合は更新される
-            DB.addBookmark({
-              id: bookmark.id,
-              containerId: newContainerId,
-              title: bookmark.title,
-              url: bookmark.url,
-              createdAt: bookmark.createdAt || existingBookmarks.find(b => b.id === bookmark.id)?.createdAt || Date.now()
-            });
-            results.bookmarks.success++;
+          if (existingIds.has(bookmark.id)) {
+            // 既存の場合は先に削除してから追加（更新のため）
+            DB.deleteBookmark(bookmark.id);
+          }
+          // 新規追加または更新（削除後に追加）
+          DB.addBookmark({
+            id: bookmark.id,
+            containerId: newContainerId,
+            title: bookmark.title,
+            url: bookmark.url,
+            createdAt: bookmark.createdAt || existingBookmarks.find(b => b.id === bookmark.id)?.createdAt || Date.now()
+          });
+          results.bookmarks.success++;
+          if (bookmarksCount > 0) {
+            const percent = Math.round(((i + 1) / bookmarksCount) * 100);
+            progressCallback(`ブックマークをインポートしています... (${i + 1}/${bookmarksCount})`, { current: i + 1, total: bookmarksCount, percent });
           }
         } catch (e) {
           console.warn(`[migration] Failed to import bookmark ${bookmark.id}:`, e);
           results.bookmarks.error++;
+          if (bookmarksCount > 0) {
+            const percent = Math.round(((i + 1) / bookmarksCount) * 100);
+            progressCallback(`ブックマークインポート中にエラー`, { current: i + 1, total: bookmarksCount, percent });
+          }
         }
+      }
+      if (bookmarksCount > 0) {
+        progressCallback(`ブックマークのインポートが完了しました (成功: ${results.bookmarks.success}, エラー: ${results.bookmarks.error})`, { current: bookmarksCount, total: bookmarksCount, percent: 100 });
       }
       
       // ブックマークの順序を復元
@@ -770,7 +868,12 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
 
     // サイト設定のインポート
     if (data.sitePrefs && Array.isArray(data.sitePrefs)) {
-      for (const pref of data.sitePrefs) {
+      const sitePrefsCount = data.sitePrefs.length;
+      if (sitePrefsCount > 0) {
+        progressCallback(`サイト設定をインポートしています... (0/${sitePrefsCount})`, { current: 0, total: sitePrefsCount, percent: 0 });
+      }
+      for (let i = 0; i < data.sitePrefs.length; i++) {
+        const pref = data.sitePrefs[i];
         try {
           const newContainerId = containerIdMapping && containerIdMapping[pref.containerId] 
             ? containerIdMapping[pref.containerId] 
@@ -780,16 +883,32 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
             containerId: newContainerId
           });
           results.sitePrefs.success++;
+          if (sitePrefsCount > 0) {
+            const percent = Math.round(((i + 1) / sitePrefsCount) * 100);
+            progressCallback(`サイト設定をインポートしています... (${i + 1}/${sitePrefsCount})`, { current: i + 1, total: sitePrefsCount, percent });
+          }
         } catch (e) {
           console.warn(`[migration] Failed to import site pref:`, e);
           results.sitePrefs.error++;
+          if (sitePrefsCount > 0) {
+            const percent = Math.round(((i + 1) / sitePrefsCount) * 100);
+            progressCallback(`サイト設定インポート中にエラー`, { current: i + 1, total: sitePrefsCount, percent });
+          }
         }
+      }
+      if (sitePrefsCount > 0) {
+        progressCallback(`サイト設定のインポートが完了しました (成功: ${results.sitePrefs.success}, エラー: ${results.sitePrefs.error})`, { current: sitePrefsCount, total: sitePrefsCount, percent: 100 });
       }
     }
 
     // 認証情報のインポート
     if (data.credentials && Array.isArray(data.credentials)) {
-      for (const cred of data.credentials) {
+      const credentialsCount = data.credentials.length;
+      if (credentialsCount > 0) {
+        progressCallback(`認証情報をインポートしています... (0/${credentialsCount})`, { current: 0, total: credentialsCount, percent: 0 });
+      }
+      for (let i = 0; i < data.credentials.length; i++) {
+        const cred = data.credentials[i];
         try {
           const newContainerId = containerIdMapping && containerIdMapping[cred.containerId] 
             ? containerIdMapping[cred.containerId] 
@@ -804,10 +923,21 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
             updatedAt: Date.now()
           });
           results.credentials.success++;
+          if (credentialsCount > 0) {
+            const percent = Math.round(((i + 1) / credentialsCount) * 100);
+            progressCallback(`認証情報をインポートしています... (${i + 1}/${credentialsCount})`, { current: i + 1, total: credentialsCount, percent });
+          }
         } catch (e) {
           console.warn(`[migration] Failed to import credential for ${cred.containerId}|${cred.origin}:`, e);
           results.credentials.error++;
+          if (credentialsCount > 0) {
+            const percent = Math.round(((i + 1) / credentialsCount) * 100);
+            progressCallback(`認証情報インポート中にエラー`, { current: i + 1, total: credentialsCount, percent });
+          }
         }
+      }
+      if (credentialsCount > 0) {
+        progressCallback(`認証情報のインポートが完了しました (成功: ${results.credentials.success}, エラー: ${results.credentials.error})`, { current: credentialsCount, total: credentialsCount, percent: 100 });
       }
     }
 
@@ -820,9 +950,10 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       credentials: `${results.credentials.success}/${results.credentials.success + results.credentials.error}`
     };
 
+    console.log('[migration] importAllData: データインポートが完了しました', summary);
     return { ok: true, results, summary };
   } catch (e: any) {
-    console.error('[migration] importAll error:', e);
+    console.error('[migration] importAllData: データインポートでエラーが発生しました:', e);
     return { ok: false, error: e?.message || String(e) };
   }
 }
@@ -835,15 +966,35 @@ ipcMain.handle('migration.importAll', async (_e, { data, updatePaths, containerI
 // 移行機能: 完全なエクスポートファイル（ZIP）をインポート
 ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { containerIdMapping?: Record<string, string> } = {}) => {
   try {
+    console.log('[migration] importComplete: インポート処理を開始します');
     const { BrowserWindow } = require('electron');
     const extractZip = require('extract-zip');
+
+    // 進捗を送信する関数
+    const sendProgress = (message: string, progress?: { current: number; total: number; percent: number }) => {
+      try {
+        const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+        if (mainWindow) {
+          mainWindow.webContents.send('migration.importProgress', {
+            message,
+            progress,
+            timestamp: Date.now()
+          });
+        }
+      } catch (e) {
+        // 進捗送信エラーは無視
+      }
+    };
 
     // ファイル選択ダイアログを表示
     const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
     if (!mainWindow) {
+      console.warn('[migration] importComplete: ダイアログ表示用のウィンドウが見つかりません');
       return { ok: false, error: 'No window available for dialog' };
     }
 
+    sendProgress('ファイル選択ダイアログを表示しています...');
+    console.log('[migration] importComplete: ファイル選択ダイアログを表示します');
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'エクスポートファイルを選択',
       filters: [
@@ -854,25 +1005,55 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
     });
 
     if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      console.log('[migration] importComplete: インポートがキャンセルされました');
       return { ok: false, error: 'Import cancelled' };
     }
 
     const zipPath = result.filePaths[0];
+    console.log('[migration] importComplete: 選択されたZIPファイル:', zipPath);
     if (!fs.existsSync(zipPath)) {
+      console.error('[migration] importComplete: ZIPファイルが見つかりません:', zipPath);
+      sendProgress('エラー: ZIPファイルが見つかりません', { current: 0, total: 100, percent: 0 });
       return { ok: false, error: 'ZIP file not found' };
     }
 
     const userDataPath = app.getPath('userData');
     const tempDir = path.join(userDataPath, 'temp', 'import-extract');
+    console.log('[migration] importComplete: 一時ディレクトリ:', tempDir);
     
     // 既存の一時ディレクトリを削除
     if (fs.existsSync(tempDir)) {
+      console.log('[migration] importComplete: 既存の一時ディレクトリを削除します');
+      sendProgress('一時ディレクトリを準備しています...');
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
     fs.mkdirSync(tempDir, { recursive: true });
 
     // ZIPを展開
-    await extractZip(zipPath, { dir: tempDir });
+    sendProgress('ZIPファイルを展開しています...', { current: 0, total: 100, percent: 0 });
+    console.log('[migration] importComplete: ZIPファイルを展開します:', zipPath);
+    try {
+      await extractZip(zipPath, { dir: tempDir });
+      sendProgress('ZIPファイルの展開が完了しました', { current: 100, total: 100, percent: 100 });
+      console.log('[migration] importComplete: ZIPファイルの展開が完了しました');
+      
+      // 展開されたファイルを確認
+      try {
+        const extractedFiles = fs.readdirSync(tempDir);
+        console.log('[migration] importComplete: 展開されたファイル/ディレクトリ:', extractedFiles);
+        const hasDataJson = fs.existsSync(path.join(tempDir, 'data.json'));
+        const hasProfiles = fs.existsSync(path.join(tempDir, 'profiles'));
+        const hasPartitions = fs.existsSync(path.join(tempDir, 'Partitions'));
+        console.log('[migration] importComplete: 展開内容確認 - data.json:', hasDataJson, 'profiles:', hasProfiles, 'Partitions:', hasPartitions);
+      } catch (e) {
+        console.warn('[migration] importComplete: 展開内容の確認でエラー:', e);
+      }
+    } catch (e: any) {
+      const errorMsg = `ZIPファイルの展開でエラーが発生しました: ${e?.message || String(e)}`;
+      console.error('[migration] importComplete:', errorMsg, e);
+      sendProgress(errorMsg, { current: 0, total: 100, percent: 0 });
+      throw e;
+    }
 
     const results = {
       data: { ok: false, error: null as string | null },
@@ -882,8 +1063,12 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
 
     // DBデータをインポート
     const dataJsonPath = path.join(tempDir, 'data.json');
+    sendProgress('DBデータのインポートを開始します...', { current: 0, total: 100, percent: 0 });
+    console.log('[migration] importComplete: DBデータのインポートを開始します');
     if (fs.existsSync(dataJsonPath)) {
       try {
+        sendProgress('data.jsonを読み込んでいます...');
+        console.log('[migration] importComplete: data.jsonを読み込みます');
         const dataJson = fs.readFileSync(dataJsonPath, 'utf-8');
         const exportData = JSON.parse(dataJson);
         
@@ -891,25 +1076,44 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
         const oldBasePath = exportData.data?.containers?.[0]?.userDataDir?.split('\\profiles')[0] || '';
         const newBasePath = userDataPath;
 
-        // importAllの処理を直接実行
+        const containersCount = exportData.data?.containers?.length || 0;
+        sendProgress(`データをインポートしています... (コンテナ: ${containersCount}件)`, { current: 0, total: 100, percent: 0 });
+        console.log('[migration] importComplete: importAllDataを実行します', {
+          containersCount,
+          oldBasePath,
+          newBasePath
+        });
+        // importAllの処理を直接実行（進捗コールバック付き）
         const importResult = await importAllData(
           exportData.data, 
           oldBasePath && newBasePath && oldBasePath !== newBasePath
             ? { oldBasePath, newBasePath }
             : undefined,
-          containerIdMapping
+          containerIdMapping,
+          sendProgress
         );
 
         results.data = importResult;
+        if (importResult.ok) {
+          sendProgress('DBデータのインポートが完了しました', { current: 100, total: 100, percent: 100 });
+        } else {
+          sendProgress(`DBデータのインポートでエラー: ${importResult.error}`, { current: 0, total: 100, percent: 0 });
+        }
+        console.log('[migration] importComplete: DBデータのインポートが完了しました', results.data);
       } catch (e: any) {
+        console.error('[migration] importComplete: DBデータのインポートでエラーが発生しました:', e);
+        sendProgress(`DBデータのインポートでエラーが発生しました: ${e?.message || String(e)}`, { current: 0, total: 100, percent: 0 });
         results.data = { ok: false, error: e?.message || String(e) };
       }
     } else {
+      console.warn('[migration] importComplete: data.jsonが見つかりません:', dataJsonPath);
+      sendProgress('エラー: data.jsonが見つかりません', { current: 0, total: 100, percent: 0 });
       results.data = { ok: false, error: 'data.json not found in ZIP' };
     }
 
     // プロファイルをインポート
     const extractedProfilesDir = path.join(tempDir, 'profiles');
+    console.log('[migration] importComplete: プロファイルのインポートを開始します');
     if (fs.existsSync(extractedProfilesDir)) {
       const profilesDir = path.join(userDataPath, 'profiles');
       if (!fs.existsSync(profilesDir)) {
@@ -917,7 +1121,10 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
       }
 
       const profileDirs = fs.readdirSync(extractedProfilesDir);
-      for (const profileDir of profileDirs) {
+      console.log('[migration] importComplete: インポート対象のプロファイル数:', profileDirs.length);
+      sendProgress(`プロファイルをインポートしています... (0/${profileDirs.length})`, { current: 0, total: profileDirs.length, percent: 0 });
+      for (let i = 0; i < profileDirs.length; i++) {
+        const profileDir = profileDirs[i];
         try {
           const sourcePath = path.join(extractedProfilesDir, profileDir);
           // コンテナIDマッピングを適用
@@ -939,21 +1146,33 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
               console.log(`[migration] Mapped profile directory: ${profileDir} -> ${newProfileDir}`);
             }
             results.profiles.successCount++;
+            const percent = Math.round(((i + 1) / profileDirs.length) * 100);
+            sendProgress(`プロファイルをインポートしています... (${i + 1}/${profileDirs.length})`, { current: i + 1, total: profileDirs.length, percent });
           }
         } catch (e) {
           console.warn(`[migration] Failed to import profile ${profileDir}:`, e);
           results.profiles.errorCount++;
+          const percent = Math.round(((i + 1) / profileDirs.length) * 100);
+          sendProgress(`プロファイルインポート中にエラー: ${profileDir}`, { current: i + 1, total: profileDirs.length, percent });
         }
+      }
+      if (profileDirs.length > 0) {
+        sendProgress(`プロファイルのインポートが完了しました (成功: ${results.profiles.successCount}, エラー: ${results.profiles.errorCount})`, { current: profileDirs.length, total: profileDirs.length, percent: 100 });
       }
     }
 
     // Partitionsをインポート（ロックファイルを除外）
     const extractedPartitionsDir = path.join(tempDir, 'Partitions');
+    console.log('[migration] importComplete: Partitionsのインポートを開始します');
     if (fs.existsSync(extractedPartitionsDir)) {
       const partitionsDir = path.join(userDataPath, 'Partitions');
       if (!fs.existsSync(partitionsDir)) {
         fs.mkdirSync(partitionsDir, { recursive: true });
       }
+
+      const partitionDirs = fs.readdirSync(extractedPartitionsDir);
+      console.log('[migration] importComplete: インポート対象のPartition数:', partitionDirs.length);
+      sendProgress(`Partitionsをインポートしています... (0/${partitionDirs.length})`, { current: 0, total: partitionDirs.length, percent: 0 });
 
       // Chromium/Electronのロックファイル名（プラットフォーム別）
       const lockFileNames = ['SingletonLock', 'LOCK', 'lockfile'];
@@ -980,8 +1199,8 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
         }
       };
 
-      const partitionDirs = fs.readdirSync(extractedPartitionsDir);
-      for (const partitionDir of partitionDirs) {
+      for (let i = 0; i < partitionDirs.length; i++) {
+        const partitionDir = partitionDirs[i];
         try {
           const sourcePath = path.join(extractedPartitionsDir, partitionDir);
           // partitionディレクトリ名からコンテナIDを抽出（container-${id}形式）
@@ -1011,7 +1230,9 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
                   fs.rmSync(targetPath, { recursive: true, force: true });
                 } catch (e2) {
                   console.error(`[migration] Failed to remove existing partition ${targetPath}:`, e2);
-                  results.profiles.errorCount++;
+                  results.partitions.errorCount++;
+                  const percent = Math.round(((i + 1) / partitionDirs.length) * 100);
+                  sendProgress(`Partitionインポート中にエラー: ${partitionDir}`, { current: i + 1, total: partitionDirs.length, percent });
                   continue;
                 }
               }
@@ -1024,35 +1245,49 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
             removeLockFiles(targetPath);
             
             results.partitions.successCount++;
+            const percent = Math.round(((i + 1) / partitionDirs.length) * 100);
+            sendProgress(`Partitionsをインポートしています... (${i + 1}/${partitionDirs.length})`, { current: i + 1, total: partitionDirs.length, percent });
             console.log(`[migration] Imported partition ${newPartitionDir}${newPartitionDir !== partitionDir ? ` (from ${partitionDir})` : ''}`);
           }
         } catch (e) {
           console.warn(`[migration] Failed to import partition ${partitionDir}:`, e);
           results.partitions.errorCount++;
+          const percent = Math.round(((i + 1) / partitionDirs.length) * 100);
+          sendProgress(`Partitionインポート中にエラー: ${partitionDir}`, { current: i + 1, total: partitionDirs.length, percent });
         }
+      }
+      if (partitionDirs.length > 0) {
+        sendProgress(`Partitionsのインポートが完了しました (成功: ${results.partitions.successCount}, エラー: ${results.partitions.errorCount})`, { current: partitionDirs.length, total: partitionDirs.length, percent: 100 });
       }
     }
 
     // 一時ディレクトリを削除
+    sendProgress('一時ディレクトリをクリーンアップしています...');
+    console.log('[migration] importComplete: 一時ディレクトリをクリーンアップします');
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
+      console.log('[migration] importComplete: 一時ディレクトリの削除が完了しました');
     } catch (e) {
-      console.warn('[migration] Failed to cleanup temp directory:', e);
+      console.warn('[migration] importComplete: 一時ディレクトリのクリーンアップに失敗しました:', e);
     }
+
+    const summary = {
+      data: results.data.ok ? 'Imported' : `Error: ${results.data.error}`,
+      profiles: `${results.profiles.successCount} imported, ${results.profiles.errorCount} errors`,
+      partitions: `${results.partitions.successCount} imported, ${results.partitions.errorCount} errors`
+    };
+    sendProgress('インポート処理が完了しました', { current: 100, total: 100, percent: 100 });
+    console.log('[migration] importComplete: インポート処理が完了しました', summary);
 
     return {
       ok: results.data.ok,
       data: results.data,
       profiles: results.profiles,
       partitions: results.partitions,
-      summary: {
-        data: results.data.ok ? 'Imported' : `Error: ${results.data.error}`,
-        profiles: `${results.profiles.successCount} imported, ${results.profiles.errorCount} errors`,
-        partitions: `${results.partitions.successCount} imported, ${results.partitions.errorCount} errors`
-      }
+      summary
     };
   } catch (e: any) {
-    console.error('[migration] importComplete error:', e);
+    console.error('[migration] importComplete: インポート処理でエラーが発生しました:', e);
     return { ok: false, error: e?.message || String(e) };
   }
 });

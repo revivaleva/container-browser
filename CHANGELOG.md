@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.4] - 2025-01-XX
+
+### Added
+- **Export Container List Feature**: Added support for export target container list file
+  - Export target containers can be specified via `export-container-list.txt` file
+  - Supports container ID or name specification (one per line)
+  - Supports comments (lines starting with `#`) and empty lines
+  - File location: `%APPDATA%\container-browser\export-container-list.txt`
+- **Export Progress Display**: Added real-time progress reporting for export operations
+  - Progress events can be monitored via `window.migrationAPI.onExportProgress()`
+  - Shows current/total counts and percentage for each step
+  - Displays detailed progress for container processing, file operations, and archiving
+- **Export Optimization**: Significantly reduced export size and time by excluding cache files
+  - Excludes Cache, Code Cache, GPUCache, Service Worker, Media Cache, ShaderCache, and other temporary files
+  - Maintains essential data for login state (Cookies, Local Storage, IndexedDB, etc.)
+  - Export size reduced from 50GB+ to manageable sizes, processing time reduced from hours to minutes
+
+### Changed
+- **Export Processing**: Banned group containers are now excluded from export operations
+  - Containers in Banned group are automatically excluded even if listed in export-container-list.txt
+  - Improved export target filtering logic
+
+### Technical
+- Enhanced export server with container list file reading
+- Improved progress reporting infrastructure
+- Optimized file filtering for export operations
+- Better error handling and logging for export operations
+
 ## [0.5.2] - 2025-01-XX
 
 ### Added

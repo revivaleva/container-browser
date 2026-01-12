@@ -18,6 +18,7 @@ declare global {
       update: (payload: any) => Promise<Container>;
       delete: (payload: { id: string }) => Promise<boolean>;
       openByName: (payload: { name: string; url?: string }) => Promise<boolean>;
+      clearCache: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
     };
     prefsAPI: {
       get: (payload: { containerId: string; origin: string }) => Promise<any>;
@@ -40,6 +41,14 @@ declare global {
     deviceAPI?: {
       getDeviceId: () => Promise<any>;
     };
+    graphicsAPI?: {
+      getSettings: () => Promise<any>;
+      saveSettings: (payload: { graphicsMode?: string; angleMode?: string; disableHttp2?: boolean; disableQuic?: boolean; debugGpu?: boolean }) => Promise<any>;
+    };
+    migrationAPI?: {
+      importComplete: (payload?: { containerIdMapping?: Record<string, string> }) => Promise<any>;
+      onImportProgress: (callback: (progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => void) => () => void;
+    };
   }
 }
 
@@ -56,10 +65,7 @@ export default function App() {
   const [modalAcceptLang, setModalAcceptLang] = useState<string>('ja,en-US;q=0.8,en;q=0.7');
   const [modalTimezone, setModalTimezone] = useState<string>('Asia/Tokyo');
   const [modalContainerName, setModalContainerName] = useState<string>('');
-  const [modalProxyServer, setModalProxyServer] = useState<string>('');
-  const [modalProxyUsername, setModalProxyUsername] = useState<string>('');
-  const [modalProxyPassword, setModalProxyPassword] = useState<string>('');
-  const [modalProxyType, setModalProxyType] = useState<'http' | 'socks5'>('http');
+  const [modalProxyString, setModalProxyString] = useState<string>('');
   const [modalNote, setModalNote] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<string>('未使用');
   const [fpLocale, setFpLocale] = useState('ja-JP');
@@ -79,6 +85,10 @@ export default function App() {
   const [modalSiteOrigin, setModalSiteOrigin] = useState<string>('');
   const [modalSiteAutoFill, setModalSiteAutoFill] = useState<boolean>(false);
   const [modalSiteAutoSave, setModalSiteAutoSave] = useState<boolean>(false);
+  
+  // インポート進捗表示用のstate
+  const [importProgress, setImportProgress] = useState<{ message: string; progress?: { current: number; total: number; percent: number }; timestamp: number } | null>(null);
+  const [isImporting, setIsImporting] = useState<boolean>(false);
 
   const [containerUrls, setContainerUrls] = useState<Record<string,string>>({});
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
@@ -136,65 +146,69 @@ export default function App() {
     setAutoSaveForms(!!pref?.autoSaveForms);
   }
 
-  // helper: normalize proxy input according to selected type
-  function normalizeProxyString(type: 'http' | 'socks5', server: string) {
-    if (!server) return '';
-    const s = server.trim();
-    if (type === 'socks5') {
-      if (/^socks5:\/\//i.test(s)) return s;
-      return `socks5://${s.replace(/^socks5:\/\//i, '')}`;
-    }
-    // http type: if user provided rule-like string, keep as-is
-    if (s.includes('=') || /^http(s)?:\/\//i.test(s)) return s;
-    return `http=${s};https=${s}`;
+  // helper: parse IP:PORT:USERNAME:PASSWORD format
+  function parseProxyString(proxyString: string): { ip: string; port: string; username: string; password: string } | null {
+    if (!proxyString || !proxyString.trim()) return null;
+    const parts = proxyString.trim().split(':');
+    // Support both IP:PORT:USERNAME:PASSWORD and IP:PORT (for backward compatibility)
+    if (parts.length < 2 || parts.length > 4) return null;
+    return {
+      ip: parts[0].trim(),
+      port: parts[1].trim(),
+      username: (parts[2] || '').trim(),
+      password: (parts[3] || '').trim()
+    };
   }
 
-  function detectProxyType(server: string) {
-    if (!server) return 'http';
-    if (/^socks5:\/\//i.test(server) || /^socks5=/i.test(server)) return 'socks5';
-    return 'http';
-  }
-
-  function extractHostPort(server: string) {
-    if (!server) return '';
-    let s = server.trim();
-
-    // If input contains key=value pairs like "http=host:port;https=host:port",
-    // parse them robustly (handles spaces and different separators).
-    if (s.includes('=')) {
-      const pairs = s.split(/[;,]+/).map(p => p.trim()).filter(Boolean);
-      // prefer https then http then socks5
-      const prefer = ['https', 'http', 'socks5'];
-      for (const key of prefer) {
-        for (const p of pairs) {
-          const m = p.match(new RegExp('^\s*' + key + '\s*=\s*(.+)$', 'i'));
-          if (m && m[1]) return m[1].trim();
+  // helper: format existing proxy config to IP:PORT:USERNAME:PASSWORD format
+  function formatProxyString(proxy: { server?: string; username?: string; password?: string } | null | undefined): string {
+    if (!proxy || !proxy.server) return '';
+    
+    // Extract host:port from server string
+    let hostPort = proxy.server.trim();
+    // Remove protocol prefixes
+    hostPort = hostPort.replace(/^socks5:\/\//i, '');
+    hostPort = hostPort.replace(/^http:\/\//i, '');
+    hostPort = hostPort.replace(/^https:\/\//i, '');
+    // Handle rule format like "http=host:port;https=host:port"
+    if (hostPort.includes('=')) {
+      const pairs = hostPort.split(/[;,]+/).map(p => p.trim()).filter(Boolean);
+      for (const p of pairs) {
+        const m = p.match(/^\s*(?:https?|socks5)\s*=\s*(.+)$/i);
+        if (m && m[1]) {
+          hostPort = m[1].trim();
+          break;
         }
       }
-      // fallback: take the RHS of the first pair
-      const first = pairs[0].split('=')[1];
-      if (first) return first.trim();
     }
+    
+    const username = proxy.username || '';
+    const password = proxy.password || '';
+    
+    // Always return IP:PORT:USERNAME:PASSWORD format (empty username/password if not set)
+    return `${hostPort}:${username}:${password}`;
+  }
 
-    // remove common URI schemes
-    s = s.replace(/^socks5:\/\//i, '');
-    s = s.replace(/^http:\/\//i, '');
-    s = s.replace(/^https:\/\//i, '');
-
-    // if still contains an equals sign like 'socks5=host:port', handle it
-    if (s.includes('=')) {
-      const parts = s.split('=');
-      return (parts[1] || parts[0] || '').trim();
-    }
-
-    return s;
+  // helper: normalize proxy input to Electron format
+  function normalizeProxyString(proxyString: string): { server: string; username?: string; password?: string } | null {
+    const parsed = parseProxyString(proxyString);
+    if (!parsed) return null;
+    
+    const { ip, port, username, password } = parsed;
+    const server = `${ip}:${port}`;
+    
+    return {
+      server: `http=${server};https=${server}`,
+      username: username || undefined,
+      password: password || undefined
+    };
   }
 
   // Save current modal settings (used by top/bottom save buttons)
   async function saveCurrentSettings() {
     if (!openSettingsId) return;
     const id = openSettingsId;
-    const proxy = modalProxyServer ? { server: normalizeProxyString(modalProxyType, modalProxyServer), username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
+    const proxy = modalProxyString ? normalizeProxyString(modalProxyString) : null;
     const fingerprint: any = {
       locale: modalLocale,
       acceptLanguage: modalAcceptLang,
@@ -452,6 +466,11 @@ export default function App() {
   const [appVersion, setAppVersion] = useState<string>('');
   const [exportEnabled, setExportEnabled] = useState<boolean>(false);
   const [exportPort, setExportPort] = useState<number>(3001);
+  const [graphicsMode, setGraphicsMode] = useState<string>('auto');
+  const [angleMode, setAngleMode] = useState<string>('default');
+  const [disableHttp2, setDisableHttp2] = useState<boolean>(false);
+  const [disableQuic, setDisableQuic] = useState<boolean>(false);
+  const [debugGpu, setDebugGpu] = useState<boolean>(false);
   const [exportStatus, setExportStatus] = useState<{ running: boolean; port: number; error?: string } | null>(null);
   const [openAsSettingsSignal, setOpenAsSettingsSignal] = useState<boolean>(false);
   const [tokenInfo, setTokenInfo] = useState<{ hasToken: boolean; remaining_quota?: number; bound?: boolean; session_expires_at?: number; expires_at?: number; error?: string } | null>(null);
@@ -507,6 +526,19 @@ export default function App() {
     (async () => {
       try {
         const s = await window.exportAPI?.getSettings();
+        // Load graphics settings
+        try {
+          const g = await (window as any).graphicsAPI?.getSettings();
+          if (g?.ok && g?.data) {
+            setGraphicsMode(g.data.graphicsMode || 'auto');
+            setAngleMode(g.data.angleMode || 'default');
+            setDisableHttp2(g.data.disableHttp2 || false);
+            setDisableQuic(g.data.disableQuic || false);
+            setDebugGpu(g.data.debugGpu || false);
+          }
+        } catch (e) {
+          console.error('[renderer] failed to load graphics settings', e);
+        }
         if (s && s.settings) {
           setExportEnabled(!!s.settings.enabled);
           setExportPort(Number(s.settings.port || 3001));
@@ -525,8 +557,24 @@ export default function App() {
     const unsub2 = window.exportAPI?.onOpenSettings?.(() => {
       try { setOpenAsSettingsSignal(true); } catch {}
     });
+    
+    // インポート進捗イベントリスナーを設定
+    const unsubImport = (window as any).migrationAPI?.onImportProgress?.((progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => {
+      try {
+        setImportProgress(progress);
+        // 進捗が100%になったら少し待ってから閉じる
+        if (progress.progress && progress.progress.percent >= 100) {
+          setTimeout(() => {
+            setIsImporting(false);
+            setImportProgress(null);
+          }, 2000);
+        }
+      } catch {}
+    });
+    
     return () => { 
       try { if (unsub) unsub(); } catch {} 
+      try { if (unsubImport) unsubImport(); } catch {}
       try { if (heartbeatTimer) clearTimeout(heartbeatTimer); } catch {}
     };
   }, [heartbeatTimer]);
@@ -764,12 +812,289 @@ export default function App() {
           ) : <div style={{ color:'#666' }}>ステータス情報がありません</div>}
         </div>
       </section>
+
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8, backgroundColor: '#fff9e6' }}>
+        <h3>GPU/描画設定（Xログイン問題の切り分け用）</h3>
+        <div style={{ marginBottom: 12, padding: 8, backgroundColor: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4, fontSize: 12, color: '#856404' }}>
+          <strong>⚠️ 重要:</strong> これらの設定はアプリ再起動後に反映されます。現在の設定を変更した場合は、アプリを再起動してください。
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>HWアクセラレーション</label>
+          <select 
+            value={graphicsMode} 
+            onChange={e => setGraphicsMode(e.target.value)}
+            style={{ padding: 6, border: '1px solid #ddd', borderRadius: 4, fontSize: 12 }}
+          >
+            <option value="auto">自動（ON）</option>
+            <option value="disable">OFF</option>
+          </select>
+          
+          <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>ANGLEバックエンド</label>
+          <select 
+            value={angleMode} 
+            onChange={e => setAngleMode(e.target.value)}
+            style={{ padding: 6, border: '1px solid #ddd', borderRadius: 4, fontSize: 12 }}
+          >
+            <option value="default">デフォルト（自動）</option>
+            <option value="d3d11">Direct3D 11</option>
+            <option value="gl">OpenGL</option>
+            <option value="warp">WARP（ソフトウェア）</option>
+          </select>
+          
+          <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>HTTP/2無効化</label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input 
+              type="checkbox" 
+              checked={disableHttp2} 
+              onChange={e => setDisableHttp2(e.target.checked)}
+              style={{ width: 16, height: 16 }}
+            />
+            <span style={{ fontSize: 12 }}>HTTP/2を無効化する</span>
+          </label>
+          
+          <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>HTTP/3（QUIC）無効化</label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input 
+              type="checkbox" 
+              checked={disableQuic} 
+              onChange={e => setDisableQuic(e.target.checked)}
+              style={{ width: 16, height: 16 }}
+            />
+            <span style={{ fontSize: 12 }}>HTTP/3（QUIC）を無効化する</span>
+          </label>
+          
+          <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>GPU診断ログ</label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input 
+              type="checkbox" 
+              checked={debugGpu} 
+              onChange={e => setDebugGpu(e.target.checked)}
+              style={{ width: 16, height: 16 }}
+            />
+            <span style={{ fontSize: 12 }}>GPU状態の詳細ログを出力する（DEBUG_GPU）</span>
+          </label>
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <button 
+            onClick={async () => {
+              try {
+                const resp = await (window as any).graphicsAPI?.saveSettings?.({
+                  graphicsMode,
+                  angleMode,
+                  disableHttp2,
+                  disableQuic,
+                  debugGpu
+                });
+                if (resp?.ok) {
+                  alert('GPU設定を保存しました。アプリを再起動すると反映されます。');
+                } else {
+                  alert('保存に失敗: ' + (resp?.error || '不明'));
+                }
+              } catch (e: any) {
+                alert('保存に失敗: ' + (e?.message || '不明'));
+              }
+            }}
+            style={{ 
+              padding: '8px 16px', 
+              backgroundColor: '#0275d8', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 4, 
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+          >
+            保存
+          </button>
+          <button 
+            onClick={async () => {
+              try {
+                const g = await (window as any).graphicsAPI?.getSettings?.();
+                if (g?.ok && g?.data) {
+                  setGraphicsMode(g.data.graphicsMode || 'auto');
+                  setAngleMode(g.data.angleMode || 'default');
+                  setDisableHttp2(g.data.disableHttp2 || false);
+                  setDisableQuic(g.data.disableQuic || false);
+                  setDebugGpu(g.data.debugGpu || false);
+                  alert('現在の設定を読み込みました');
+                } else {
+                  alert('設定の読み込みに失敗しました');
+                }
+              } catch (e: any) {
+                alert('読み込みに失敗: ' + (e?.message || '不明'));
+              }
+            }}
+            style={{ 
+              padding: '8px 16px', 
+              backgroundColor: '#6c757d', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 4, 
+              cursor: 'pointer',
+              fontSize: 13
+            }}
+          >
+            読み込み
+          </button>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#666' }}>
+          <div><strong>現在の設定:</strong></div>
+          <div>HWアクセラレーション: {graphicsMode === 'auto' ? 'ON（自動）' : 'OFF'}</div>
+          <div>ANGLE: {angleMode === 'default' ? 'デフォルト' : angleMode.toUpperCase()}</div>
+          <div>HTTP/2: {disableHttp2 ? '無効' : '有効'}</div>
+          <div>HTTP/3（QUIC）: {disableQuic ? '無効' : '有効'}</div>
+          <div>診断ログ: {debugGpu ? 'ON' : 'OFF'}</div>
+        </div>
+      </section>
+
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
+        <h3>データ移行</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button 
+            onClick={handleImport}
+            disabled={isImporting}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: isImporting ? '#6c757d' : '#0275d8',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: isImporting ? 'not-allowed' : 'pointer',
+              fontSize: 14,
+              fontWeight: 'bold'
+            }}
+          >
+            {isImporting ? 'インポート中...' : 'ZIPファイルからインポート'}
+          </button>
+        </div>
+        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+          エクスポートしたZIPファイルからデータをインポートします
+        </div>
+      </section>
     </div>
   );
+
+  // インポート進捗表示用のヘルパー関数
+  const handleImport = async () => {
+    try {
+      setIsImporting(true);
+      setImportProgress({ message: 'インポートを開始します...', timestamp: Date.now() });
+      const result = await (window as any).migrationAPI?.importComplete?.();
+      if (result?.ok) {
+        setImportProgress({ 
+          message: 'インポートが完了しました！', 
+          progress: { current: 100, total: 100, percent: 100 },
+          timestamp: Date.now() 
+        });
+        setTimeout(() => {
+          setIsImporting(false);
+          setImportProgress(null);
+          refresh();
+        }, 2000);
+      } else {
+        setImportProgress({ 
+          message: `インポート失敗: ${result?.error || '不明なエラー'}`, 
+          timestamp: Date.now() 
+        });
+        setTimeout(() => {
+          setIsImporting(false);
+          setImportProgress(null);
+        }, 3000);
+      }
+    } catch (e: any) {
+      setImportProgress({ 
+        message: `インポートエラー: ${e?.message || String(e)}`, 
+        timestamp: Date.now() 
+      });
+      setTimeout(() => {
+        setIsImporting(false);
+        setImportProgress(null);
+      }, 3000);
+    }
+  };
 
   // Render settings-only when opened as settings window, otherwise render main dashboard
   return isSettingsWindow ? <SettingsOnly /> : (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
+      
+      {/* インポート進捗表示モーダル */}
+      {(isImporting || importProgress) && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: 24,
+            borderRadius: 8,
+            minWidth: 400,
+            maxWidth: 600,
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: 16 }}>インポート処理中</h3>
+            {importProgress && (
+              <>
+                <div style={{ marginBottom: 16, fontSize: 14, color: '#666' }}>
+                  {importProgress.message}
+                </div>
+                {importProgress.progress && (
+                  <div>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      marginBottom: 8,
+                      fontSize: 12,
+                      color: '#666'
+                    }}>
+                      <span>
+                        {importProgress.progress.current} / {importProgress.progress.total}
+                      </span>
+                      <span style={{ fontWeight: 'bold', color: '#0275d8' }}>
+                        {importProgress.progress.percent}%
+                      </span>
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: 24,
+                      backgroundColor: '#e9ecef',
+                      borderRadius: 4,
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${importProgress.progress.percent}%`,
+                        height: '100%',
+                        backgroundColor: '#0275d8',
+                        transition: 'width 0.3s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        fontSize: 12,
+                        fontWeight: 'bold'
+                      }}>
+                        {importProgress.progress.percent}%
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {!importProgress && (
+              <div style={{ textAlign: 'center', padding: 20 }}>
+                <div style={{ fontSize: 14, color: '#666' }}>処理を開始しています...</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Info when token not set */}
       {(!tokenInfo || !tokenInfo.hasToken) && (
@@ -874,7 +1199,7 @@ export default function App() {
           {filteredList.map((c:any)=> (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ const raw = c.proxy?.server ?? ''; setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalStatus(c.status ?? '未使用'); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyType(detectProxyType(raw)); setModalProxyServer(extractHostPort(raw)); setModalProxyUsername(c.proxy?.username ?? ''); setModalProxyPassword(c.proxy?.password ?? ''); }}>
+                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalStatus(c.status ?? '未使用'); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyString(formatProxyString(c.proxy)); }}>
                   <label><strong>{c.name}</strong></label>
                   <div style={{ marginTop: 4, width: 'fit-content', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 'bold', color: 'white', backgroundColor: c.status === '稼働中' ? '#28a745' : c.status === '停止' ? '#dc3545' : '#6c757d' }}>
                     {c.status ?? '未使用'}
@@ -895,7 +1220,6 @@ export default function App() {
                   }}>開く</button>
                   <button title="前回の状態で開きます" onClick={()=> window.containersAPI.open({ id: c.id })}>復元</button>
                     <button style={{ marginLeft: 8 }} onClick={()=>{
-                    const raw = c.proxy?.server ?? '';
                     setOpenSettingsId(c.id);
                     setModalContainerName(c.name || '');
                     setModalLocale(c.fingerprint?.locale ?? 'ja-JP');
@@ -912,10 +1236,7 @@ export default function App() {
                     setFpWebglVendor(c.fingerprint?.webglVendor ?? '');
                     setFpWebglRenderer(c.fingerprint?.webglRenderer ?? '');
                     setFpFakeIp(!!c.fingerprint?.fakeIp);
-                    setModalProxyType(detectProxyType(raw));
-                    setModalProxyServer(extractHostPort(raw));
-                    setModalProxyUsername(c.proxy?.username ?? '');
-                    setModalProxyPassword(c.proxy?.password ?? '');
+                    setModalProxyString(formatProxyString(c.proxy));
                     setModalNote(c.note ?? '');
                     setModalStatus(c.status ?? '未使用');
                   }}>設定</button>
@@ -973,7 +1294,7 @@ export default function App() {
                     <label>Cookie 有効</label>
                     <input type="checkbox" checked={fpCookie} onChange={e=>setFpCookie(e.target.checked)} />
                     <label>IP 偽装</label>
-                    <input type="checkbox" checked={fpFakeIp} onChange={e=>setFpFakeIp(e.target.checked)} disabled={!!modalProxyServer} />
+                    <input type="checkbox" checked={fpFakeIp} onChange={e=>setFpFakeIp(e.target.checked)} disabled={!!modalProxyString} />
                     <label>WebGL Vendor</label>
                     <input value={fpWebglVendor} onChange={e=>setFpWebglVendor(e.target.value)} />
                     <label>WebGL Renderer</label>
@@ -989,11 +1310,11 @@ export default function App() {
                     <label>プロキシ接続テスト</label>
                     <div style={{ display:'flex', gap:8 }}>
                       <button onClick={async ()=>{
-                        const proxy = { 
-                          server: normalizeProxyString(modalProxyType, modalProxyServer),
-                          username: modalProxyUsername || undefined,
-                          password: modalProxyPassword || undefined
-                        };
+                        const proxy = normalizeProxyString(modalProxyString);
+                        if (!proxy) {
+                          alert('プロキシ情報が入力されていません');
+                          return;
+                        }
                         console.log('[renderer] proxy.test ->', proxy);
                         const res = await (window as any).proxyAPI.test({ proxy });
                         console.log('[renderer] proxy.test result ->', res);
@@ -1014,23 +1335,54 @@ export default function App() {
                         alert(res && res.token ? '保存済みトークンあり' : '保存トークンなし');
                       }}>確認</button>
                     </div>
-                    <label>プロキシ種類</label>
-                    <select value={modalProxyType} onChange={e=> setModalProxyType(e.target.value as any)}>
-                      <option value="http">HTTP</option>
-                      <option value="socks5">SOCKS5</option>
-                    </select>
-                    <label>プロキシサーバー</label>
-                    <input value={modalProxyServer} onChange={e=>setModalProxyServer(e.target.value)} placeholder="host:port" />
-                    <label>プロキシ ユーザー名</label>
-                    <input value={modalProxyUsername} onChange={e=>setModalProxyUsername(e.target.value)} />
-                    <label>プロキシ パスワード</label>
-                    <input value={modalProxyPassword} onChange={e=>setModalProxyPassword(e.target.value)} type="password" />
+                    <label>プロキシ（IP:PORT:USERNAME:PASSWORD）</label>
+                    <input 
+                      value={modalProxyString} 
+                      onChange={e=>setModalProxyString(e.target.value)} 
+                      placeholder="54.65.19.52:23465:3idyqw0i:pznZsMZ2QhHtaq0d" 
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                      形式: IP:PORT:USERNAME:PASSWORD
+                    </div>
+                    <label>キャッシュ削除</label>
+                    <div style={{ display:'flex', gap:8 }}>
+                      <button onClick={async ()=>{
+                        if (!confirm('ページのキャッシュを削除しますか？\n（セッションやCookieなどのデータは保持されます）')) return;
+                        try {
+                          const result = await window.containersAPI.clearCache({ id: c.id });
+                          if (result && result.ok) {
+                            alert('キャッシュを削除しました');
+                          } else {
+                            alert('キャッシュの削除に失敗しました: ' + (result?.error || '不明なエラー'));
+                          }
+                        } catch (e: any) {
+                          alert('エラー: ' + (e?.message || String(e)));
+                        }
+                      }}>キャッシュ削除</button>
+                    </div>
+                    <label>すべてのデータを削除</label>
+                    <div style={{ display:'flex', gap:8 }}>
+                      <button onClick={async ()=>{
+                        if (!confirm('Cookie、セッション、LocalStorage、IndexedDBなどのすべてのデータを削除しますか？\nこの操作は元に戻せません。')) return;
+                        try {
+                          const result = await window.containersAPI.clearAllData({ id: c.id });
+                          if (result && result.ok) {
+                            alert('すべてのデータを削除しました');
+                          } else {
+                            alert('データの削除に失敗しました: ' + (result?.error || '不明なエラー'));
+                          }
+                        } catch (e: any) {
+                          alert('エラー: ' + (e?.message || String(e)));
+                        }
+                      }} style={{ backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', padding: '6px 12px' }}>すべてのデータを削除</button>
+                    </div>
                     
                   </div>
                   <div style={{ marginTop:10, display:'flex', gap:8 }}>
                     <button onClick={async ()=>{
                       // save fingerprint and close
-                      const proxy = modalProxyServer ? { server: normalizeProxyString(modalProxyType, modalProxyServer), username: modalProxyUsername || undefined, password: modalProxyPassword || undefined } : null;
+                      const proxy = modalProxyString ? normalizeProxyString(modalProxyString) : null;
                       const fingerprint: any = {
                         locale: modalLocale,
                         acceptLanguage: modalAcceptLang,

@@ -432,8 +432,20 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           const c = DB.getContainer(contextId);
           if (!c) throw new Error('container not found');
           // ensure container open (when opened via API prefer single-tab)
+          let navigationAlreadyDone = false;
           if (!isContainerOpen(contextId)) {
-            await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+            // navigate コマンドの場合は、指定URLで直接開く（シングルタブ＆3秒待機後にURL読み込み）
+            if (command === 'navigate') {
+              const url = String(body.url || '');
+              if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
+              // ★ singleTab: true でシングルタブ、3秒待機が自動的に適用される
+              await openContainerWindow(c, url, { singleTab: true });
+              navigationAlreadyDone = true;
+              console.log('[exportServer] container opened with navigate URL (single tab, 3s delay applied)', { contextId, url });
+            } else {
+              // 他のコマンドの場合は通常通り開く（シングルタブ＆復元モード）
+              await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+            }
           }
             // get active webContents
             const wc = getActiveWebContents(contextId);
@@ -524,18 +536,24 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             } else if (command === 'navigate') {
               const url = String(body.url || '');
               if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
-              try {
-                const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
-                // 先にナビゲーション完了待機をセットしてから loadURL を呼ぶ（did-navigate を見逃さないため）
-                const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
-                await wc.loadURL(url);
-                await navPromise;
-                if (options.waitForSelector) {
-                  const ok = await waitForSelector(options.waitForSelector, timeoutMs);
-                  if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
-                }
+              // If navigation already done during container open, skip
+              if (navigationAlreadyDone) {
+                console.log('[exportServer] navigate already done during container open, skipping loadURL', { contextId, url });
                 navigationOccurred = true;
-              } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+              } else {
+                try {
+                  const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
+                  // 先にナビゲーション完了待機をセットしてから loadURL を呼ぶ（did-navigate を見逃さないため）
+                  const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
+                  await wc.loadURL(url);
+                  await navPromise;
+                  if (options.waitForSelector) {
+                    const ok = await waitForSelector(options.waitForSelector, timeoutMs);
+                    if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
+                  }
+                  navigationOccurred = true;
+                } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+              }
             } else if (command === 'click' || command === 'clickAndType') {
               const selector = body.selector;
               if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
