@@ -14,7 +14,18 @@ contextBridge.exposeInMainWorld('containersAPI', {
   saveCredential: (payload: any) => ipcRenderer.invoke('vault.saveCredential', payload),
   compare: (payload: { successName: string; failNameOrId: string }) => ipcRenderer.invoke('containers.compare', payload),
   clearCache: (payload: { id: string }) => ipcRenderer.invoke('containers.clearCache', payload),
-  clearAllData: (payload: { id: string }) => ipcRenderer.invoke('containers.clearAllData', payload)
+  clearAllData: (payload: { id: string }) => ipcRenderer.invoke('containers.clearAllData', payload),
+  clearAllCacheStart: () => ipcRenderer.invoke('containers.clearAllCache.start'),
+  onClearAllCacheProgress: (cb: (payload: any) => void) => {
+    const listener = (_e: any, payload: any) => { try { cb(payload); } catch {} };
+    ipcRenderer.on('containers.clearAllCache.progress', listener);
+    return () => { try { ipcRenderer.removeListener('containers.clearAllCache.progress', listener); } catch {} };
+  },
+  onClearAllCacheDone: (cb: (payload: any) => void) => {
+    const listener = (_e: any, payload: any) => { try { cb(payload); } catch {} };
+    ipcRenderer.on('containers.clearAllCache.done', listener);
+    return () => { try { ipcRenderer.removeListener('containers.clearAllCache.done', listener); } catch {} };
+  }
 });
 
 // (containerShellAPI is defined below together with tabsAPI; do not duplicate exposeInMainWorld)

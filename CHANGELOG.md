@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.6] - 2025-01-24
+
+### Added
+- **コンテナキャッシュクリア**: コンテナ単位のキャッシュ削除機能
+  - `clearContainerCache(containerId)`: 指定コンテナの HTTP キャッシュ・ServiceWorker・CacheStorage を手動削除
+  - コンテナ終了時の自動クリア (`clearContainerCacheOnClose`) をオプションで実行可能
+- **IPC API**: キャッシュクリア用 `containers:clear-cache` ハンドラを追加
+- **キャッシュ・データクリーンアップガイド**: `docs/CACHE_CLEANUP_GUIDE.md` を追加
+  - データ保存場所、サイズ確認方法、クリーンアップ手順を記載
+- **スクリプト**: キャッシュ/データ確認・削除用 PowerShell/CJS を追加
+  - `check_cache_size.ps1`, `check_data_size.ps1`, `check_data_size_quick.ps1`
+  - `clear_container_cache.ps1`, `clear_all_container_cache.ps1`
+  - `inspect_data_size.ps1`, `get_container_info.cjs`
+
+### Changed
+- **Container Manager**: キャッシュクリア処理とコンテナ終了時のクリアフックを追加
+- **メインUI**: キャッシュクリア関連の操作・表示を拡張
+
+### Technical
+- キャッシュクリア処理のエラーハンドリング・ログ出力を強化
+
 ## [0.5.4] - 2025-01-XX
 
 ### Added

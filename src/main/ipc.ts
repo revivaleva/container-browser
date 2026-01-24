@@ -2,7 +2,7 @@ import { ipcMain, dialog } from 'electron';
 import keytar from 'keytar';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app } from 'electron';
+import { app, session } from 'electron';
 import { DB } from './db';
 import { zipAllProfiles, extractProfiles } from './profileExporter';
 import archiver from 'archiver';
@@ -61,6 +61,155 @@ ipcMain.handle('containers.clearAllData', async (_e, { id }: { id: string }) => 
   } catch (e: any) {
     console.error('[main] containers.clearAllData error', e);
     return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+type ClearAllCacheProgressPayload = {
+  message: string;
+  progress?: { current: number; total: number; percent: number };
+  containerId?: string;
+  containerName?: string;
+  freedBytesSoFar?: number;
+  errorCount?: number;
+  timestamp: number;
+};
+
+type ClearAllCacheDonePayload = {
+  ok: boolean;
+  freedBytes: number;
+  total: number;
+  errorCount: number;
+  errors?: string[];
+  timestamp: number;
+};
+
+let _clearAllCacheRunning = false;
+
+function clearCacheAsync(ses: Electron.Session): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ses.clearCache((error) => {
+      if (error) return reject(error);
+      resolve();
+    });
+  });
+}
+
+// Clear ALL containers cache (DB登録コンテナのみ)
+// - Measures freed bytes via `getCacheSize()` (HTTP cache only)
+// - Clears HTTP cache + (best-effort) serviceworker/cachestorage
+ipcMain.handle('containers.clearAllCache.start', async (e) => {
+  try {
+    if (_clearAllCacheRunning) {
+      return { ok: false, error: 'already running' };
+    }
+    _clearAllCacheRunning = true;
+
+    const sender = e.sender;
+    const safeSend = (channel: string, payload: any) => {
+      try {
+        if (sender && !sender.isDestroyed()) sender.send(channel, payload);
+      } catch {
+        // ignore send failures (window may be closed)
+      }
+    };
+
+    const containers = DB.listContainers();
+    const total = containers.length;
+    let freedBytesSoFar = 0;
+    const errors: string[] = [];
+
+    safeSend('containers.clearAllCache.progress', {
+      message: `キャッシュ削除を開始します... (${total}件)`,
+      progress: { current: 0, total, percent: total > 0 ? 0 : 100 },
+      freedBytesSoFar,
+      errorCount: 0,
+      timestamp: Date.now(),
+    } satisfies ClearAllCacheProgressPayload);
+
+    for (let i = 0; i < containers.length; i++) {
+      const c = containers[i];
+      const current = i + 1;
+      const percent = total > 0 ? Math.round((current / total) * 100) : 100;
+
+      safeSend('containers.clearAllCache.progress', {
+        message: `(${current}/${total}) ${c.name || c.id} をクリア中...`,
+        progress: { current, total, percent },
+        containerId: c.id,
+        containerName: c.name,
+        freedBytesSoFar,
+        errorCount: errors.length,
+        timestamp: Date.now(),
+      } satisfies ClearAllCacheProgressPayload);
+
+      try {
+        if (!c.partition) {
+          throw new Error('missing partition');
+        }
+        const ses = session.fromPartition(c.partition, { cache: true });
+
+        // Measure HTTP cache size (bytes)
+        try {
+          const sz = await ses.getCacheSize();
+          if (typeof sz === 'number' && isFinite(sz) && sz > 0) freedBytesSoFar += sz;
+        } catch (err: any) {
+          errors.push(`${c.name || c.id}: getCacheSize failed: ${err?.message || String(err)}`);
+        }
+
+        // Clear HTTP cache
+        try {
+          await clearCacheAsync(ses);
+        } catch (err: any) {
+          errors.push(`${c.name || c.id}: clearCache failed: ${err?.message || String(err)}`);
+        }
+
+        // Clear SW/CacheStorage (容量は算出しない)
+        try {
+          await ses.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] });
+        } catch (err: any) {
+          errors.push(`${c.name || c.id}: clearStorageData(serviceworkers/cachestorage) failed: ${err?.message || String(err)}`);
+        }
+      } catch (err: any) {
+        errors.push(`${c.name || c.id}: unexpected error: ${err?.message || String(err)}`);
+      }
+
+      safeSend('containers.clearAllCache.progress', {
+        message: `(${current}/${total}) ${c.name || c.id} 完了`,
+        progress: { current, total, percent },
+        containerId: c.id,
+        containerName: c.name,
+        freedBytesSoFar,
+        errorCount: errors.length,
+        timestamp: Date.now(),
+      } satisfies ClearAllCacheProgressPayload);
+    }
+
+    safeSend('containers.clearAllCache.done', {
+      ok: true,
+      freedBytes: freedBytesSoFar,
+      total,
+      errorCount: errors.length,
+      errors: errors.length > 0 ? errors.slice(0, 50) : undefined,
+      timestamp: Date.now(),
+    } satisfies ClearAllCacheDonePayload);
+
+    return { ok: true };
+  } catch (e2: any) {
+    try {
+      const sender = e.sender;
+      if (sender && !sender.isDestroyed()) {
+        sender.send('containers.clearAllCache.done', {
+          ok: false,
+          freedBytes: 0,
+          total: 0,
+          errorCount: 1,
+          errors: [e2?.message || String(e2)],
+          timestamp: Date.now(),
+        } satisfies ClearAllCacheDonePayload);
+      }
+    } catch {}
+    return { ok: false, error: e2?.message || String(e2) };
+  } finally {
+    _clearAllCacheRunning = false;
   }
 });
 

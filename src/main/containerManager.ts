@@ -2440,7 +2440,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       if (ctx) win.webContents.send('container.context', ctx);
     } catch {}
   } catch (e) { console.error('[main] ensure three views error', e); }
-  win.on('closed', () => { openedById.delete(container.id); DB.closeSession(sessionId, Date.now()); });
+  win.on('closed', () => { 
+    openedById.delete(container.id); 
+    DB.closeSession(sessionId, Date.now());
+    // Clear cache on close (preserves cookies and session data)
+    clearContainerCacheOnClose(container.id).catch((e) => {
+      console.warn('[main] clearContainerCacheOnClose failed in closed handler', e);
+    });
+  });
 
   // startUrlをロード
   if (startUrl) {
@@ -2850,6 +2857,58 @@ export function clearContainerCache(containerId: string) {
   } catch (e) {
     console.error('[main] clearContainerCache error', e);
     return false;
+  }
+}
+
+// Clear cache on container close (preserves cookies and session data)
+// Clears: HTTP cache, ServiceWorker cache, CacheStorage
+// Preserves: cookies, localStorage, IndexedDB
+export async function clearContainerCacheOnClose(containerId: string): Promise<void> {
+  try {
+    if (!containerId) {
+      console.warn('[main] clearContainerCacheOnClose: containerId is missing');
+      return;
+    }
+    
+    const container = DB.getContainer(containerId);
+    if (!container) {
+      console.warn('[main] clearContainerCacheOnClose: container not found', containerId);
+      return;
+    }
+    
+    const part = container.partition;
+    if (!part) {
+      console.warn('[main] clearContainerCacheOnClose: container has no partition', containerId);
+      return;
+    }
+    
+    const ses = session.fromPartition(part, { cache: true });
+    
+    // Clear HTTP cache
+    await new Promise<void>((resolve) => {
+      ses.clearCache((error) => {
+        if (error) {
+          console.warn('[main] clearContainerCacheOnClose: failed to clear HTTP cache', error);
+        } else {
+          console.log('[main] clearContainerCacheOnClose: HTTP cache cleared for container', containerId);
+        }
+        resolve();
+      });
+    });
+    
+    // Clear ServiceWorker cache and CacheStorage (preserving cookies)
+    try {
+      await ses.clearStorageData({
+        storages: ['serviceworkers', 'cachestorage']
+      });
+      console.log('[main] clearContainerCacheOnClose: ServiceWorker and CacheStorage cleared for container', containerId);
+    } catch (e) {
+      console.warn('[main] clearContainerCacheOnClose: failed to clear ServiceWorker/CacheStorage', e);
+    }
+    
+  } catch (e) {
+    // エラーはログのみ（コンテナの閉じる処理をブロックしない）
+    console.warn('[main] clearContainerCacheOnClose error', e);
   }
 }
 

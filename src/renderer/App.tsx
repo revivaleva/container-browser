@@ -19,6 +19,10 @@ declare global {
       delete: (payload: { id: string }) => Promise<boolean>;
       openByName: (payload: { name: string; url?: string }) => Promise<boolean>;
       clearCache: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
+      clearAllData?: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
+      clearAllCacheStart?: () => Promise<{ ok: boolean; error?: string }>;
+      onClearAllCacheProgress?: (cb: (payload: { message: string; progress?: { current: number; total: number; percent: number }; freedBytesSoFar?: number; errorCount?: number; timestamp: number }) => void) => () => void;
+      onClearAllCacheDone?: (cb: (payload: { ok: boolean; freedBytes: number; total: number; errorCount: number; errors?: string[]; timestamp: number }) => void) => () => void;
     };
     prefsAPI: {
       get: (payload: { containerId: string; origin: string }) => Promise<any>;
@@ -89,6 +93,12 @@ export default function App() {
   // インポート進捗表示用のstate
   const [importProgress, setImportProgress] = useState<{ message: string; progress?: { current: number; total: number; percent: number }; timestamp: number } | null>(null);
   const [isImporting, setIsImporting] = useState<boolean>(false);
+  // 全コンテナキャッシュ削除（HTTP cache総量のみ算出）
+  const [clearAllCacheProgress, setClearAllCacheProgress] = useState<{ message: string; progress?: { current: number; total: number; percent: number }; freedBytesSoFar?: number; errorCount?: number; timestamp: number } | null>(null);
+  const [isClearingAllCache, setIsClearingAllCache] = useState<boolean>(false);
+  const [lastClearedAllCacheBytes, setLastClearedAllCacheBytes] = useState<number | null>(null);
+  const [lastClearedAllCacheErrorCount, setLastClearedAllCacheErrorCount] = useState<number>(0);
+  const [lastClearedAllCacheErrors, setLastClearedAllCacheErrors] = useState<string[] | null>(null);
 
   const [containerUrls, setContainerUrls] = useState<Record<string,string>>({});
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
@@ -202,6 +212,18 @@ export default function App() {
       username: username || undefined,
       password: password || undefined
     };
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let idx = 0;
+    while (size >= 1024 && idx < units.length - 1) {
+      size /= 1024;
+      idx++;
+    }
+    return `${size.toFixed(2)} ${units[idx]}`;
   }
 
   // Save current modal settings (used by top/bottom save buttons)
@@ -578,6 +600,39 @@ export default function App() {
       try { if (heartbeatTimer) clearTimeout(heartbeatTimer); } catch {}
     };
   }, [heartbeatTimer]);
+
+  // 全コンテナキャッシュ削除の進捗イベント購読
+  useEffect(() => {
+    const unsubProgress = window.containersAPI?.onClearAllCacheProgress?.((p) => {
+      try {
+        setIsClearingAllCache(true);
+        setClearAllCacheProgress(p);
+        if (typeof p.freedBytesSoFar === 'number') setLastClearedAllCacheBytes(p.freedBytesSoFar);
+        if (typeof p.errorCount === 'number') setLastClearedAllCacheErrorCount(p.errorCount);
+      } catch {}
+    });
+    const unsubDone = window.containersAPI?.onClearAllCacheDone?.((p) => {
+      try {
+        setIsClearingAllCache(false);
+        setLastClearedAllCacheBytes(typeof p.freedBytes === 'number' ? p.freedBytes : 0);
+        setLastClearedAllCacheErrorCount(typeof p.errorCount === 'number' ? p.errorCount : 0);
+        setLastClearedAllCacheErrors(p.errors || null);
+        // show completion for a short while
+        setClearAllCacheProgress({
+          message: `完了: 削除されたHTTPキャッシュ総量 ${formatBytes(p.freedBytes || 0)}（${p.total}件）`,
+          progress: { current: p.total || 0, total: p.total || 0, percent: 100 },
+          freedBytesSoFar: p.freedBytes || 0,
+          errorCount: p.errorCount || 0,
+          timestamp: Date.now(),
+        });
+        setTimeout(() => setClearAllCacheProgress(null), 2000);
+      } catch {}
+    });
+    return () => {
+      try { if (unsubProgress) unsubProgress(); } catch {}
+      try { if (unsubDone) unsubDone(); } catch {}
+    };
+  }, []);
 
   // If this renderer was opened as a Settings window (main process adds ?settings=1),
   // render the Settings-only UI and skip the main dashboard.
@@ -971,6 +1026,67 @@ export default function App() {
           エクスポートしたZIPファイルからデータをインポートします
         </div>
       </section>
+
+      <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8, backgroundColor: '#f8f9fa' }}>
+        <h3>キャッシュ管理</h3>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={async () => {
+              if (isClearingAllCache) return;
+              const ok = window.confirm('全コンテナ（DB登録分）のキャッシュを削除します。\n\n- Cookie/ログイン状態は保持されます\n- 表示される削除量は「HTTPキャッシュ総量」のみです\n\n実行しますか？');
+              if (!ok) return;
+              try {
+                setIsClearingAllCache(true);
+                setLastClearedAllCacheErrors(null);
+                setLastClearedAllCacheErrorCount(0);
+                setClearAllCacheProgress({ message: '開始しています...', timestamp: Date.now(), progress: { current: 0, total: 0, percent: 0 } });
+                const resp = await window.containersAPI?.clearAllCacheStart?.();
+                if (!resp?.ok) {
+                  setIsClearingAllCache(false);
+                  setClearAllCacheProgress({ message: `開始に失敗しました: ${resp?.error || '不明なエラー'}`, timestamp: Date.now() });
+                  setTimeout(() => setClearAllCacheProgress(null), 3000);
+                }
+              } catch (e: any) {
+                setIsClearingAllCache(false);
+                setClearAllCacheProgress({ message: `開始に失敗しました: ${e?.message || String(e)}`, timestamp: Date.now() });
+                setTimeout(() => setClearAllCacheProgress(null), 3000);
+              }
+            }}
+            disabled={isClearingAllCache}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: isClearingAllCache ? '#6c757d' : '#0275d8',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: isClearingAllCache ? 'not-allowed' : 'pointer',
+              fontSize: 14,
+              fontWeight: 'bold'
+            }}
+          >
+            {isClearingAllCache ? 'キャッシュ削除中...' : '全コンテナのキャッシュを削除'}
+          </button>
+          {lastClearedAllCacheBytes !== null && (
+            <div style={{ fontSize: 12, color: '#333' }}>
+              前回の削除量（HTTPキャッシュ）: <strong>{formatBytes(lastClearedAllCacheBytes)}</strong>
+              {lastClearedAllCacheErrorCount > 0 ? (
+                <span style={{ color: '#d9534f' }}>（エラー {lastClearedAllCacheErrorCount} 件）</span>
+              ) : null}
+            </div>
+          )}
+        </div>
+        {lastClearedAllCacheErrors && lastClearedAllCacheErrors.length > 0 && (
+          <details style={{ marginTop: 8 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12, color: '#d9534f' }}>エラー詳細（先頭{lastClearedAllCacheErrors.length}件）</summary>
+            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, background: '#fff', border: '1px solid #eee', padding: 8, borderRadius: 4 }}>
+              {lastClearedAllCacheErrors.join('\n')}
+            </pre>
+          </details>
+        )}
+        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+          ※ 進捗表示の「削除総量」はHTTPキャッシュ（`getCacheSize()`）を合算した値です。ServiceWorker/CacheStorageは削除しますが容量は表示に含まれません。
+        </div>
+      </section>
     </div>
   );
 
@@ -1088,6 +1204,93 @@ export default function App() {
               </>
             )}
             {!importProgress && (
+              <div style={{ textAlign: 'center', padding: 20 }}>
+                <div style={{ fontSize: 14, color: '#666' }}>処理を開始しています...</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 全コンテナキャッシュ削除 進捗モーダル */}
+      {(isClearingAllCache || clearAllCacheProgress) && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: 24,
+            borderRadius: 8,
+            minWidth: 420,
+            maxWidth: 640,
+            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+          }}>
+            <h3 style={{ marginTop: 0, marginBottom: 16 }}>キャッシュ削除中</h3>
+            {clearAllCacheProgress && (
+              <>
+                <div style={{ marginBottom: 12, fontSize: 14, color: '#666' }}>
+                  {clearAllCacheProgress.message}
+                </div>
+                {typeof clearAllCacheProgress.freedBytesSoFar === 'number' && (
+                  <div style={{ marginBottom: 12, fontSize: 12, color: '#333' }}>
+                    削除済み（HTTPキャッシュ）: <strong>{formatBytes(clearAllCacheProgress.freedBytesSoFar)}</strong>
+                    {typeof clearAllCacheProgress.errorCount === 'number' && clearAllCacheProgress.errorCount > 0 ? (
+                      <span style={{ color: '#d9534f' }}>（エラー {clearAllCacheProgress.errorCount} 件）</span>
+                    ) : null}
+                  </div>
+                )}
+                {clearAllCacheProgress.progress && (
+                  <div>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      marginBottom: 8,
+                      fontSize: 12,
+                      color: '#666'
+                    }}>
+                      <span>
+                        {clearAllCacheProgress.progress.current} / {clearAllCacheProgress.progress.total}
+                      </span>
+                      <span style={{ fontWeight: 'bold', color: '#0275d8' }}>
+                        {clearAllCacheProgress.progress.percent}%
+                      </span>
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: 24,
+                      backgroundColor: '#e9ecef',
+                      borderRadius: 4,
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${clearAllCacheProgress.progress.percent}%`,
+                        height: '100%',
+                        backgroundColor: '#0275d8',
+                        transition: 'width 0.3s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        fontSize: 12,
+                        fontWeight: 'bold'
+                      }}>
+                        {clearAllCacheProgress.progress.percent}%
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+            {!clearAllCacheProgress && (
               <div style={{ textAlign: 'center', padding: 20 }}>
                 <div style={{ fontSize: 14, color: '#666' }}>処理を開始しています...</div>
               </div>
