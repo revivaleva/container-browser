@@ -6,9 +6,11 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),
-        // ★ 追加：ネイティブモジュールは必ず external 扱いに
         external: ['better-sqlite3', 'keytar'],
       },
+    },
+    ssr: {
+      external: ['better-sqlite3', 'keytar'],
     },
   },
   preload: {
@@ -26,11 +28,9 @@ export default defineConfig({
     },
   },
   renderer: {
-    vite: {
-      server: {
-        port: 5173,
-        open: false,
-      },
+    server: {
+      port: 5173,
+      open: false,
     },
     build: {
       rollupOptions: {

@@ -100,6 +100,34 @@ function waitForNavigationComplete(wc: WebContents, timeoutMs: number): Promise<
   });
 }
 
+function generateBezierPath(start: { x: number; y: number }, end: { x: number; y: number }, steps: number) {
+  const points = [];
+  // Use random control points for curve
+  const ctrl1 = {
+    x: start.x + (end.x - start.x) * Math.random(),
+    y: start.y + (end.y - start.y) * 0.2
+  };
+  const ctrl2 = {
+    x: start.x + (end.x - start.x) * 0.8,
+    y: start.y + (end.y - start.y) * Math.random()
+  };
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = Math.pow(1 - t, 3) * start.x +
+      3 * Math.pow(1 - t, 2) * t * ctrl1.x +
+      3 * (1 - t) * Math.pow(t, 2) * ctrl2.x +
+      Math.pow(t, 3) * end.x;
+    const y = Math.pow(1 - t, 3) * start.y +
+      3 * Math.pow(1 - t, 2) * t * ctrl1.y +
+      3 * (1 - t) * Math.pow(t, 2) * ctrl2.y +
+      Math.pow(t, 3) * end.y;
+    points.push({ x: Math.round(x), y: Math.round(y) });
+  }
+  return points;
+}
+
+
 function determineProfilePath(container: any): string | null {
   const appdata = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
   if (container.userDataDir && existsSync(container.userDataDir)) return container.userDataDir;
@@ -236,8 +264,8 @@ async function downloadAndSaveMedia(
       ok: false,
       folder_path: fullPath,
       files: [],
-    summary: { total: 0, succeeded: 0, failed: 0, paths_comma_separated: '', total_bytes: 0 },
-    error_detail: { message: String(err?.message || 'Failed to create directory'), code: err?.code },
+      summary: { total: 0, succeeded: 0, failed: 0, paths_comma_separated: '', total_bytes: 0 },
+      error_detail: { message: String(err?.message || 'Failed to create directory'), code: err?.code },
     };
   }
 
@@ -335,7 +363,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             const token = await getToken();
             if (!token) throw new Error('no token available for ensureAuth');
             if (returnToken) returnedToken = token;
-            
+
             // call auth.validate
             const BASE_URL = getAuthApiBase();
             const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
@@ -399,7 +427,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           // session to be available externally, use the remote exec API (/internal/exec)
           // or the ensureAuth flow which injects cookies into the running session.
           return jsonResponse(res, 200, { ok: true, lastSessionId: c.lastSessionId ?? null, authInjected: ensureAuth, token: returnedToken ?? null, cookieNames: injectedCookieNames.length ? injectedCookieNames : null, message: 'profile copy disabled' });
-        } catch (err:any) {
+        } catch (err: any) {
           const msg = String(err?.message || err);
           if (msg && msg.toLowerCase().includes('timeout')) return jsonResponse(res, 504, { ok: false, error: 'timeout during export' });
           return jsonResponse(res, 500, { ok: false, error: msg });
@@ -428,25 +456,25 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           locks.add(contextId);
           const tstart = Date.now();
           try {
-          // resolve container
-          const c = DB.getContainer(contextId);
-          if (!c) throw new Error('container not found');
-          // ensure container open (when opened via API prefer single-tab)
-          let navigationAlreadyDone = false;
-          if (!isContainerOpen(contextId)) {
-            // navigate コマンドの場合は、指定URLで直接開く（シングルタブ＆3秒待機後にURL読み込み）
-            if (command === 'navigate') {
-              const url = String(body.url || '');
-              if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
-              // ★ singleTab: true でシングルタブ、3秒待機が自動的に適用される
-              await openContainerWindow(c, url, { singleTab: true });
-              navigationAlreadyDone = true;
-              console.log('[exportServer] container opened with navigate URL (single tab, 3s delay applied)', { contextId, url });
-            } else {
-              // 他のコマンドの場合は通常通り開く（シングルタブ＆復元モード）
-              await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+            // resolve container
+            const c = DB.getContainer(contextId);
+            if (!c) throw new Error('container not found');
+            // ensure container open (when opened via API prefer single-tab)
+            let navigationAlreadyDone = false;
+            if (!isContainerOpen(contextId)) {
+              // navigate コマンドの場合は、指定URLで直接開く（シングルタブ＆3秒待機後にURL読み込み）
+              if (command === 'navigate') {
+                const url = String(body.url || '');
+                if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
+                // ★ singleTab: true でシングルタブ、3秒待機が自動的に適用される
+                await openContainerWindow(c, url, { singleTab: true });
+                navigationAlreadyDone = true;
+                console.log('[exportServer] container opened with navigate URL (single tab, 3s delay applied)', { contextId, url });
+              } else {
+                // 他のコマンドの場合は通常通り開く（シングルタブ＆復元モード）
+                await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+              }
             }
-          }
             // get active webContents
             const wc = getActiveWebContents(contextId);
             if (!wc) return jsonResponse(res, 404, { ok: false, error: 'no active webContents' });
@@ -476,7 +504,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                   if (!selector || !type) return null;
                   return { selector, type };
                 })
-                .filter((v): v is MediaSelectorRule => !!v);
+                .filter((v: any): v is MediaSelectorRule => !!v);
               const mediaTimeoutMs = Number(options.timeoutMs || 60000);
               if (!destinationFolder) return jsonResponse(res, 400, { ok: false, error: 'Invalid destination folder' });
               if (!isValidFolderName(folderName)) return jsonResponse(res, 400, { ok: false, error: 'Invalid folder name' });
@@ -552,7 +580,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                     if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
                   }
                   navigationOccurred = true;
-                } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+                } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
               }
             } else if (command === 'click' || command === 'clickAndType') {
               const selector = body.selector;
@@ -579,16 +607,16 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
 
                   // Generate random uppercase letter (A-Z)
                   const randomChar = String.fromCharCode(65 + Math.floor(Math.random() * 26));
-                  
+
                   // Send keyboard input via sendInputEvent: keyDown -> char -> keyUp
                   // Use lowercase for char event to ensure input receives the character
                   const charLower = randomChar.toLowerCase();
-                  
+
                   wc.sendInputEvent({ type: 'keyDown', keyCode: randomChar });
                   wc.sendInputEvent({ type: 'char', keyCode: charLower });
                   wc.sendInputEvent({ type: 'keyUp', keyCode: randomChar });
                 }
-              } catch (e:any) {
+              } catch (e: any) {
                 const msg = String(e?.message || e);
                 if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
                 return jsonResponse(res, 500, { ok: false, error: msg });
@@ -617,17 +645,17 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                   // Support client sending JSON-stringified expr; try parse but fall back to raw string
                   let exprStr: string = rawEval as any;
                   if (typeof rawEval === 'string') {
-                    try { const parsed = JSON.parse(rawEval); if (typeof parsed === 'string') exprStr = parsed; } catch {}
+                    try { const parsed = JSON.parse(rawEval); if (typeof parsed === 'string') exprStr = parsed; } catch { }
                   } else {
                     exprStr = String(rawEval);
                   }
                   // Execute the expression directly (no template wrapping) and capture runtime/syntax errors with details
                   try {
                     evalResult = await wc.executeJavaScript(exprStr, true);
-                  } catch (e:any) {
+                  } catch (e: any) {
                     const message = String(e?.message || e);
                     const stack = String(e?.stack || '');
-                    const stackShort = stack.split('\\n').slice(0,5).join('\\n');
+                    const stackShort = stack.split('\\n').slice(0, 5).join('\\n');
                     // try to extract line/column from stack (format: <anonymous>:line:column)
                     let line: number | null = null;
                     let column: number | null = null;
@@ -643,14 +671,14 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                       } else {
                         snippet = String(exprStr).slice(0, 200);
                       }
-                    } catch {}
+                    } catch { }
                     const context = String(exprStr).slice(-80);
                     const errorDetail: any = { message, stack: stackShort, line, column, snippet, context, exprId: body.exprId || null, sourceSnippet: body.sourceSnippet || null };
                     return jsonResponse(res, 500, { ok: false, error: message, errorDetail });
                   }
                   // do not return here; allow post-collection collection (html/cookies/screenshot) to run and include evalResult
                 }
-              } catch (e:any) {
+              } catch (e: any) {
                 const msg = String(e?.message || e);
                 if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
                 return jsonResponse(res, 500, { ok: false, error: msg });
@@ -685,16 +713,16 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 try {
                   response = await (global as any).fetch(actualFileUrl);
                 } catch (fetchError: any) {
-                  return jsonResponse(res, 500, { 
-                    ok: false, 
-                    error: `Failed to fetch file: ${String(fetchError?.message || fetchError)}` 
+                  return jsonResponse(res, 500, {
+                    ok: false,
+                    error: `Failed to fetch file: ${String(fetchError?.message || fetchError)}`
                   });
                 }
 
                 if (!response.ok) {
-                  return jsonResponse(res, 500, { 
-                    ok: false, 
-                    error: `Failed to fetch file: HTTP ${response.status}` 
+                  return jsonResponse(res, 500, {
+                    ok: false,
+                    error: `Failed to fetch file: HTTP ${response.status}`
                   });
                 }
 
@@ -741,8 +769,8 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 try {
                   const result = await wc.executeJavaScript(script, true);
                   if (result && (result as any).success) {
-                    return jsonResponse(res, 200, { 
-                      ok: true, 
+                    return jsonResponse(res, 200, {
+                      ok: true,
                       result: {
                         success: true,
                         selector,
@@ -751,9 +779,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                       }
                     });
                   } else {
-                    return jsonResponse(res, 500, { 
-                      ok: false, 
-                      error: 'Failed to set file input: unexpected result' 
+                    return jsonResponse(res, 500, {
+                      ok: false,
+                      error: 'Failed to set file input: unexpected result'
                     });
                   }
                 } catch (jsError: any) {
@@ -766,9 +794,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                   }
                   if (msg.includes('DataTransfer failed')) {
                     // セキュリティ制約により失敗した場合の詳細なエラーメッセージ
-                    return jsonResponse(res, 500, { 
-                      ok: false, 
-                      error: 'Failed to set file input: browser security restrictions prevent programmatic file input setting. This is expected behavior in browsers.' 
+                    return jsonResponse(res, 500, {
+                      ok: false,
+                      error: 'Failed to set file input: browser security restrictions prevent programmatic file input setting. This is expected behavior in browsers.'
                     });
                   }
                   return jsonResponse(res, 500, { ok: false, error: `Failed to set file input: ${msg}` });
@@ -780,21 +808,136 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 }
                 return jsonResponse(res, 500, { ok: false, error: msg });
               }
+            } else if (command === 'getElementRect') {
+              const selector = body.selector;
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              const script = `(function(sel){
+                const el = document.querySelector(sel);
+                if(!el) return null;
+                const r = el.getBoundingClientRect();
+                return { x: r.left, y: r.top, width: r.width, height: r.height };
+              })(${JSON.stringify(selector)});`;
+              try {
+                const rect = await wc.executeJavaScript(script, true);
+                if (!rect) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                return jsonResponse(res, 200, { ok: true, rect });
+              } catch (e: any) {
+                return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+              }
+            } else if (command === 'mouseMove') {
+              const x = Number(body.x);
+              const y = Number(body.y);
+              const steps = Number(options.steps || 1);
+              if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
+
+              // We don't have a reliable last position in a stateless API, 
+              // but we can try to get it if we want to glide. 
+              // for now, just glide from a near point or just jump if steps=1
+              if (steps > 1) {
+                // Dummy start for now (top left or somewhere random)
+                const startX = 0;
+                const startY = 0;
+                const path = generateBezierPath({ x: startX, y: startY }, { x, y }, steps);
+                for (const pt of path) {
+                  wc.sendInputEvent({ type: 'mouseMove', x: pt.x, y: pt.y });
+                  await new Promise(r => setTimeout(r, 5));
+                }
+              } else {
+                wc.sendInputEvent({ type: 'mouseMove', x, y });
+              }
+              return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'mouseClick') {
+              const x = Number(body.x);
+              const y = Number(body.y);
+              if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
+              const delay = Number(options.delayMs || 100);
+
+              wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+              await new Promise(r => setTimeout(r, delay));
+              wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+
+              return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'humanClick') {
+              const selector = body.selector;
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+
+              // 1. Get Rect (Support searching inside iframes)
+              const getRectScript = `(function(sel){
+                function findInFrames(targetSel, root = document) {
+                  const items = root.querySelectorAll('iframe');
+                  for (let i = 0; i < items.length; i++) {
+                    try {
+                      const frame = items[i];
+                      const rect = frame.getBoundingClientRect();
+                      const innerDoc = frame.contentDocument || frame.contentWindow.document;
+                      const el = innerDoc.querySelector(targetSel);
+                      if (el) {
+                        const r = el.getBoundingClientRect();
+                        return { x: rect.left + r.left, y: rect.top + r.top, width: r.width, height: r.height };
+                      }
+                      const deep = findInFrames(targetSel, innerDoc);
+                      if (deep) {
+                        return { x: rect.left + deep.x, y: rect.top + deep.y, width: deep.width, height: deep.height };
+                      }
+                    } catch (e) { /* ignore cross-origin */ }
+                  }
+                  return null;
+                }
+                const topEl = document.querySelector(sel);
+                if(topEl) {
+                  const r = topEl.getBoundingClientRect();
+                  return { x: r.left, y: r.top, width: r.width, height: r.height };
+                }
+                return findInFrames(sel);
+              })(${JSON.stringify(selector)});`;
+
+              try {
+                const rect = await wc.executeJavaScript(getRectScript, true);
+                if (!rect) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+
+                // 2. Target point with offset (prefer explicit offsetX/offsetY if provided)
+                const offsetX = typeof body.offsetX === 'number' ? body.offsetX : (rect.width / 2 + (Math.random() - 0.5) * (rect.width * 0.4));
+                const offsetY = typeof body.offsetY === 'number' ? body.offsetY : (rect.height / 2 + (Math.random() - 0.5) * (rect.height * 0.4));
+
+                const targetX = Math.round(rect.x + offsetX);
+                const targetY = Math.round(rect.y + offsetY);
+
+                // 3. Move
+                const startX = Math.round(Math.random() * 200);
+                const startY = Math.round(Math.random() * 200);
+                const path = generateBezierPath({ x: startX, y: startY }, { x: targetX, y: targetY }, 30);
+                for (const pt of path) {
+                  wc.sendInputEvent({ type: 'mouseMove', x: pt.x, y: pt.y });
+                  await new Promise(r => setTimeout(r, 8 + Math.random() * 5));
+                }
+
+                // 4. Click
+                wc.sendInputEvent({ type: 'mouseDown', x: targetX, y: targetY, button: 'left', clickCount: 1 });
+                await new Promise(r => setTimeout(r, 60 + Math.random() * 100));
+                wc.sendInputEvent({ type: 'mouseUp', x: targetX, y: targetY, button: 'left', clickCount: 1 });
+
+                return jsonResponse(res, 200, { ok: true, command: 'humanClick', target: { x: targetX, y: targetY } });
+              } catch (e: any) {
+                return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+              }
+            } else if (command === 'status' || command === 'refresh' || command === 'current_url') {
+              // No-op: proceed to post-collection which returns URL, Title, and optionally HTML/Screenshot
             } else {
+
               return jsonResponse(res, 400, { ok: false, error: 'unsupported command' });
             }
 
             // post-collection
             const urlNow = wc.getURL ? wc.getURL() : null;
             let title = null;
-            try { title = wc.getTitle ? wc.getTitle() : null; } catch {}
+            try { title = wc.getTitle ? wc.getTitle() : null; } catch { }
             let html: string | null = null;
             if (options.returnHtml && options.returnHtml !== 'none') {
               try {
                 // in-page sanitizer: clone DOM, remove styles/scripts/comments, strip inline styles and data: URLs
                 const isTrim = (options.returnHtml === 'trim');
                 const maxLen = isTrim ? (64 * 1024) : 0;
-                
+
                 // HTML取得にタイムアウト機構を追加
                 const htmlTimeoutMs = 10000; // 10秒タイムアウト
                 const htmlPromise = wc.executeJavaScript(`(function(maxLen,isTrim){
@@ -849,7 +992,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 html = full ? String(full) : null;
                 const htmlLen = html ? html.length : 0;
                 console.log('[exportServer] html len', htmlLen, 'contextId=', contextId);
-              } catch (e:any) {
+              } catch (e: any) {
                 console.error('[exportServer] html fetch error', e?.message || e);
                 // HTML取得失敗時もレスポンスを継続
               }
@@ -857,7 +1000,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             // cookies
             let cookies: any[] | null = null;
             if (options.returnCookies) {
-              try { const ses = session.fromPartition(c.partition); cookies = await ses.cookies.get({}); } catch {}
+              try { const ses = session.fromPartition(c.partition); cookies = await ses.cookies.get({}); } catch { }
             }
             // screenshot
             let shotPath: string | null = null;
@@ -878,22 +1021,33 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             const out: any = { ok: true, command, navigationOccurred, url: urlNow, title, html, screenshotPath: shotPath, cookies, elapsedMs: elapsed };
             if (typeof evalResult !== 'undefined') out.result = evalResult;
             return jsonResponse(res, 200, out);
-          } catch (e:any) {
+          } catch (e: any) {
             const msg = String(e?.message || e);
             if (msg.toLowerCase().includes('container not found')) return jsonResponse(res, 404, { ok: false, error: 'Context not found' });
             if (msg && msg.toLowerCase().includes('timeout')) return jsonResponse(res, 504, { ok: false, error: 'timeout' });
             return jsonResponse(res, 500, { ok: false, error: msg });
           } finally { locks.delete(contextId); }
-        } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+        } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
       }
+
+      // List containers endpoint
+      if (req.method === 'GET' && (u.pathname === '/internal/containers/list' || u.pathname === '/internal/containers')) {
+        try {
+          const list = DB.listContainers();
+          return jsonResponse(res, 200, { ok: true, containers: list });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
 
       if ((req.method === 'DELETE' || req.method === 'POST') && u.pathname === '/internal/export-restored/delete') {
         // accept JSON body with path or query ?path=
         let body = {} as any;
-        try { body = await parseBody(req); } catch {}
+        try { body = await parseBody(req); } catch { }
         const p = body.path || u.searchParams.get('path');
         if (!p) return jsonResponse(res, 400, { ok: false, error: 'missing path' });
-        try { rmSync(String(p), { recursive: true, force: true }); return jsonResponse(res, 200, { ok: true }); } catch (e:any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+        try { rmSync(String(p), { recursive: true, force: true }); return jsonResponse(res, 200, { ok: true }); } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
       }
 
       // Create container endpoint
@@ -915,13 +1069,13 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           // Consume quota from token before creating container (only if token exists)
           try {
             const token = await getToken();
-            
+
             // If no token, skip quota check and allow creation
             if (token) {
               const deviceId = getOrCreateDeviceId();
               const BASE_URL = getAuthApiBase();
               const timeoutMs = getAuthTimeoutMs();
-              
+
               const ac = new AbortController();
               const idt = setTimeout(() => ac.abort(), timeoutMs);
               try {
@@ -953,14 +1107,22 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             return jsonResponse(res, 500, { ok: false, error: msg });
           }
 
+          // Realistic GPU rendering strings to spoof SwiftShader
+          const gpus = [
+            { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+            { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+            { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+          ];
+          const gpu = gpus[Math.floor(Math.random() * gpus.length)];
+
           // Create container with fingerprint
           const fp: Fingerprint = {
             acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
             locale: 'ja-JP',
             timezone: 'Asia/Tokyo',
             platform: 'Win32',
-            hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random()*4)],
-            deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random()*5)],
+            hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
+            deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
             canvasNoise: true,
             screenWidth: 2560,
             screenHeight: 1440,
@@ -974,6 +1136,8 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             batteryLevel: 1,
             batteryCharging: true,
             fakeIp: undefined,
+            webglVendor: gpu.vendor,
+            webglRenderer: gpu.renderer,
           };
           const c: Container = {
             id,
@@ -1000,7 +1164,37 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           }
 
           return jsonResponse(res, 200, { ok: true, container: c });
-        } catch (e:any) {
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Delete container endpoint
+      if (req.method === 'POST' && u.pathname === '/internal/containers/delete') {
+        try {
+          const body = await parseBody(req);
+          const id = String(body && body.id || '').trim();
+          if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
+
+          const container = DB.getContainer(id);
+          if (!container) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          if (isContainerOpen(id)) {
+            try {
+              // Try to gently close it first
+              const { closeContainerTabRestored } = await import('./containerManager');
+              await closeContainerTabRestored(id);
+            } catch (e: any) {
+              console.error('[exportServer] close error during delete', e);
+            }
+          }
+
+          DB.asyncDeleteContainer(id);
+          const p = path.join(app.getPath('userData'), 'profiles', id);
+          try { rmSync(p, { recursive: true, force: true }); } catch { }
+
+          return jsonResponse(res, 200, { ok: true, deletedId: id });
+        } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
       }
@@ -1011,9 +1205,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           const body = await parseBody(req);
           const name = String(body && body.name || '').trim();
           const id = String(body && body.id || '').trim();
-          
+
           if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
-          
+
           // Find container by name or id
           const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
           if (!container) {
@@ -1037,12 +1231,12 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             proxy: proxy !== undefined ? proxy : container.proxy,
             updatedAt: Date.now(),
           };
-          
+
           DB.upsertContainer(updated);
           console.log('[exportServer] set proxy for container', { containerId: container.id, containerName: container.name, hasProxy: !!proxy });
 
           return jsonResponse(res, 200, { ok: true, container: updated });
-        } catch (e:any) {
+        } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
       }
@@ -1053,9 +1247,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           const body = await parseBody(req);
           const name = String(body && body.name || '').trim();
           const id = String(body && body.id || '').trim();
-          
+
           if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
-          
+
           // Find container by name or id
           const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
           if (!container) {
@@ -1076,11 +1270,11 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             ...(proxy !== undefined ? { proxy } : {}),
             updatedAt: Date.now(),
           };
-          
+
           DB.upsertContainer(updated);
 
           return jsonResponse(res, 200, { ok: true, container: updated });
-        } catch (e:any) {
+        } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
       }
@@ -1095,12 +1289,12 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
 
           // clear any active locks for this context to avoid deadlocks from long-running ops
-          try { locks.delete(id); } catch {}
+          try { locks.delete(id); } catch { }
 
           // If not open, return idempotent response
           if (!isContainerOpen(id)) return jsonResponse(res, 200, { ok: true, closed: false, message: 'not-open' });
 
-          const runId = (crypto && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : `${Date.now()}-${Math.floor(Math.random()*1000000)}`;
+          const runId = (crypto && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
           const closedBy = req.headers['x-requested-by'] || null;
           console.log('[exportServer] close requested', { id, runId, closedBy, time: new Date().toISOString() });
 
@@ -1115,23 +1309,23 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             try {
               const timeoutMs = Number(body && body.timeoutMs) || 30000;
               await waitForContainerClosed(id, timeoutMs);
-            } catch (e:any) {
+            } catch (e: any) {
               console.error('[exportServer] waitForContainerClosed error', e);
               return jsonResponse(res, 500, { ok: false, error: 'internal' });
             }
             console.log('[exportServer] close completed', { id, runId, time: new Date().toISOString() });
             return jsonResponse(res, 200, { ok: true, closed: true, message: 'closed' });
-          } catch (e:any) {
+          } catch (e: any) {
             console.error('[exportServer] close error', e);
             return jsonResponse(res, 500, { ok: false, error: 'internal' });
           }
-        } catch (e:any) {
+        } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
       }
 
       jsonResponse(res, 404, { ok: false, error: 'not found' });
-    } catch (e:any) {
+    } catch (e: any) {
       jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
     }
   });

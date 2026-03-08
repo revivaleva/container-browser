@@ -9,108 +9,108 @@ let db: Database.Database;
 export function initDB() {
   const dbPath = path.join(app.getPath('userData'), 'data.db');
   const dbDir = path.dirname(dbPath);
-  
+
   // データベースディレクトリが存在しない場合は作成
   if (!fs.existsSync(dbDir)) {
     try {
       fs.mkdirSync(dbDir, { recursive: true });
     } catch (err) {
       const error = err as Error;
-      throw new Error(`Failed to create database directory: ${dbDir}. Error: ${error.message}`);
+      throw new Error(`Failed to create database directory: ${dbDir}.Error: ${error.message} `);
     }
   }
-  
+
   try {
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
   } catch (err) {
     const error = err as Error & { code?: string };
-    throw new Error(`Failed to initialize database at ${dbPath}. Error code: ${error.code || 'unknown'}, Message: ${error.message}`);
+    throw new Error(`Failed to initialize database at ${dbPath}. Error code: ${error.code || 'unknown'}, Message: ${error.message} `);
   }
 
   db.exec(`
-  CREATE TABLE IF NOT EXISTS containers (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    note TEXT,
-    status TEXT DEFAULT '未使用',
-    userDataDir TEXT NOT NULL,
-    partition TEXT NOT NULL,
-    userAgent TEXT,
-    locale TEXT,
-    timezone TEXT,
-    fingerprint TEXT,
-    proxy TEXT,
-    createdAt INTEGER,
-    updatedAt INTEGER,
-    lastSessionId TEXT
-  );
+  CREATE TABLE IF NOT EXISTS containers(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  note TEXT,
+  status TEXT DEFAULT '未使用',
+  userDataDir TEXT NOT NULL,
+  partition TEXT NOT NULL,
+  userAgent TEXT,
+  locale TEXT,
+  timezone TEXT,
+  fingerprint TEXT,
+  proxy TEXT,
+  createdAt INTEGER,
+  updatedAt INTEGER,
+  lastSessionId TEXT
+);
 
-  CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    containerId TEXT NOT NULL,
-    startedAt INTEGER,
-    closedAt INTEGER
-  );
+  CREATE TABLE IF NOT EXISTS sessions(
+  id TEXT PRIMARY KEY,
+  containerId TEXT NOT NULL,
+  startedAt INTEGER,
+  closedAt INTEGER
+);
 
-  CREATE TABLE IF NOT EXISTS tabs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    containerId TEXT NOT NULL,
-    sessionId TEXT NOT NULL,
-    url TEXT NOT NULL,
-    tabIndex INTEGER,
-    title TEXT,
-    favicon TEXT,
-    scrollY INTEGER,
-    updatedAt INTEGER
-  );
+  CREATE TABLE IF NOT EXISTS tabs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  containerId TEXT NOT NULL,
+  sessionId TEXT NOT NULL,
+  url TEXT NOT NULL,
+  tabIndex INTEGER,
+  title TEXT,
+  favicon TEXT,
+  scrollY INTEGER,
+  updatedAt INTEGER
+);
 
-  CREATE TABLE IF NOT EXISTS credentials (
-    containerId TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    username TEXT NOT NULL,
-    keytarAccount TEXT NOT NULL,
-    updatedAt INTEGER,
-    PRIMARY KEY (containerId, origin)
-  );
+  CREATE TABLE IF NOT EXISTS credentials(
+  containerId TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  username TEXT NOT NULL,
+  keytarAccount TEXT NOT NULL,
+  updatedAt INTEGER,
+  PRIMARY KEY(containerId, origin)
+);
 
-  CREATE TABLE IF NOT EXISTS site_prefs (
-    containerId TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    autoFill INTEGER NOT NULL DEFAULT 0,
-    autoSaveForms INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (containerId, origin)
-  );
+  CREATE TABLE IF NOT EXISTS site_prefs(
+  containerId TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  autoFill INTEGER NOT NULL DEFAULT 0,
+  autoSaveForms INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(containerId, origin)
+);
   
-  CREATE TABLE IF NOT EXISTS bookmarks (
-    id TEXT PRIMARY KEY,
-    containerId TEXT NOT NULL,
-    title TEXT NOT NULL,
-    url TEXT NOT NULL,
-    createdAt INTEGER,
-    sortOrder INTEGER DEFAULT 0
-  );
-  `);
+  CREATE TABLE IF NOT EXISTS bookmarks(
+  id TEXT PRIMARY KEY,
+  containerId TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  createdAt INTEGER,
+  sortOrder INTEGER DEFAULT 0
+);
+`);
 
   // migrate: add fingerprint column if missing
-    try {
+  try {
     const cols = db.prepare('PRAGMA table_info(containers)').all() as any[];
     const hasFingerprint = cols.some(c => c.name === 'fingerprint');
     if (!hasFingerprint) {
       db.prepare('ALTER TABLE containers ADD COLUMN fingerprint TEXT').run();
     }
-      // migrate: add status column if missing (replaces note)
-      const hasStatus = cols.some(c => c.name === 'status');
-      const hasNote = cols.some(c => c.name === 'note');
-      if (!hasStatus) {
-        try { 
-          db.prepare('ALTER TABLE containers ADD COLUMN status TEXT DEFAULT "未使用"').run(); 
-          // If note column exists, we can use it as reference but status is separate
-        } catch (e) { /* ignore */ }
-      }
-      if (!hasNote) {
-        try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
-      }
+    // migrate: add status column if missing (replaces note)
+    const hasStatus = cols.some(c => c.name === 'status');
+    const hasNote = cols.some(c => c.name === 'note');
+    if (!hasStatus) {
+      try {
+        db.prepare('ALTER TABLE containers ADD COLUMN status TEXT DEFAULT "未使用"').run();
+        // If note column exists, we can use it as reference but status is separate
+      } catch (e) { /* ignore */ }
+    }
+    if (!hasNote) {
+      try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
+    }
     // migrate: ensure bookmarks have sortOrder column
     try {
       const bcols = db.prepare("PRAGMA table_info(bookmarks)").all() as any[];
@@ -119,10 +119,10 @@ export function initDB() {
         db.prepare('ALTER TABLE bookmarks ADD COLUMN sortOrder INTEGER DEFAULT 0').run();
         // populate sortOrder with createdAt ordering
         const rows = db.prepare('SELECT id FROM bookmarks ORDER BY createdAt ASC').all();
-        const tx = db.transaction((r:any[]) => { for (let i=0;i<r.length;i++) { db.prepare('UPDATE bookmarks SET sortOrder=? WHERE id=?').run(i, r[i].id); } });
+        const tx = db.transaction((r: any[]) => { for (let i = 0; i < r.length; i++) { db.prepare('UPDATE bookmarks SET sortOrder=? WHERE id=?').run(i, r[i].id); } });
         tx(rows);
       }
-    } catch {}
+    } catch { }
     // migrate: ensure tabs have tabIndex column
     try {
       const tcols = db.prepare("PRAGMA table_info(tabs)").all() as any[];
@@ -130,28 +130,28 @@ export function initDB() {
       if (!hasTabIndex) {
         try { db.prepare('ALTER TABLE tabs ADD COLUMN tabIndex INTEGER').run(); } catch (e) { /* ignore */ }
       }
-    } catch {}
-  } catch {}
+    } catch { }
+  } catch { }
 }
 
 export const DB = {
   upsertContainer(c: Container) {
     const stmt = db.prepare(`
-      INSERT INTO containers (id,name,note,status,userDataDir,partition,userAgent,locale,timezone,fingerprint,proxy,createdAt,updatedAt,lastSessionId)
-      VALUES (@id,@name,@note,@status,@userDataDir,@partition,@userAgent,@locale,@timezone,@fingerprint,@proxy,@createdAt,@updatedAt,@lastSessionId)
+      INSERT INTO containers(id, name, note, status, userDataDir, partition, userAgent, locale, timezone, fingerprint, proxy, createdAt, updatedAt, lastSessionId)
+VALUES(@id, @name, @note, @status, @userDataDir, @partition, @userAgent, @locale, @timezone, @fingerprint, @proxy, @createdAt, @updatedAt, @lastSessionId)
       ON CONFLICT(id) DO UPDATE SET
-        name=excluded.name,
-        note=excluded.note,
-        status=excluded.status,
-        userDataDir=excluded.userDataDir,
-        partition=excluded.partition,
-        userAgent=excluded.userAgent,
-        locale=excluded.locale,
-        timezone=excluded.timezone,
-        fingerprint=excluded.fingerprint,
-        proxy=excluded.proxy,
-        updatedAt=excluded.updatedAt,
-        lastSessionId=excluded.lastSessionId
+name = excluded.name,
+  note = excluded.note,
+  status = excluded.status,
+  userDataDir = excluded.userDataDir,
+  partition = excluded.partition,
+  userAgent = excluded.userAgent,
+  locale = excluded.locale,
+  timezone = excluded.timezone,
+  fingerprint = excluded.fingerprint,
+  proxy = excluded.proxy,
+  updatedAt = excluded.updatedAt,
+  lastSessionId = excluded.lastSessionId
     `);
     stmt.run({
       ...c,
@@ -163,7 +163,7 @@ export const DB = {
   },
   listContainers(): Container[] {
     const rows = db.prepare('SELECT * FROM containers ORDER BY createdAt DESC').all();
-    return rows.map((r:any)=> ({
+    return rows.map((r: any) => ({
       ...r,
       note: r.note ?? undefined,
       status: r.status ?? '未使用',
@@ -209,8 +209,8 @@ export const DB = {
     db.prepare('UPDATE sessions SET closedAt=? WHERE id=?').run(closedAt, id);
   },
   addOrUpdateTab(t: TabEntry) {
-    const stmt = db.prepare(`INSERT INTO tabs(containerId,sessionId,url,tabIndex,title,favicon,scrollY,updatedAt)
-      VALUES (@containerId,@sessionId,@url,@tabIndex,@title,@favicon,@scrollY,@updatedAt)`);
+    const stmt = db.prepare(`INSERT INTO tabs(containerId, sessionId, url, tabIndex, title, favicon, scrollY, updatedAt)
+VALUES(@containerId, @sessionId, @url, @tabIndex, @title, @favicon, @scrollY, @updatedAt)`);
     // better-sqlite3 の named parameter は省略不可のため既定値を補完
     stmt.run({
       containerId: t.containerId,
@@ -227,10 +227,10 @@ export const DB = {
     return db.prepare('SELECT * FROM tabs WHERE sessionId=? ORDER BY id ASC').all(sessionId);
   },
   upsertCredential(row: CredentialRow) {
-    db.prepare(`INSERT INTO credentials(containerId,origin,username,keytarAccount,updatedAt)
-               VALUES(@containerId,@origin,@username,@keytarAccount,@updatedAt)
-               ON CONFLICT(containerId,origin) DO UPDATE SET username=excluded.username, keytarAccount=excluded.keytarAccount, updatedAt=excluded.updatedAt
-    `).run(row);
+    db.prepare(`INSERT INTO credentials(containerId, origin, username, keytarAccount, updatedAt)
+VALUES(@containerId, @origin, @username, @keytarAccount, @updatedAt)
+               ON CONFLICT(containerId, origin) DO UPDATE SET username = excluded.username, keytarAccount = excluded.keytarAccount, updatedAt = excluded.updatedAt
+  `).run(row);
   },
   getCredential(containerId: string, origin: string): CredentialRow | undefined {
     return db.prepare('SELECT * FROM credentials WHERE containerId=? AND origin=?').get(containerId, origin);
@@ -239,9 +239,9 @@ export const DB = {
     return db.prepare('SELECT * FROM credentials ORDER BY containerId, origin').all() as CredentialRow[];
   },
   upsertSitePref(pref: SitePref) {
-    db.prepare(`INSERT INTO site_prefs(containerId,origin,autoFill,autoSaveForms)
-                VALUES(@containerId,@origin,@autoFill,@autoSaveForms)
-                ON CONFLICT(containerId,origin) DO UPDATE SET autoFill=excluded.autoFill, autoSaveForms=excluded.autoSaveForms`).run(pref);
+    db.prepare(`INSERT INTO site_prefs(containerId, origin, autoFill, autoSaveForms)
+VALUES(@containerId, @origin, @autoFill, @autoSaveForms)
+                ON CONFLICT(containerId, origin) DO UPDATE SET autoFill = excluded.autoFill, autoSaveForms = excluded.autoSaveForms`).run(pref);
   },
   getSitePref(containerId: string, origin: string): SitePref | undefined {
     return db.prepare('SELECT * FROM site_prefs WHERE containerId=? AND origin=?').get(containerId, origin);

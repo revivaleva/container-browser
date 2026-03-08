@@ -25,6 +25,20 @@ ipcMain.handle('vault.getCredential', async (_e, { containerId, origin }) => {
   return { username: row.username, password };
 });
 
+ipcMain.on('get-fingerprint', (e) => {
+  try {
+    const cid = (e.sender as any)._containerId;
+    if (cid) {
+      const c = DB.getContainer(cid);
+      if (c && c.fingerprint) {
+        e.returnValue = c.fingerprint;
+        return;
+      }
+    }
+  } catch { }
+  e.returnValue = null;
+});
+
 ipcMain.handle('prefs.set', async (_e, pref) => { DB.upsertSitePref(pref); return true; });
 ipcMain.handle('prefs.get', async (_e, { containerId, origin }) => DB.getSitePref(containerId, origin) ?? null);
 
@@ -206,7 +220,7 @@ ipcMain.handle('containers.clearAllCache.start', async (e) => {
           timestamp: Date.now(),
         } satisfies ClearAllCacheDonePayload);
       }
-    } catch {}
+    } catch { }
     return { ok: false, error: e2?.message || String(e2) };
   } finally {
     _clearAllCacheRunning = false;
@@ -263,19 +277,19 @@ ipcMain.handle('migration.exportAll', async () => {
   try {
     // コンテナ
     const containers = DB.listContainers();
-    
+
     // セッション
     const sessions = DB.listAllSessions();
-    
+
     // タブ
     const tabs = DB.listAllTabs();
-    
+
     // ブックマーク
     const bookmarks = DB.listBookmarks();
-    
+
     // サイト設定
     const sitePrefs = DB.listAllSitePrefs();
-    
+
     // 認証情報（パスワード含む）
     const credentials: Array<{ containerId: string; origin: string; username: string; password: string }> = [];
     const credentialRows = DB.listAllCredentials();
@@ -294,7 +308,7 @@ ipcMain.handle('migration.exportAll', async () => {
         console.warn(`[migration] Failed to get password for ${row.keytarAccount}:`, e);
       }
     }
-    
+
     const exportData = {
       version: '1.0',
       exportedAt: Date.now(),
@@ -315,7 +329,7 @@ ipcMain.handle('migration.exportAll', async () => {
         credentials: credentials.length
       }
     };
-    
+
     return { ok: true, data: exportData };
   } catch (e: any) {
     console.error('[migration] exportAll error:', e);
@@ -353,23 +367,23 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
 
     // DBデータをエクスポート（直接関数を呼び出し）
     const allContainers = DB.listContainers();
-    
+
     // エクスポート対象コンテナリストを読み込む
     const exportListPath = path.join(app.getPath('userData'), 'export-container-list.txt');
     let allowedContainerIds: Set<string> | null = null;
     let allowedContainerNames: Set<string> | null = null;
-    
+
     if (fs.existsSync(exportListPath)) {
       try {
         const listContent = fs.readFileSync(exportListPath, 'utf-8');
         const lines = listContent.split('\n')
           .map(line => line.trim())
           .filter(line => line && !line.startsWith('#')); // 空行とコメント行を除外
-        
+
         if (lines.length > 0) {
           allowedContainerIds = new Set<string>();
           allowedContainerNames = new Set<string>();
-          
+
           for (const line of lines) {
             const trimmed = line.trim();
             if (trimmed) {
@@ -378,7 +392,7 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
               allowedContainerNames.add(trimmed.toLowerCase());
             }
           }
-          
+
           console.log(`[migration] エクスポート対象リストから ${lines.length}件のエントリを読み込みました`);
           sendProgress(`エクスポート対象リストから ${lines.length}件を読み込み`);
         }
@@ -387,17 +401,17 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
         sendProgress(`警告: エクスポート対象リストの読み込みに失敗しました`);
       }
     }
-    
+
     // Bannedグループのコンテナを除外（名前またはnoteに"Banned"が含まれる）
     const isBannedContainer = (container: Container) => {
       const name = (container.name || '').toLowerCase();
       const note = (container.note || '').toLowerCase();
       return name.includes('banned') || note.includes('banned');
     };
-    
+
     // エクスポート対象のフィルタリング
     let filteredContainers = allContainers.filter(c => !isBannedContainer(c));
-    
+
     // エクスポート対象リストが存在する場合は、リストに含まれるコンテナのみを対象にする
     if (allowedContainerIds && allowedContainerNames) {
       filteredContainers = filteredContainers.filter(c => {
@@ -407,31 +421,31 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
       console.log(`[migration] エクスポート対象リストに基づいて ${filteredContainers.length}件のコンテナを選択しました`);
       sendProgress(`エクスポート対象: ${filteredContainers.length}件のコンテナ`);
     }
-    
+
     const containers = filteredContainers;
     const bannedContainers = allContainers.filter(c => isBannedContainer(c));
-    const excludedContainers = allContainers.filter(c => 
+    const excludedContainers = allContainers.filter(c =>
       !isBannedContainer(c) && !containers.some(ec => ec.id === c.id)
     );
-    
+
     if (bannedContainers.length > 0) {
       console.log(`[migration] Bannedグループのコンテナ ${bannedContainers.length}件をエクスポートから除外しました`);
       sendProgress(`Bannedグループのコンテナ ${bannedContainers.length}件を除外`);
     }
-    
+
     if (excludedContainers.length > 0 && allowedContainerIds) {
       console.log(`[migration] エクスポート対象リストに含まれないコンテナ ${excludedContainers.length}件を除外しました`);
       sendProgress(`リスト外のコンテナ ${excludedContainers.length}件を除外`);
     }
-    
+
     // Bannedグループを除外したコンテナIDのセットを作成
     const bannedContainerIds = new Set(bannedContainers.map(c => c.id));
-    
+
     const sessions = DB.listAllSessions().filter(s => !bannedContainerIds.has(s.containerId));
     const tabs = DB.listAllTabs().filter(t => !bannedContainerIds.has(t.containerId));
     const bookmarks = DB.listBookmarks().filter(b => !bannedContainerIds.has(b.containerId));
     const sitePrefs = DB.listAllSitePrefs().filter(sp => !bannedContainerIds.has(sp.containerId));
-    
+
     const credentials: Array<{ containerId: string; origin: string; username: string; password: string }> = [];
     const credentialRows = DB.listAllCredentials().filter(row => !bannedContainerIds.has(row.containerId));
     for (const row of credentialRows) {
@@ -539,22 +553,22 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
         // progress.entries が undefined の場合があるため、安全にアクセス
         const entries = progress.entries || {};
         const bytes = progress.bytes || {};
-        const percent = entries.total && entries.processed !== undefined 
-          ? Math.round((entries.processed / entries.total) * 100) 
-          : (bytes.total && bytes.processed !== undefined 
-            ? Math.round((bytes.processed / bytes.total) * 100) 
+        const percent = entries.total && entries.processed !== undefined
+          ? Math.round((entries.processed / entries.total) * 100)
+          : (bytes.total && bytes.processed !== undefined
+            ? Math.round((bytes.processed / bytes.total) * 100)
             : 0);
-        
+
         const sizeInfo = bytes.processed !== undefined && bytes.total !== undefined
           ? `${(bytes.processed / 1024 / 1024).toFixed(2)} MB / ${(bytes.total / 1024 / 1024).toFixed(2)} MB`
           : bytes.processed !== undefined
-          ? `${(bytes.processed / 1024 / 1024).toFixed(2)} MB`
-          : '処理中...';
-        
+            ? `${(bytes.processed / 1024 / 1024).toFixed(2)} MB`
+            : '処理中...';
+
         sendProgress(
           `アーカイブ中... ${sizeInfo}${percent > 0 ? ` (${percent}%)` : ''}`,
-          entries.total && entries.processed !== undefined 
-            ? { current: entries.processed, total: entries.total, percent } 
+          entries.total && entries.processed !== undefined
+            ? { current: entries.processed, total: entries.total, percent }
             : undefined
         );
       });
@@ -705,10 +719,10 @@ ipcMain.handle('migration.exportComplete', async (_e, { includeProfiles = true }
 
         sendProgress(`コンテナ処理完了: プロファイル ${profileCount}件, Partitions ${partitionCount}件`);
 
-        profilesInfo = { 
-          success: profileCount + partitionCount, 
-          error: profileErrorCount + partitionErrorCount, 
-          totalSize: 0 
+        profilesInfo = {
+          success: profileCount + partitionCount,
+          error: profileErrorCount + partitionErrorCount,
+          totalSize: 0
         };
       }
 
@@ -752,7 +766,7 @@ ipcMain.handle('migration.importCredentials', async (_e, { credentials }: { cred
 // 移行機能: 全データのインポート（内部関数）
 async function importAllData(data: any, updatePaths?: { oldBasePath: string; newBasePath: string }, containerIdMapping?: Record<string, string>, sendProgress?: (message: string, progress?: { current: number; total: number; percent: number }) => void) {
   try {
-    const progressCallback = sendProgress || (() => {});
+    const progressCallback = sendProgress || (() => { });
     console.log('[migration] importAllData: データインポートを開始します', {
       hasContainers: !!data.containers,
       containersCount: data.containers?.length || 0,
@@ -786,7 +800,7 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
           // コンテナIDのマッピング適用
           const originalId = container.id;
           const newId = containerIdMapping && containerIdMapping[originalId] ? containerIdMapping[originalId] : originalId;
-          
+
           // コンテナ名で既存のコンテナを検索（マッピングが指定されていない場合のみ）
           if (!containerIdMapping && container.name) {
             const existingContainer = DB.getContainerByName(container.name);
@@ -799,7 +813,7 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
                 const userDataPath = app.getPath('userData');
                 const profilesDir = path.join(userDataPath, 'profiles');
                 const partitionsDir = path.join(userDataPath, 'Partitions');
-                
+
                 // プロファイルディレクトリを削除
                 const profilePath = path.join(profilesDir, existingContainer.id);
                 if (fs.existsSync(profilePath)) {
@@ -810,7 +824,7 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
                     console.warn(`[migration] Failed to remove profile directory ${profilePath}:`, e);
                   }
                 }
-                
+
                 // Partitionsディレクトリを削除
                 const partitionMatch = existingContainer.partition?.match(/^persist:(.+)$/);
                 if (partitionMatch) {
@@ -830,7 +844,7 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
               }
             }
           }
-          
+
           // userDataDirを新しい環境に合わせて更新
           let userDataDir = container.userDataDir;
           if (updatePaths && userDataDir) {
@@ -886,8 +900,8 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       for (let i = 0; i < data.sessions.length; i++) {
         const session = data.sessions[i];
         try {
-          const newContainerId = containerIdMapping && containerIdMapping[session.containerId] 
-            ? containerIdMapping[session.containerId] 
+          const newContainerId = containerIdMapping && containerIdMapping[session.containerId]
+            ? containerIdMapping[session.containerId]
             : session.containerId;
           DB.recordSession(session.id, newContainerId, session.startedAt);
           if (session.closedAt) {
@@ -921,8 +935,8 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       for (let i = 0; i < data.tabs.length; i++) {
         const tab = data.tabs[i];
         try {
-          const newContainerId = containerIdMapping && containerIdMapping[tab.containerId] 
-            ? containerIdMapping[tab.containerId] 
+          const newContainerId = containerIdMapping && containerIdMapping[tab.containerId]
+            ? containerIdMapping[tab.containerId]
             : tab.containerId;
           DB.addOrUpdateTab({
             ...tab,
@@ -955,12 +969,12 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       }
       const existingBookmarks = DB.listBookmarks();
       const existingIds = new Set(existingBookmarks.map(b => b.id));
-      
+
       for (let i = 0; i < data.bookmarks.length; i++) {
         const bookmark = data.bookmarks[i];
         try {
-          const newContainerId = containerIdMapping && bookmark.containerId && containerIdMapping[bookmark.containerId] 
-            ? containerIdMapping[bookmark.containerId] 
+          const newContainerId = containerIdMapping && bookmark.containerId && containerIdMapping[bookmark.containerId]
+            ? containerIdMapping[bookmark.containerId]
             : (bookmark.containerId || '');
           // 既存のブックマークをチェック
           if (existingIds.has(bookmark.id)) {
@@ -992,14 +1006,14 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       if (bookmarksCount > 0) {
         progressCallback(`ブックマークのインポートが完了しました (成功: ${results.bookmarks.success}, エラー: ${results.bookmarks.error})`, { current: bookmarksCount, total: bookmarksCount, percent: 100 });
       }
-      
+
       // ブックマークの順序を復元
       if (data.bookmarks.length > 0) {
         try {
           // エクスポート時の順序を保持
           const sortedBookmarks = [...data.bookmarks].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
           const sortedIds = sortedBookmarks.map(b => b.id);
-          
+
           // 既存のブックマークで、エクスポートデータに含まれていないものを末尾に追加
           const allBookmarks = DB.listBookmarks();
           for (const existing of allBookmarks) {
@@ -1007,7 +1021,7 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
               sortedIds.push(existing.id);
             }
           }
-          
+
           DB.setBookmarksOrder(sortedIds);
         } catch (e) {
           console.warn('[migration] Failed to restore bookmark order:', e);
@@ -1024,8 +1038,8 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       for (let i = 0; i < data.sitePrefs.length; i++) {
         const pref = data.sitePrefs[i];
         try {
-          const newContainerId = containerIdMapping && containerIdMapping[pref.containerId] 
-            ? containerIdMapping[pref.containerId] 
+          const newContainerId = containerIdMapping && containerIdMapping[pref.containerId]
+            ? containerIdMapping[pref.containerId]
             : pref.containerId;
           DB.upsertSitePref({
             ...pref,
@@ -1059,8 +1073,8 @@ async function importAllData(data: any, updatePaths?: { oldBasePath: string; new
       for (let i = 0; i < data.credentials.length; i++) {
         const cred = data.credentials[i];
         try {
-          const newContainerId = containerIdMapping && containerIdMapping[cred.containerId] 
-            ? containerIdMapping[cred.containerId] 
+          const newContainerId = containerIdMapping && containerIdMapping[cred.containerId]
+            ? containerIdMapping[cred.containerId]
             : cred.containerId;
           const account = `${newContainerId}|${cred.origin}|${cred.username}`;
           await keytar.setPassword(SERVICE, account, cred.password);
@@ -1169,7 +1183,7 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
     const userDataPath = app.getPath('userData');
     const tempDir = path.join(userDataPath, 'temp', 'import-extract');
     console.log('[migration] importComplete: 一時ディレクトリ:', tempDir);
-    
+
     // 既存の一時ディレクトリを削除
     if (fs.existsSync(tempDir)) {
       console.log('[migration] importComplete: 既存の一時ディレクトリを削除します');
@@ -1185,7 +1199,7 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
       await extractZip(zipPath, { dir: tempDir });
       sendProgress('ZIPファイルの展開が完了しました', { current: 100, total: 100, percent: 100 });
       console.log('[migration] importComplete: ZIPファイルの展開が完了しました');
-      
+
       // 展開されたファイルを確認
       try {
         const extractedFiles = fs.readdirSync(tempDir);
@@ -1220,7 +1234,7 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
         console.log('[migration] importComplete: data.jsonを読み込みます');
         const dataJson = fs.readFileSync(dataJsonPath, 'utf-8');
         const exportData = JSON.parse(dataJson);
-        
+
         const userDataPath = app.getPath('userData');
         const oldBasePath = exportData.data?.containers?.[0]?.userDataDir?.split('\\profiles')[0] || '';
         const newBasePath = userDataPath;
@@ -1234,7 +1248,7 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
         });
         // importAllの処理を直接実行（進捗コールバック付き）
         const importResult = await importAllData(
-          exportData.data, 
+          exportData.data,
           oldBasePath && newBasePath && oldBasePath !== newBasePath
             ? { oldBasePath, newBasePath }
             : undefined,
@@ -1277,18 +1291,18 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
         try {
           const sourcePath = path.join(extractedProfilesDir, profileDir);
           // コンテナIDマッピングを適用
-          const newProfileDir = containerIdMapping && containerIdMapping[profileDir] 
-            ? containerIdMapping[profileDir] 
+          const newProfileDir = containerIdMapping && containerIdMapping[profileDir]
+            ? containerIdMapping[profileDir]
             : profileDir;
           const targetPath = path.join(profilesDir, newProfileDir);
-          
+
           if (fs.statSync(sourcePath).isDirectory()) {
             // 既存のプロファイルがある場合はバックアップ
             if (fs.existsSync(targetPath)) {
               const backupPath = `${targetPath}.backup.${Date.now()}`;
               fs.renameSync(targetPath, backupPath);
             }
-            
+
             // プロファイルをコピー（移動ではなく）
             fs.cpSync(sourcePath, targetPath, { recursive: true });
             if (newProfileDir !== profileDir) {
@@ -1364,7 +1378,7 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
             }
           }
           const targetPath = path.join(partitionsDir, newPartitionDir);
-          
+
           if (fs.statSync(sourcePath).isDirectory()) {
             // 既存のPartitionがある場合はバックアップ
             if (fs.existsSync(targetPath)) {
@@ -1386,13 +1400,13 @@ ipcMain.handle('migration.importComplete', async (_e, { containerIdMapping }: { 
                 }
               }
             }
-            
+
             // Partitionをコピー（移動ではなく）
             fs.cpSync(sourcePath, targetPath, { recursive: true });
-            
+
             // コピー後にロックファイルを削除
             removeLockFiles(targetPath);
-            
+
             results.partitions.successCount++;
             const percent = Math.round(((i + 1) / partitionDirs.length) * 100);
             sendProgress(`Partitionsをインポートしています... (${i + 1}/${partitionDirs.length})`, { current: i + 1, total: partitionDirs.length, percent });

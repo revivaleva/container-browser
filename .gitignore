@@ -32,3 +32,7 @@ scripts/.github_token
 
 # IDE / local configs
 .cursor/
+.agent/
+
+# Test output / Debugging
+shots/
