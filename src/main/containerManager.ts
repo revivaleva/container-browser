@@ -12,7 +12,7 @@ const LOG_ONLY_PROXY = process.env.LOG_ONLY_PROXY === '1';
 // ログがプロキシ関連かどうかを判定（containerManager用）
 function isProxyRelatedLog(...args: any[]): boolean {
   if (!LOG_ONLY_PROXY) return true; // フィルタリングしない
-  
+
   const firstArg = args[0];
   if (typeof firstArg === 'string') {
     const proxyPrefixes = [
@@ -39,7 +39,7 @@ function isProxyRelatedLog(...args: any[]): boolean {
     }
     return proxyPrefixes.some(prefix => firstArg.includes(prefix));
   }
-  
+
   const allArgs = args.map(a => String(a)).join(' ');
   // [main]プレフィックスは除外（プロキシ関連でない限り）
   if (/\[main\]/i.test(allArgs) && !/proxy|Proxy|PROXY|setProxy/i.test(allArgs)) {
@@ -72,19 +72,19 @@ if (LOG_ONLY_PROXY) {
   const originalLog = console.log;
   const originalWarn = console.warn;
   const originalError = console.error;
-  
+
   console.log = (...args: any[]) => {
     if (isProxyRelatedLog(...args)) {
       originalLog(...args);
     }
   };
-  
+
   console.warn = (...args: any[]) => {
     if (isProxyRelatedLog(...args)) {
       originalWarn(...args);
     }
   };
-  
+
   console.error = (...args: any[]) => {
     if (isProxyRelatedLog(...args)) {
       originalError(...args);
@@ -116,12 +116,12 @@ function isXRelatedUrl(url: string): boolean {
     const hostname = u.hostname.toLowerCase();
     const pathname = u.pathname.toLowerCase();
     return hostname.includes('api.x.com') ||
-           hostname.includes('x.com') && (
-             pathname.includes('/i/api') ||
-             pathname.includes('/i/flow') ||
-             pathname.includes('/onboarding/task') ||
-             pathname.includes('/guest/activate')
-           );
+      hostname.includes('x.com') && (
+        pathname.includes('/i/api') ||
+        pathname.includes('/i/flow') ||
+        pathname.includes('/onboarding/task') ||
+        pathname.includes('/guest/activate')
+      );
   } catch {
     return false;
   }
@@ -134,11 +134,11 @@ function isXUrl(url: string): boolean {
     const u = new URL(url);
     const hostname = u.hostname.toLowerCase();
     return hostname.includes('x.com') ||
-           hostname.includes('api.x.com') ||
-           hostname.includes('twitter.com') ||
-           hostname.includes('t.co') ||
-           hostname.includes('twimg.com') ||
-           hostname.includes('abs.twimg.com');
+      hostname.includes('api.x.com') ||
+      hostname.includes('twitter.com') ||
+      hostname.includes('t.co') ||
+      hostname.includes('twimg.com') ||
+      hostname.includes('abs.twimg.com');
   } catch {
     return false;
   }
@@ -237,13 +237,13 @@ function waitForNavigationComplete(wc: Electron.WebContents, timeoutMs: number):
       const currentUrl = wc.getURL();
       const elapsed = Date.now() - startTime;
       console.log('[main] waitForNavigationComplete: did-navigate', { elapsedMs: elapsed, url: currentUrl });
-      
+
       // about:blankへの遷移は無視（loadURLの最初の遷移として発生する）
       if (currentUrl === 'about:blank') {
         console.log('[main] waitForNavigationComplete: ignoring about:blank, waiting for actual URL');
         return; // 次の遷移を待つ
       }
-      
+
       cleanup();
       resolve();
     };
@@ -289,7 +289,7 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
     const startTime = Date.now();
     let resolved = false;
     let lastRejectError: string | undefined; // loadURLのrejectエラーを保存
-    
+
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
@@ -301,14 +301,14 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
           ttfb,
           lastRejectError
         });
-        resolve({ 
-          ok: false, 
+        resolve({
+          ok: false,
           error: lastRejectError ? `timeout (loadURL rejected: ${lastRejectError})` : 'timeout',
-          ttfb: timeoutMs 
+          ttfb: timeoutMs
         });
       }
     }, timeoutMs);
-    
+
     const cleanup = () => {
       clearTimeout(timeout);
       win.webContents.removeAllListeners('did-finish-load');
@@ -317,7 +317,7 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
       win.webContents.removeAllListeners('certificate-error');
       win.webContents.removeAllListeners('render-process-gone');
     };
-    
+
     const onSuccess = () => {
       if (!resolved) {
         resolved = true;
@@ -331,7 +331,7 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
         resolve({ ok: true, ttfb });
       }
     };
-    
+
     const onFailure = (errorCode: number | undefined, errorDescription: string | undefined, error: string, validatedURL?: string, isMainFrame?: boolean) => {
       if (!resolved) {
         resolved = true;
@@ -351,7 +351,7 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
         resolve({ ok: false, error, errorCode, errorDescription, validatedURL, isMainFrame, ttfb });
       }
     };
-    
+
     // did-finish-load: 成功（validatedURL一致で判定）
     win.webContents.once('did-finish-load', (event, finishedUrl) => {
       // URLの一致判定を緩和（リダイレクト対応）
@@ -359,21 +359,21 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
         onSuccess();
       }
     });
-    
+
     // did-fail-provisional-load: 失敗（プロビジョナル読み込み失敗）- 最優先で捕捉
     win.webContents.once('did-fail-provisional-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (validatedURL === url || validatedURL?.startsWith(url.split('?')[0]) || url.startsWith(validatedURL?.split('?')[0] || '')) {
         onFailure(errorCode, errorDescription, `did-fail-provisional-load: ${errorDescription} (code: ${errorCode})`, validatedURL, isMainFrame);
       }
     });
-    
+
     // did-fail-load: 失敗（メインリソースの読み込み失敗）
     win.webContents.once('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
       if (validatedURL === url || validatedURL?.startsWith(url.split('?')[0]) || url.startsWith(validatedURL?.split('?')[0] || '')) {
         onFailure(errorCode, errorDescription, `did-fail-load: ${errorDescription} (code: ${errorCode})`, validatedURL, isMainFrame);
       }
     });
-    
+
     // certificate-error: 証明書エラー
     win.webContents.once('certificate-error', (event, url2, error, certificate, callback) => {
       if (url2 === url || url2?.startsWith(url.split('?')[0]) || url.startsWith(url2?.split('?')[0] || '')) {
@@ -383,12 +383,12 @@ async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): P
         onFailure(-107, `certificate-error: ${error}`, `certificate-error: ${error}`, url2);
       }
     });
-    
+
     // render-process-gone: プロセスクラッシュ
     win.webContents.once('render-process-gone', (event, details) => {
       onFailure(undefined, details.reason, `render-process-gone: ${details.reason}`);
     });
-    
+
     // URLをロード（awaitしない、イベントで判定）
     try {
       win.webContents.loadURL(url).catch((e) => {
@@ -424,7 +424,7 @@ async function runWarmupViaHiddenView(options: {
   const { ses, partition, startUrl, proxyServer, containerId } = options;
   const hostPort = extractProxyHostPort(proxyServer);
   let warmupWin: BrowserWindow | null = null;
-  
+
   try {
     // warmup用のhidden BrowserWindowを作成（show: false で表示しない）
     const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
@@ -438,27 +438,27 @@ async function runWarmupViaHiddenView(options: {
         backgroundThrottling: false
       }
     });
-    
+
     // WebRTC非プロキシUDP禁止を適用（本番と同じ設定）
     try {
       warmupWin.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     } catch (e) {
       // エラーは無視
     }
-    
+
     // Set containerId for app.on('login') handler
     try {
       (warmupWin.webContents as any)._containerId = containerId;
     } catch (e) {
       // エラーは無視
     }
-    
+
     proxyLog.log(`[proxy-warmup] Starting nonSNS warmup for container ${containerId}`, {
       containerId,
       proxy: hostPort,
       partition
     });
-    
+
     // (1) nonSNS warmup: net.requestベースで主判定（HTTP/HTTPS）
     // テスト先URLを見直し（google/favicon維持、cman.jp追加、cloudflare/msftconnecttestは任意）
     const nonSnsUrls = [
@@ -470,26 +470,26 @@ async function runWarmupViaHiddenView(options: {
     ];
     const NET_REQUEST_TIMEOUT_MS = 12000; // 12秒（回線が細い前提で少し長めに）
     const FALLBACK_LOADURL_TIMEOUT_MS = 15000; // フォールバック用: 15秒
-    
+
     proxyLog.log(`[proxy-warmup] Starting nonSNS warmup via net.request for container ${containerId}`, {
       containerId,
       proxy: hostPort,
       testUrls: nonSnsUrls.map(u => ({ url: u.url, scheme: u.scheme, required: u.required })),
       timeoutMs: NET_REQUEST_TIMEOUT_MS
     });
-    
+
     let nonSnsSuccess = false;
     let nonSnsLastError: string | undefined;
     let nonSnsLastErrorType: string | undefined;
-    
+
     // 必須URLから試す
     const requiredUrls = nonSnsUrls.filter(u => u.required);
     const optionalUrls = nonSnsUrls.filter(u => !u.required);
     const orderedUrls = [...requiredUrls, ...optionalUrls];
-    
+
     for (const testUrl of orderedUrls) {
       const startTime = Date.now();
-      
+
       // resolveProxyを実行してプロキシ設定を確認
       try {
         const resolvedProxy = await ses.resolveProxy(testUrl.url);
@@ -516,31 +516,31 @@ async function runWarmupViaHiddenView(options: {
           error: e instanceof Error ? e.message : String(e)
         });
       }
-      
+
       proxyLog.log(`[proxy-warmup] Testing ${testUrl.scheme} via net.request: ${testUrl.url}`, {
         containerId,
         proxy: hostPort,
         url: testUrl.url,
         scheme: testUrl.scheme
       });
-      
+
       try {
         const response = await new Promise<{ statusCode: number; elapsedMs: number }>((resolve, reject) => {
           const timeout = setTimeout(() => {
-            try { request.abort(); } catch {}
+            try { request.abort(); } catch { }
             reject(new Error('timeout'));
           }, NET_REQUEST_TIMEOUT_MS);
-          
+
           const request = net.request({
             method: 'GET',
             url: testUrl.url,
             session: ses
           });
-          
+
           request.on('response', (response) => {
             const elapsedMs = Date.now() - startTime;
             // レスポンスボディは読み飛ばす
-            response.on('data', () => {});
+            response.on('data', () => { });
             response.on('end', () => {
               clearTimeout(timeout);
               resolve({
@@ -553,18 +553,18 @@ async function runWarmupViaHiddenView(options: {
               reject(error);
             });
           });
-          
+
           request.on('error', (error) => {
             clearTimeout(timeout);
             reject(error);
           });
-          
+
           request.end();
         });
-        
+
         const elapsedMs = Date.now() - startTime;
         const errorType = response.statusCode >= 400 ? 'http_error' : undefined;
-        
+
         // 判定条件: statusCodeが200〜399
         if (response.statusCode >= 200 && response.statusCode < 400) {
           nonSnsSuccess = true;
@@ -595,7 +595,7 @@ async function runWarmupViaHiddenView(options: {
             logData.hasCredentials = hasCredentials;
           }
           proxyLog.warn(`[proxy-warmup] net.request result`, logData);
-          
+
           nonSnsLastError = `Unexpected status ${response.statusCode}`;
           nonSnsLastErrorType = errorType || 'http_error';
         }
@@ -603,9 +603,9 @@ async function runWarmupViaHiddenView(options: {
         const elapsedMs = Date.now() - startTime;
         const errorMsg = e instanceof Error ? e.message : String(e);
         const errorType = errorMsg.includes('ERR_TUNNEL') ? 'ERR_TUNNEL_CONNECTION_FAILED' :
-                          errorMsg.includes('timeout') ? 'timeout' :
-                          errorMsg.includes('407') ? 'proxy_authentication_required' : 'unknown';
-        
+          errorMsg.includes('timeout') ? 'timeout' :
+            errorMsg.includes('407') ? 'proxy_authentication_required' : 'unknown';
+
         const logData: any = {
           url: testUrl.url,
           statusCode: undefined,
@@ -622,10 +622,10 @@ async function runWarmupViaHiddenView(options: {
           logData.hasCredentials = hasCredentials;
         }
         proxyLog.warn(`[proxy-warmup] net.request result`, logData);
-        
+
         nonSnsLastError = errorMsg;
         nonSnsLastErrorType = errorType;
-        
+
         // ERR_TUNNEL_CONNECTION_FAILEDの場合のみフォールバック（loadURL warmup）
         if (errorType === 'ERR_TUNNEL_CONNECTION_FAILED') {
           proxyLog.log(`[proxy-warmup] ERR_TUNNEL_CONNECTION_FAILED -> trying fallback loadURL warmup for ${testUrl.url}`, {
@@ -634,7 +634,7 @@ async function runWarmupViaHiddenView(options: {
             url: testUrl.url,
             scheme: testUrl.scheme
           });
-          
+
           try {
             const fallbackWin = new BrowserWindow({
               show: false,
@@ -646,18 +646,18 @@ async function runWarmupViaHiddenView(options: {
                 backgroundThrottling: false
               }
             });
-            
+
             try {
               fallbackWin.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
               (fallbackWin.webContents as any)._containerId = containerId;
-            } catch (e) {}
-            
+            } catch (e) { }
+
             const fallbackResult = await warmupLoad(fallbackWin, testUrl.url, FALLBACK_LOADURL_TIMEOUT_MS);
-            
+
             try {
               fallbackWin.destroy();
-            } catch (e) {}
-            
+            } catch (e) { }
+
             if (fallbackResult.ok) {
               nonSnsSuccess = true;
               proxyLog.log(`[proxy-warmup] Fallback loadURL warmup SUCCESS for ${testUrl.url}`, {
@@ -690,7 +690,7 @@ async function runWarmupViaHiddenView(options: {
         }
       }
     }
-    
+
     // net.requestが成功した場合のみ、補助としてloadURL warmupを試す（DEBUG_WARMUP_AUX=1 のときだけ）
     const DEBUG_WARMUP_AUX = process.env.DEBUG_WARMUP_AUX === '1';
     if (nonSnsSuccess && DEBUG_WARMUP_AUX) {
@@ -698,7 +698,7 @@ async function runWarmupViaHiddenView(options: {
         containerId,
         proxy: hostPort
       });
-      
+
       // 補助warmup: loadURL（任意、失敗してもwarmup全体の合否には影響しない）
       try {
         const testWin = new BrowserWindow({
@@ -711,12 +711,12 @@ async function runWarmupViaHiddenView(options: {
             backgroundThrottling: false
           }
         });
-        
+
         try {
           testWin.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
           (testWin.webContents as any)._containerId = containerId;
-        } catch (e) {}
-        
+        } catch (e) { }
+
         const loadUrlResult = await warmupLoad(testWin, nonSnsUrls[0].url, 8000);
         proxyLog.log(`[proxy-warmup] loadURL warmup (auxiliary) result`, {
           containerId,
@@ -726,10 +726,10 @@ async function runWarmupViaHiddenView(options: {
           ttfb: loadUrlResult.ttfb,
           error: loadUrlResult.error
         });
-        
+
         try {
           testWin.destroy();
-        } catch (e) {}
+        } catch (e) { }
       } catch (e) {
         // 補助warmupの失敗は無視
         proxyLog.warn(`[proxy-warmup] loadURL warmup (auxiliary) failed (ignored)`, {
@@ -739,7 +739,7 @@ async function runWarmupViaHiddenView(options: {
         });
       }
     }
-    
+
     if (!nonSnsSuccess) {
       proxyLog.error(`[proxy-warmup] nonSNS warmup FAILED via net.request: All required test URLs failed`, {
         containerId,
@@ -748,8 +748,8 @@ async function runWarmupViaHiddenView(options: {
         lastErrorType: nonSnsLastErrorType,
         testedUrls: orderedUrls.map(u => ({ url: u.url, required: u.required }))
       });
-      return { 
-        ok: false, 
+      return {
+        ok: false,
         error: `nonSNS warmup failed: ${nonSnsLastError || 'All required test URLs failed'}`,
         details: {
           errorType: nonSnsLastErrorType,
@@ -757,7 +757,7 @@ async function runWarmupViaHiddenView(options: {
         }
       };
     }
-    
+
     // nonSNS warmup成功後にネットワークメタ情報を取得（ベストエフォート）
     let networkMetadata: NetworkMetadata | null = null;
     try {
@@ -770,17 +770,17 @@ async function runWarmupViaHiddenView(options: {
         error: e instanceof Error ? e.message : String(e)
       });
     }
-    
+
     // (2) SNS static warmupは削除（プロキシ確認はnonSNS warmupのみで十分）
-    
+
     proxyLog.log(`[proxy-warmup] Warmup OK via hidden view -> ready to load startUrl`, {
       containerId,
       proxy: hostPort,
       startUrl
     });
-    
+
     return { ok: true };
-    
+
   } catch (e: any) {
     const errorMsg = e instanceof Error ? e.message : String(e);
     proxyLog.error(`[proxy-warmup] runWarmupViaHiddenView ERROR`, {
@@ -813,18 +813,18 @@ async function nonSnsWarmup(ses: Electron.Session, containerId: string, proxySer
   const MAX_RETRIES = 3; // 各URLで3回リトライ
   const TIMEOUT_MS = 3000;
   const hostPort = extractProxyHostPort(proxyServer);
-  
+
   // HTTP(非TLS)とHTTPSの両方を試す
   const testUrls = [
     { url: 'http://httpbin.org/ip', scheme: 'HTTP (non-TLS)', name: 'httpbin-ip' },
     { url: 'https://ifconfig.co/ip', scheme: 'HTTPS (TLS)', name: 'ifconfig-ip' }
   ];
-  
+
   proxyLog.log(`[proxy-warmup] Starting nonSnsWarmup for container ${containerId}, proxy ${hostPort}`, {
     containerId,
     testUrls: testUrls.map(u => ({ url: u.url, scheme: u.scheme }))
   });
-  
+
   // 各URLを順番に試す（HTTP→HTTPSの順）
   for (const testUrl of testUrls) {
     proxyLog.log(`[proxy-warmup] Testing ${testUrl.scheme}: ${testUrl.url}`, {
@@ -833,28 +833,28 @@ async function nonSnsWarmup(ses: Electron.Session, containerId: string, proxySer
       url: testUrl.url,
       scheme: testUrl.scheme
     });
-    
+
     let lastError: string | undefined;
-    
+
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         const startTime = Date.now();
         const response = await new Promise<{ statusCode: number; ttfb: number }>((resolve, reject) => {
           const timeout = setTimeout(() => {
-            try { request.abort(); } catch {}
+            try { request.abort(); } catch { }
             reject(new Error('timeout'));
           }, TIMEOUT_MS);
-          
+
           const request = net.request({
             method: 'GET',
             url: testUrl.url,
             session: ses
           });
-          
+
           request.on('response', (response) => {
             const ttfb = Date.now() - startTime;
             // レスポンスボディは読み飛ばす
-            response.on('data', () => {});
+            response.on('data', () => { });
             response.on('end', () => {
               clearTimeout(timeout);
               resolve({
@@ -867,15 +867,15 @@ async function nonSnsWarmup(ses: Electron.Session, containerId: string, proxySer
               reject(error);
             });
           });
-          
+
           request.on('error', (error) => {
             clearTimeout(timeout);
             reject(error);
           });
-          
+
           request.end();
         });
-        
+
         if (response.statusCode === 200) {
           proxyLog.log(`[proxy-warmup] ${testUrl.scheme} SUCCESS (attempt ${attempt + 1}/${MAX_RETRIES}, TTFB: ${response.ttfb}ms)`, {
             proxy: hostPort,
@@ -906,7 +906,7 @@ async function nonSnsWarmup(ses: Electron.Session, containerId: string, proxySer
         const errorMsg = e instanceof Error ? e.message : String(e);
         lastError = errorMsg;
         const errorType = errorMsg.includes('ERR_TUNNEL') ? 'ERR_TUNNEL_CONNECTION_FAILED' :
-                          errorMsg.includes('timeout') ? 'timeout' : 'unknown';
+          errorMsg.includes('timeout') ? 'timeout' : 'unknown';
         proxyLog.warn(`[proxy-warmup] ${testUrl.scheme} attempt ${attempt + 1}/${MAX_RETRIES} failed: ${errorMsg}`, {
           proxy: hostPort,
           containerId,
@@ -915,14 +915,14 @@ async function nonSnsWarmup(ses: Electron.Session, containerId: string, proxySer
           errorType,
           error: errorMsg
         });
-        
+
         // 最後の試行でない場合はリトライ（少し待機）
         if (attempt < MAX_RETRIES - 1) {
           await new Promise(r => setTimeout(r, 1000));
         }
       }
     }
-    
+
     // このURLで失敗した場合は次のURLを試す（ログに記録）
     proxyLog.warn(`[proxy-warmup] ${testUrl.scheme} FAILED after ${MAX_RETRIES} attempts`, {
       proxy: hostPort,
@@ -932,7 +932,7 @@ async function nonSnsWarmup(ses: Electron.Session, containerId: string, proxySer
       lastError
     });
   }
-  
+
   // 全てのURLで失敗
   proxyLog.error(`[proxy-warmup] nonSnsWarmup FAILED: All test URLs failed (HTTP and HTTPS)`, {
     proxy: hostPort,
@@ -947,31 +947,31 @@ async function snsStaticWarmup(ses: Electron.Session, containerId: string, proxy
   const MAX_RETRIES = 2;
   const TIMEOUT_MS = 5000;
   const hostPort = extractProxyHostPort(proxyServer);
-  
+
   proxyLog.log(`[proxy-warmup] Starting snsStaticWarmup for container ${containerId}, proxy ${hostPort}`, {
     url: staticUrl,
     containerId
   });
-  
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const startTime = Date.now();
       const response = await new Promise<{ statusCode: number; ttfb: number }>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          try { request.abort(); } catch {}
+          try { request.abort(); } catch { }
           reject(new Error('timeout'));
         }, TIMEOUT_MS);
-        
+
         const request = net.request({
           method: 'GET',
           url: staticUrl,
           session: ses
         });
-        
+
         request.on('response', (response) => {
           const ttfb = Date.now() - startTime;
           // レスポンスボディは読み飛ばす
-          response.on('data', () => {});
+          response.on('data', () => { });
           response.on('end', () => {
             clearTimeout(timeout);
             resolve({
@@ -984,15 +984,15 @@ async function snsStaticWarmup(ses: Electron.Session, containerId: string, proxy
             reject(error);
           });
         });
-        
+
         request.on('error', (error) => {
           clearTimeout(timeout);
           reject(error);
         });
-        
+
         request.end();
       });
-      
+
       if (response.statusCode === 200) {
         proxyLog.log(`[proxy-warmup] snsStaticWarmup SUCCESS (attempt ${attempt + 1}/${MAX_RETRIES}, TTFB: ${response.ttfb}ms)`, {
           proxy: hostPort,
@@ -1018,14 +1018,14 @@ async function snsStaticWarmup(ses: Electron.Session, containerId: string, proxy
     } catch (e: any) {
       const errorMsg = e instanceof Error ? e.message : String(e);
       const errorType = errorMsg.includes('ERR_TUNNEL') ? 'ERR_TUNNEL_CONNECTION_FAILED' :
-                        errorMsg.includes('timeout') ? 'timeout' : 'unknown';
+        errorMsg.includes('timeout') ? 'timeout' : 'unknown';
       proxyLog.warn(`[proxy-warmup] snsStaticWarmup attempt ${attempt + 1}/${MAX_RETRIES} failed: ${errorMsg}`, {
         proxy: hostPort,
         containerId,
         url: staticUrl,
         errorType
       });
-      
+
       // 最後の試行でない場合はリトライ（少し待機）
       if (attempt < MAX_RETRIES - 1) {
         await new Promise(r => setTimeout(r, 1000));
@@ -1034,7 +1034,7 @@ async function snsStaticWarmup(ses: Electron.Session, containerId: string, proxy
       }
     }
   }
-  
+
   proxyLog.error(`[proxy-warmup] snsStaticWarmup FAILED after ${MAX_RETRIES} attempts`, {
     proxy: hostPort,
     containerId,
@@ -1052,7 +1052,7 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
 
   const issues: string[] = [];
   const hostPort = extractProxyHostPort(proxyServer);
-  
+
   proxyLog.log(`[proxy-check] Starting healthcheck for container ${containerId}, proxy ${hostPort}`);
 
   try {
@@ -1062,16 +1062,16 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
       const startTime = Date.now();
       const headersResponse = await new Promise<{ headers: Record<string, string>; statusCode: number; ttfb: number }>((resolve, reject) => {
         const timeout = setTimeout(() => {
-          try { request.abort(); } catch {}
+          try { request.abort(); } catch { }
           reject(new Error('headers check timeout'));
         }, 10000);
-        
+
         const request = net.request({
           method: 'GET',
           url: headersUrl,
           session: ses
         });
-        
+
         request.on('response', (response) => {
           const ttfb = Date.now() - startTime;
           let body = '';
@@ -1096,12 +1096,12 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
             reject(error);
           });
         });
-        
+
         request.on('error', (error) => {
           clearTimeout(timeout);
           reject(error);
         });
-        
+
         request.end();
       });
 
@@ -1109,8 +1109,8 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
       const leakedHeaders: string[] = [];
       const checkHeaders = ['x-forwarded-for', 'forwarded', 'x-real-ip', 'true-client-ip', 'via', 'x-forwarded-proto', 'x-forwarded-host'];
       for (const h of checkHeaders) {
-        if (headersResponse.headers[h] || headersResponse.headers[h.toLowerCase()] || 
-            headersResponse.headers[h.toUpperCase()]) {
+        if (headersResponse.headers[h] || headersResponse.headers[h.toLowerCase()] ||
+          headersResponse.headers[h.toUpperCase()]) {
           leakedHeaders.push(h);
         }
       }
@@ -1144,21 +1144,21 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
     try {
       const ipinfoUrl = 'https://ipinfo.io/json';
       const ips: string[] = [];
-      
+
       for (let i = 0; i < 3; i++) {
         try {
           const ipResponse = await new Promise<{ ip?: string }>((resolve, reject) => {
             const timeout = setTimeout(() => {
-              try { request.abort(); } catch {}
+              try { request.abort(); } catch { }
               reject(new Error('ipinfo check timeout'));
             }, 8000);
-            
+
             const request = net.request({
               method: 'GET',
               url: ipinfoUrl,
               session: ses
             });
-            
+
             request.on('response', (response) => {
               let body = '';
               response.on('data', (chunk) => {
@@ -1178,19 +1178,19 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
                 reject(error);
               });
             });
-            
+
             request.on('error', (error) => {
               clearTimeout(timeout);
               reject(error);
             });
-            
+
             request.end();
           });
-          
+
           if (ipResponse.ip) {
             ips.push(ipResponse.ip);
           }
-          
+
           // 2回目以降は少し待機
           if (i < 2) {
             await new Promise(r => setTimeout(r, 1000));
@@ -1229,20 +1229,20 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
         const startTime = Date.now();
         const xResponse = await new Promise<{ statusCode: number; ttfb: number }>((resolve, reject) => {
           const timeout = setTimeout(() => {
-            try { request.abort(); } catch {}
+            try { request.abort(); } catch { }
             reject(new Error(`${name} timeout`));
           }, 15000);
-          
+
           const request = net.request({
             method: 'GET',
             url: url,
             session: ses
           });
-          
+
           request.on('response', (response) => {
             const ttfb = Date.now() - startTime;
             // レスポンスボディは読み飛ばす
-            response.on('data', () => {});
+            response.on('data', () => { });
             response.on('end', () => {
               clearTimeout(timeout);
               resolve({
@@ -1255,12 +1255,12 @@ async function checkProxyHealth(ses: Electron.Session, containerId: string, prox
               reject(error);
             });
           });
-          
+
           request.on('error', (error) => {
             clearTimeout(timeout);
             reject(error);
           });
-          
+
           request.end();
         });
 
@@ -1306,13 +1306,13 @@ async function getNetworkMetadata(ses: Electron.Session, containerId: string, pr
     const timeoutMs = 5000;
     // ipwho.is を優先使用（タイムアウトしにくい）
     const ipwhoisUrl = 'https://ipwho.is/';
-    
+
     const request = net.request({
       method: 'GET',
       url: ipwhoisUrl,
       session: ses
     });
-    
+
     const responsePromise = new Promise<{
       ip?: string;
       connection?: {
@@ -1323,10 +1323,10 @@ async function getNetworkMetadata(ses: Electron.Session, containerId: string, pr
       };
     }>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        try { request.abort(); } catch {}
+        try { request.abort(); } catch { }
         reject(new Error('getNetworkMetadata timeout'));
       }, timeoutMs);
-      
+
       request.on('response', (response) => {
         let body = '';
         response.on('data', (chunk) => {
@@ -1349,21 +1349,21 @@ async function getNetworkMetadata(ses: Electron.Session, containerId: string, pr
           reject(error);
         });
       });
-      
+
       request.on('error', (error) => {
         clearTimeout(timeout);
         reject(error);
       });
     });
-    
+
     request.end();
     const ipwhoisData = await responsePromise;
-    
+
     if (!ipwhoisData.ip) {
       proxyLog.warn(`[proxy-net] ipwho.is returned no IP`, { containerId });
       return null;
     }
-    
+
     const metadata = {
       ip: ipwhoisData.ip,
       asn: ipwhoisData.connection?.asn,
@@ -1371,7 +1371,7 @@ async function getNetworkMetadata(ses: Electron.Session, containerId: string, pr
       isp: ipwhoisData.connection?.isp,
       domain: ipwhoisData.connection?.domain
     };
-    
+
     proxyLog.log(`[proxy-net] egress (ipwhois)`, {
       containerId,
       ip: metadata.ip,
@@ -1380,7 +1380,7 @@ async function getNetworkMetadata(ses: Electron.Session, containerId: string, pr
       isp: metadata.isp,
       domain: metadata.domain
     });
-    
+
     return metadata;
   } catch (e) {
     // エラーを再スローせず、静かに失敗（warmup判定には影響しない）
@@ -1422,15 +1422,15 @@ function evaluateXNetworkPolicy(netMeta: NetworkMetadata | null): NetworkPolicyD
       org: netMeta?.org
     };
   }
-  
+
   const BLOCK_X_ON_DATACENTER = process.env.BLOCK_X_ON_DATACENTER === '1'; // default: 0 (OFF)
   const WARN_X_ON_TRANSIT_ORG = process.env.WARN_X_ON_TRANSIT_ORG !== '0'; // default: 1 (ON)
-  
+
   const asn = netMeta.asn;
   const org = (netMeta.org || '').toLowerCase();
   const domain = (netMeta.domain || '').toLowerCase();
   const isp = (netMeta.isp || '').toLowerCase();
-  
+
   // block: 主要クラウド/データセンター系（BLOCK_X_ON_DATACENTER=1 のときだけ）
   if (BLOCK_X_ON_DATACENTER) {
     // AWS ASN 16509
@@ -1493,11 +1493,11 @@ function evaluateXNetworkPolicy(netMeta: NetworkMetadata | null): NetworkPolicyD
   } else {
     // BLOCK_X_ON_DATACENTER=0 の場合、DC検出時はwarnログを出す（blockしない）
     const isDatacenter = (asn === 16509) ||
-                         (org.includes('amazon data services') || org.includes('amazon.com') || domain.includes('amazon.com')) ||
-                         (org.includes('microsoft') || domain.includes('microsoft.com') || domain.includes('azure.com')) ||
-                         (org.includes('google') || domain.includes('google.com') || domain.includes('gcp.com')) ||
-                         (org.includes('digitalocean') || domain.includes('digitalocean.com')) ||
-                         (org.includes('ovh') || domain.includes('ovh.com'));
+      (org.includes('amazon data services') || org.includes('amazon.com') || domain.includes('amazon.com')) ||
+      (org.includes('microsoft') || domain.includes('microsoft.com') || domain.includes('azure.com')) ||
+      (org.includes('google') || domain.includes('google.com') || domain.includes('gcp.com')) ||
+      (org.includes('digitalocean') || domain.includes('digitalocean.com')) ||
+      (org.includes('ovh') || domain.includes('ovh.com'));
     if (isDatacenter) {
       proxyLog.warn(`[net-policy] WARN Datacenter detected (BLOCK_X_ON_DATACENTER=0, allowing)`, {
         asn,
@@ -1507,7 +1507,7 @@ function evaluateXNetworkPolicy(netMeta: NetworkMetadata | null): NetworkPolicyD
       // blockしない（warn ログのみ）
     }
   }
-  
+
   // warn: 不安定になりがちなトランジット系（同じASNでもorgで判定）
   if (WARN_X_ON_TRANSIT_ORG) {
     if (org.includes('pacnet')) {
@@ -1520,7 +1520,7 @@ function evaluateXNetworkPolicy(netMeta: NetworkMetadata | null): NetworkPolicyD
       };
     }
   }
-  
+
   // allow: その他（Ping Broadband Japan等はここ）
   return {
     ok: true,
@@ -1534,17 +1534,17 @@ function evaluateXNetworkPolicy(netMeta: NetworkMetadata | null): NetworkPolicyD
 // SNSネットワークポリシー評価（拡張可能な構造）
 function evaluateNetworkPolicy(startUrl: string, netMeta: NetworkMetadata | null): NetworkPolicyDecision | null {
   if (!startUrl) return null;
-  
+
   // X向けポリシー
   if (isXUrl(startUrl)) {
     return evaluateXNetworkPolicy(netMeta);
   }
-  
+
   // 将来的に他SNSを追加する場合はここに追加
   // if (isInstagramUrl(startUrl)) {
   //   return evaluateInstagramNetworkPolicy(netMeta);
   // }
-  
+
   return null;
 }
 
@@ -1554,21 +1554,21 @@ async function probeEgressNetwork(ses: Electron.Session, containerId: string, pr
   try {
     const timeoutMs = 5000;
     const ipinfoUrl = 'https://ipinfo.io/json';
-    
+
     const request = net.request({
       method: 'GET',
       url: ipinfoUrl,
       session: ses
     });
-    
+
     const responsePromise = new Promise<{ ip?: string; country?: string; org?: string }>((resolve, reject) => {
       const timeout = setTimeout(() => {
         try {
           request.abort();
-        } catch {}
+        } catch { }
         reject(new Error('probeEgressNetwork timeout'));
       }, timeoutMs);
-      
+
       request.on('response', (response) => {
         let body = '';
         response.on('data', (chunk) => {
@@ -1592,20 +1592,20 @@ async function probeEgressNetwork(ses: Electron.Session, containerId: string, pr
           reject(error);
         });
       });
-      
+
       request.on('error', (error) => {
         clearTimeout(timeout);
         reject(error);
       });
     });
-    
+
     request.end();
     const ipinfo = await responsePromise;
-    
+
     if (!ipinfo.ip) {
       return;
     }
-    
+
     // ipinfo.io の org フィールドからASNを抽出（例: "AS4637 Telstra Global" -> ASN: "4637", orgName: "Telstra Global"）
     let asnInfo: { asn?: string; prefix?: string; name?: string } = {};
     if (ipinfo.org) {
@@ -1620,10 +1620,10 @@ async function probeEgressNetwork(ses: Electron.Session, containerId: string, pr
         };
       }
     }
-    
+
     // TODO: DBに保存する場合はここで実装
     // DB.updateContainerEgressInfo(containerId, { ip: ipinfo.ip, country: ipinfo.country, org: ipinfo.org, asn: asnInfo.asn, prefix: asnInfo.prefix });
-    
+
   } catch (e) {
     // エラーを再スローせず、静かに失敗（エラーダイアログを表示しない）
     // この関数は診断機能であり、失敗してもコンテナの動作に影響しない
@@ -1639,7 +1639,7 @@ export function setMainWindow(win: BrowserWindow) {
     win.on('closed', () => {
       if (mainWindowRef === win) mainWindowRef = null;
     });
-  } catch {}
+  } catch { }
 }
 
 // --- helpers for external control (export API) ---
@@ -1684,20 +1684,20 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   try {
     const existing = openedById.get(container.id);
     if (existing) {
-      try { existing.win.focus(); } catch {}
+      try { existing.win.focus(); } catch { }
       if (startUrl) {
         // if existing window has no visible webContents URL (just created), load into existing view instead of creating duplicate window
         const activeView = existing.views[existing.activeIndex] || existing.views[0];
         const currentUrl = activeView ? (activeView.webContents.getURL?.() || '') : '';
         if (!currentUrl || currentUrl === 'about:blank') {
-          try { activeView.webContents.loadURL(startUrl); } catch { try { createTab(container.id, startUrl); } catch {} }
+          try { activeView.webContents.loadURL(startUrl); } catch { try { createTab(container.id, startUrl); } catch { } }
         } else {
-          try { createTab(container.id, startUrl); } catch {}
+          try { createTab(container.id, startUrl); } catch { }
         }
       }
       return existing.win;
     }
-  } catch {}
+  } catch { }
   const part = container.partition;
   const ses = session.fromPartition(part, { cache: true });
   // プロファイルは 'persist:<name>' の partition により分離される。
@@ -1715,17 +1715,17 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     // Store credentials for use in onBeforeSendHeaders (案B)
     const proxyUsername = container.proxy.username;
     const proxyPassword = container.proxy.password;
-    
+
     // Normalize proxy server format for Electron
     // Electron expects format like "http=host:port;https=host:port" or "socks5=host:port" or just "host:port"
     // NOTE: Electron's setProxy does NOT support embedded credentials in URL format
     // We must use plain host:port and rely on the login event for authentication
     let proxyRules = container.proxy.server;
     const originalProxyServer = proxyRules;
-    
+
     // Check if proxy is SOCKS5
     const isSocks5 = /socks5/i.test(proxyRules);
-    
+
     // Extract host:port from proxyRules if it contains = or ://
     let hostPort = proxyRules;
     if (proxyRules.includes('=')) {
@@ -1745,7 +1745,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       // Already in host:port format, but may contain embedded credentials
       hostPort = proxyRules.replace(/^[^@]+@/, '');
     }
-    
+
     // Build proxy rules: preserve SOCKS5, otherwise use http/https
     if (isSocks5) {
       proxyRules = `socks5=${hostPort}`;
@@ -1755,8 +1755,8 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       // Rebuild proxy rules with clean host:port
       proxyRules = `http=${hostPort};https=${hostPort}`;
     }
-    
-    
+
+
     try {
       // 既存のプロキシ接続をクリア（接続プール対策）
       try {
@@ -1765,7 +1765,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       } catch (e) {
         // closeAllConnectionsのエラーは無視
       }
-      
+
       // Proxy認証情報をpartition -> credentials Mapに登録（app.on('login')で使用）
       // また、host:portキーでも登録（warmup前に確実に登録して、warmup中にloginイベントが発火した際に引けるようにする）
       if (container.proxy?.username && container.proxy?.password) {
@@ -1773,7 +1773,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           username: container.proxy.username,
           password: container.proxy.password
         });
-        
+
         // host:portキーでも登録（warmup中にloginイベントが発火した際に確実に引けるように最優先で登録）
         if (container.proxy.server) {
           const hostPort = extractProxyHostPort(container.proxy.server);
@@ -1790,13 +1790,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           }
         }
       }
-      
+
       // proxyBypassRulesを設定してローカル通信をバイパス
-      await ses.setProxy({ 
+      await ses.setProxy({
         proxyRules,
         proxyBypassRules: 'localhost,127.0.0.1,<local>'
       });
-      
+
       // forceReloadProxyConfig() を呼び出してプロキシ設定を強制リロード
       try {
         await ses.forceReloadProxyConfig();
@@ -1812,7 +1812,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
         (ses as any).__proxyHealthcheckContainerId = container.id;
         (ses as any).__proxyHealthcheckProxyServer = container.proxy.server;
       }
-      
+
       // 出口IP情報を取得（1回だけ、プロキシ認証完了後に実行）
       // webRequest.onCompleted で最初の成功したリクエストを検知してから実行
     } catch (e) {
@@ -1829,12 +1829,12 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   // webRequest ハンドラの多重登録を防ぐ
   if (!(ses as any).__hooksInstalled) {
     (ses as any).__hooksInstalled = true;
-    
+
     try {
       const acceptLang = container.fingerprint?.acceptLanguage || 'ja,en-US;q=0.8,en;q=0.7';
       // Proxy-Authorization ヘッダー注入はデフォルトOFF（フラグで切替可能）
       const ENABLE_PROXY_AUTH_HEADER_INJECTION = false;
-      
+
       ses.webRequest.onBeforeSendHeaders((details, cb) => {
         const headers = { ...details.requestHeaders, 'Accept-Language': acceptLang } as any;
 
@@ -1854,11 +1854,11 @@ export async function openContainerWindow(container: Container, startUrl?: strin
 
         // Proxy-Authorization ヘッダー注入（デフォルトOFF、段階的に撤去予定）
         if (ENABLE_PROXY_AUTH_HEADER_INJECTION
-            && (details.url.startsWith('http://') || details.url.startsWith('https://')) 
-            && !details.url.startsWith('http://localhost') 
-            && !details.url.startsWith('https://localhost')
-            && container.proxy?.username 
-            && container.proxy?.password) {
+          && (details.url.startsWith('http://') || details.url.startsWith('https://'))
+          && !details.url.startsWith('http://localhost')
+          && !details.url.startsWith('https://localhost')
+          && container.proxy?.username
+          && container.proxy?.password) {
           const token = Buffer.from(`${container.proxy.username}:${container.proxy.password}`).toString('base64');
           headers['Proxy-Authorization'] = `Basic ${token}`;
           console.log('[main] added Proxy-Authorization header (injection mode)', {
@@ -1867,7 +1867,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             hasToken: !!token
           });
         }
-      
+
         // X関連URLの診断ログ: 400エラーが発生する可能性のあるリクエストの詳細ログ
         if (isXRelatedUrl(details.url)) {
           const requestHeaders = details.requestHeaders || {};
@@ -1890,7 +1890,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             });
           }
         }
-      
+
         cb({ requestHeaders: headers });
       });
       ses.webRequest.onHeadersReceived((details, cb) => {
@@ -1910,7 +1910,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           cb({ cancel: true });
           return;
         }
-        
+
         if (isXRelatedUrl(details.url)) {
           // onboarding/task.json のPOSTリクエストのみ詳細ログ（OPTIONSやその他のリクエストは除外）
           if (details.url.includes('onboarding/task.json') && details.method === 'POST') {
@@ -1928,27 +1928,27 @@ export async function openContainerWindow(container: Container, startUrl?: strin
         }
         cb({});
       });
-      
+
       // X関連URLの診断ログ: onCompleted
       // 出口IP情報取得: プロキシ認証完了後の最初の成功したリクエストを検知
       ses.webRequest.onCompleted((details) => {
         // 最初の成功したリクエスト（statusCode 200）を検知してから出口IP情報を取得
-        if (container.proxy?.server && !(ses as any).__egressProbed && 
-            details.statusCode === 200 && 
-            !details.url.startsWith('chrome-extension://') && 
-            !details.url.startsWith('devtools://') && 
-            !details.url.startsWith('http://localhost') &&
-            !details.url.startsWith('ws://localhost')) {
+        if (container.proxy?.server && !(ses as any).__egressProbed &&
+          details.statusCode === 200 &&
+          !details.url.startsWith('chrome-extension://') &&
+          !details.url.startsWith('devtools://') &&
+          !details.url.startsWith('http://localhost') &&
+          !details.url.startsWith('ws://localhost')) {
           (ses as any).__egressProbed = true;
-          
+
           // Proxy Healthcheck（DEBUG_PROXY_CHECK=1 の時だけ実行）
           // warmup成功時のみ実行（warmup失敗時は実行しない）
-          if ((ses as any).__proxyHealthcheckPending && 
-              (ses as any).__proxyHealthcheckContainerId && 
-              (ses as any).__proxyHealthcheckProxyServer) {
+          if ((ses as any).__proxyHealthcheckPending &&
+            (ses as any).__proxyHealthcheckContainerId &&
+            (ses as any).__proxyHealthcheckProxyServer) {
             const healthCheckContainerId = (ses as any).__proxyHealthcheckContainerId;
             const healthCheckProxyServer = (ses as any).__proxyHealthcheckProxyServer;
-            
+
             // warmupStateをチェック（warmup失敗時は実行しない）
             const state = warmupState.get(healthCheckContainerId);
             if (state && !state.ok) {
@@ -1956,13 +1956,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
               (ses as any).__proxyHealthcheckPending = false;
             } else {
               (ses as any).__proxyHealthcheckPending = false;
-              
+
               setTimeout(async () => {
                 try {
                   const healthCheck = await checkProxyHealth(ses, healthCheckContainerId, healthCheckProxyServer);
                   // 重大な問題がある場合はプロキシをBAN
                   if (!healthCheck.ok && healthCheck.issues.length > 0) {
-                    const criticalIssues = healthCheck.issues.filter((i: string) => 
+                    const criticalIssues = healthCheck.issues.filter((i: string) =>
                       i.includes('ヘッダー漏れ') || i.includes('出口IPが不安定')
                     );
                     if (criticalIssues.length > 0) {
@@ -1975,7 +1975,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
               }, 1000);
             }
           }
-          
+
           // プロキシ認証が完了したことを確認できたので、出口IP情報を取得
           // エラーが発生しても静かに失敗（エラーダイアログを表示しない）
           const attemptProbe = async (retryCount = 0): Promise<void> => {
@@ -2001,7 +2001,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             });
           }, 1000);
         }
-        
+
         // X関連URLの診断ログ処理
         if (isXRelatedUrl(details.url)) {
           const webContentsId = details.webContentsId ?? null;
@@ -2011,102 +2011,102 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             'x-rate-limit': details.responseHeaders['x-rate-limit'] || details.responseHeaders['X-Rate-Limit'],
             'x-rate-limit-remaining': details.responseHeaders['x-rate-limit-remaining'] || details.responseHeaders['X-Rate-Limit-Remaining']
           } : null;
-          
-            // エラーの場合は警告ログ + レスポンスボディからエラー情報を抽出 + 回復策を提案
-            // 400エラーのみ詳細ログ、それ以外のエラーは簡易ログ
-            if (details.statusCode >= 400) {
-              if (details.statusCode === 400 && details.url.includes('onboarding/task.json')) {
-            let errorInfo: any = null;
-            try {
-              // filterResponseData が有効な場合、responseBody が details に含まれる
-              const responseBody = (details as any).responseBody;
-              if (responseBody) {
-                let bodyText = '';
-                if (Array.isArray(responseBody.data)) {
-                  // responseBody.data は Buffer の配列
-                  const buffers = responseBody.data.map((b: any) => Buffer.isBuffer(b) ? b : Buffer.from(b));
-                  bodyText = Buffer.concat(buffers).toString('utf8');
-                } else if (typeof responseBody === 'string') {
-                  bodyText = responseBody;
-                } else if (Buffer.isBuffer(responseBody)) {
-                  bodyText = responseBody.toString('utf8');
-                }
-                
-                if (bodyText) {
-                  const bodyJson = JSON.parse(bodyText);
-                  // errors/message/code のみ抽出（PIIを避ける）
-                  if (bodyJson.errors && Array.isArray(bodyJson.errors)) {
-                    errorInfo = {
-                      errors: bodyJson.errors.map((err: any) => ({
-                        message: err.message,
-                        code: err.code
-                      }))
-                    };
-                  } else if (bodyJson.message) {
-                    errorInfo = {
-                      message: bodyJson.message,
-                      code: bodyJson.code
-                    };
+
+          // エラーの場合は警告ログ + レスポンスボディからエラー情報を抽出 + 回復策を提案
+          // 400エラーのみ詳細ログ、それ以外のエラーは簡易ログ
+          if (details.statusCode >= 400) {
+            if (details.statusCode === 400 && details.url.includes('onboarding/task.json')) {
+              let errorInfo: any = null;
+              try {
+                // filterResponseData が有効な場合、responseBody が details に含まれる
+                const responseBody = (details as any).responseBody;
+                if (responseBody) {
+                  let bodyText = '';
+                  if (Array.isArray(responseBody.data)) {
+                    // responseBody.data は Buffer の配列
+                    const buffers = responseBody.data.map((b: any) => Buffer.isBuffer(b) ? b : Buffer.from(b));
+                    bodyText = Buffer.concat(buffers).toString('utf8');
+                  } else if (typeof responseBody === 'string') {
+                    bodyText = responseBody;
+                  } else if (Buffer.isBuffer(responseBody)) {
+                    bodyText = responseBody.toString('utf8');
+                  }
+
+                  if (bodyText) {
+                    const bodyJson = JSON.parse(bodyText);
+                    // errors/message/code のみ抽出（PIIを避ける）
+                    if (bodyJson.errors && Array.isArray(bodyJson.errors)) {
+                      errorInfo = {
+                        errors: bodyJson.errors.map((err: any) => ({
+                          message: err.message,
+                          code: err.code
+                        }))
+                      };
+                    } else if (bodyJson.message) {
+                      errorInfo = {
+                        message: bodyJson.message,
+                        code: bodyJson.code
+                      };
+                    }
                   }
                 }
+              } catch (e) {
+                // パースエラーは無視（ログには出さない）
               }
-            } catch (e) {
-              // パースエラーは無視（ログには出さない）
-            }
-            
-                proxyLog.error('[x-net] completed (400 ERROR)', {
-                  url: details.url,
-                  method: details.method,
-                  statusCode: details.statusCode,
-                  fromCache: details.fromCache,
-                  responseHeaders: details.responseHeaders ? {
-                    'content-type': responseHeaders?.['content-type'],
-                    'x-response-time': responseHeaders?.['x-response-time'],
-                    'x-rate-limit-remaining': responseHeaders?.['x-rate-limit-remaining'],
-                    'all-keys': Object.keys(details.responseHeaders)
-                  } : null,
-                  errorInfo,
-                  webContentsId,
-                  containerId: container.id
-                });
 
-                // プロキシをBANして回復策を提案
-                if (container.proxy?.server) {
-                  const proxyHostPort = extractProxyHostPort(container.proxy.server);
-                  banProxy(container.proxy.server, `Xログイン失敗 (onboarding/task.json 400)`);
-                  proxyLog.error(`[x-net] Proxy ${proxyHostPort} has been BANNED due to X login failure. Consider:`, {
-                    suggestion1: 'Clear storage for x.com domain and retry',
-                    suggestion2: 'Switch to a different proxy',
-                    suggestion3: 'Check proxy healthcheck logs (DEBUG_PROXY_CHECK=1)',
-                    containerId: container.id
-                  });
-                }
-              } else {
-                // 400以外のエラーは簡易ログ
-                proxyLog.error('[x-net] completed (ERROR)', {
-                  url: details.url,
-                  method: details.method,
-                  statusCode: details.statusCode,
+              proxyLog.error('[x-net] completed (400 ERROR)', {
+                url: details.url,
+                method: details.method,
+                statusCode: details.statusCode,
+                fromCache: details.fromCache,
+                responseHeaders: details.responseHeaders ? {
+                  'content-type': responseHeaders?.['content-type'],
+                  'x-response-time': responseHeaders?.['x-response-time'],
+                  'x-rate-limit-remaining': responseHeaders?.['x-rate-limit-remaining'],
+                  'all-keys': Object.keys(details.responseHeaders)
+                } : null,
+                errorInfo,
+                webContentsId,
+                containerId: container.id
+              });
+
+              // プロキシをBANして回復策を提案
+              if (container.proxy?.server) {
+                const proxyHostPort = extractProxyHostPort(container.proxy.server);
+                banProxy(container.proxy.server, `Xログイン失敗 (onboarding/task.json 400)`);
+                proxyLog.error(`[x-net] Proxy ${proxyHostPort} has been BANNED due to X login failure. Consider:`, {
+                  suggestion1: 'Clear storage for x.com domain and retry',
+                  suggestion2: 'Switch to a different proxy',
+                  suggestion3: 'Check proxy healthcheck logs (DEBUG_PROXY_CHECK=1)',
                   containerId: container.id
                 });
               }
             } else {
-              // 200成功はログ出力しない（エラーのみ表示）
-              // onboarding/task.jsonのPOSTリクエストの200成功のみ簡易ログ（OPTIONSは除外）
-              if (details.url.includes('onboarding/task.json') && 
-                  details.statusCode === 200 && 
-                  details.method === 'POST') {
-                proxyLog.log('[x-net] completed (SUCCESS)', {
-                  url: details.url,
-                  method: details.method,
-                  statusCode: details.statusCode,
-                  containerId: container.id
-                });
-              }
+              // 400以外のエラーは簡易ログ
+              proxyLog.error('[x-net] completed (ERROR)', {
+                url: details.url,
+                method: details.method,
+                statusCode: details.statusCode,
+                containerId: container.id
+              });
             }
+          } else {
+            // 200成功はログ出力しない（エラーのみ表示）
+            // onboarding/task.jsonのPOSTリクエストの200成功のみ簡易ログ（OPTIONSは除外）
+            if (details.url.includes('onboarding/task.json') &&
+              details.statusCode === 200 &&
+              details.method === 'POST') {
+              proxyLog.log('[x-net] completed (SUCCESS)', {
+                url: details.url,
+                method: details.method,
+                statusCode: details.statusCode,
+                containerId: container.id
+              });
+            }
+          }
         }
       });
-      
+
       // X関連URLの診断ログ: onErrorOccurred
       ses.webRequest.onErrorOccurred((details) => {
         if (isXRelatedUrl(details.url)) {
@@ -2148,7 +2148,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       backgroundThrottling: false // バックグラウンドでも読み込みを継続
     }
   });
-  
+
   // WebRTC非プロキシUDP禁止を確実に適用（BrowserWindow生成直後、loadURLより前）
   try {
     win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
@@ -2156,14 +2156,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   } catch (e) {
     console.error('[main] failed to setWebRTCIPHandlingPolicy', e);
   }
-  
+
   // Set containerId on shell window's webContents for app.on('login') handler
   try {
     (win.webContents as any)._containerId = container.id;
   } catch (e) {
     console.error('[main] failed to set containerId on shell webContents', e);
   }
-  
+
   // GPU診断ログ（DEBUG_GPU=1 の時のみ）
   if (process.env.DEBUG_GPU === '1') {
     try {
@@ -2176,14 +2176,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       // ログ取得エラーは無視
     }
   }
-  
+
   // set window icon if available
   try {
     const ico = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
     if (existsSync(ico)) win.setIcon(ico as any);
   } catch (e) { console.error('[main] set container window icon error', e); }
   // mark this window as a container shell so main can detect and close it reliably
-  try { (win as any).__isContainerShell = true; (win as any).__containerId = container.id; } catch {}
+  try { (win as any).__isContainerShell = true; (win as any).__containerId = container.id; } catch { }
   // Set containerId on shell window's webContents for app.on('login') handler
   try {
     (win.webContents as any)._containerId = container.id;
@@ -2191,7 +2191,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     console.error('[main] failed to set containerId on shell webContents', e);
   }
   // hide menu bar for the container shell window (remove File/Edit menus)
-  try { win.removeMenu(); win.setAutoHideMenuBar(true); } catch {}
+  try { win.removeMenu(); win.setAutoHideMenuBar(true); } catch { }
 
   // 開発時デバッグ: DevTools の自動オープンを無効化。
   // 開発中は F12 押下で開くように renderer -> preload -> main で toggle を提供する。
@@ -2210,13 +2210,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   // (e.g. containerShell.html or dev server). Record tabs only from BrowserView
   // navigations below. Still keep light logging for debugging.
   win.webContents.on('did-navigate', (_e, url) => {
-    try { console.log('[main] shell did-navigate (ignored for tabs) url=', url); } catch {}
+    try { console.log('[main] shell did-navigate (ignored for tabs) url=', url); } catch { }
   });
   win.webContents.on('page-title-updated', (_e, title) => {
-    try { console.log('[main] shell title-updated (ignored for tabs) title=', title); } catch {}
+    try { console.log('[main] shell title-updated (ignored for tabs) title=', title); } catch { }
   });
   win.webContents.on('page-favicon-updated', (_e, favs) => {
-    try { console.log('[main] shell favicon-updated (ignored for tabs) favs=', favs); } catch {}
+    try { console.log('[main] shell favicon-updated (ignored for tabs) favs=', favs); } catch { }
   });
 
   win.on('closed', () => DB.closeSession(sessionId, Date.now()));
@@ -2232,9 +2232,9 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       const activeView = entry ? (entry.views[activeIndex] || entry.views[0]) : null;
       const currentUrl = activeView ? activeView.webContents.getURL() : undefined;
       console.log('[main] sendCtx', { containerId: container.id, sessionId, currentUrl, tabsLength: tabs.length, activeIndex, containerName });
-      try { win.setTitle(containerName || 'コンテナシェル'); } catch {}
+      try { win.setTitle(containerName || 'コンテナシェル'); } catch { }
       win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl, tabs, activeIndex, containerName });
-    } catch {}
+    } catch { }
   };
   win.webContents.on('did-finish-load', sendCtx);
 
@@ -2242,21 +2242,21 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
   const createView = (u: string) => {
     const v = new BrowserView({ webPreferences: { partition: part, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
-    
+
     // WebRTC非プロキシUDP禁止を確実に適用
     try {
       v.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     } catch (e) {
       console.error('[main] failed to setWebRTCIPHandlingPolicy on view', e);
     }
-    
+
     // Set containerId on view's webContents for app.on('login') handler
     try {
       (v.webContents as any)._containerId = container.id;
     } catch (e) {
       console.error('[main] failed to set containerId on view webContents', e);
     }
-    
+
     // GPU診断ログ（DEBUG_GPU=1 の時のみ、BrowserView作成時）
     if (process.env.DEBUG_GPU === '1') {
       try {
@@ -2269,7 +2269,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
         // ログ取得エラーは無視
       }
     }
-    
+
     const layoutView = () => {
       const [w, h] = win.getContentSize();
       const bar = BAR_HEIGHT;
@@ -2278,7 +2278,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     win.on('resize', layoutView);
     layoutView();
     const scale = container.fingerprint?.deviceScaleFactor || 1.0;
-    try { v.webContents.setZoomFactor(scale); } catch {}
+    try { v.webContents.setZoomFactor(scale); } catch { }
 
     // Forward navigation/title/favicon events from the BrowserView to the shell window
     try {
@@ -2409,9 +2409,9 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       } catch (e) { /* ignore if devtools events unsupported */ }
     } catch (e) { console.error('[main] createView attach handlers error', e); }
 
-    if (u) v.webContents.loadURL(u).catch(()=>{});
+    if (u) v.webContents.loadURL(u).catch(() => { });
     // initialize tabIndex placeholder - will be assigned when view is added to entry.views
-    try { (v as any).__tabIndex = null; } catch {}
+    try { (v as any).__tabIndex = null; } catch { }
     return v;
   };
 
@@ -2421,7 +2421,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   const entry: OpenedContainer = { win, views: [firstView], activeIndex: 0, sessionId };
   openedById.set(container.id, entry);
   // 初期タブ情報をシェルに送る
-  try { console.log('[main] initial sendCtx for', container.id); sendCtx(); } catch {}
+  try { console.log('[main] initial sendCtx for', container.id); sendCtx(); } catch { }
   // Ensure there are at least three BrowserViews so renderer tab indices match,
   // unless singleTab option requested.
   try {
@@ -2432,16 +2432,22 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       }
     }
     // assign tabIndex values according to array index
-    entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch {} });
+    entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch { } });
     // do not set additional views as visible; keep firstView shown
     // send updated context so renderer sees at least three tabs
     try {
       const ctx = getContextForWindow(win);
       if (ctx) win.webContents.send('container.context', ctx);
-    } catch {}
+    } catch { }
   } catch (e) { console.error('[main] ensure three views error', e); }
-  win.on('closed', () => { 
-    openedById.delete(container.id); 
+  win.on('closed', () => {
+    // メモリ拡張を防ぐため、閉じる際にすべてのBrowserViewプロセスを明示的に破壊する
+    if (entry && entry.views) {
+      entry.views.forEach(v => {
+        try { (v.webContents as any).destroy(); } catch (e) { }
+      });
+    }
+    openedById.delete(container.id);
     DB.closeSession(sessionId, Date.now());
     // Clear cache on close (preserves cookies and session data)
     clearContainerCacheOnClose(container.id).catch((e) => {
@@ -2451,14 +2457,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
 
   // startUrlをロード
   if (startUrl) {
-    try { 
+    try {
       // ナビゲーション完了を待機する（API呼び出し時にURLが正しく返るようにするため）
       const navPromise = waitForNavigationComplete(firstView.webContents, 30000); // 30秒タイムアウト
       await firstView.webContents.loadURL(startUrl);
       await navPromise;
       console.log('[main] startUrl navigation completed', { containerId: container.id, startUrl, finalUrl: firstView.webContents.getURL() });
-    } catch (e) { 
-      console.error('[main] load startUrl error', e, { containerId: container.id, startUrl, currentUrl: firstView.webContents.getURL() }); 
+    } catch (e) {
+      console.error('[main] load startUrl error', e, { containerId: container.id, startUrl, currentUrl: firstView.webContents.getURL() });
     }
   }
 
@@ -2471,14 +2477,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       const prevTabs = DB.tabsOfSession(prevLastSessionId) || [];
       // Filter out shell/renderer URLs (containerShell.html, file://, dev server) and keep only http(s) URLs
       const candidates = (prevTabs || [])
-        .map((t:any) => (t && t.url) ? String(t.url) : '')
-        .filter((u:string) => !!u && /^https?:\/\//i.test(u));
+        .map((t: any) => (t && t.url) ? String(t.url) : '')
+        .filter((u: string) => !!u && /^https?:\/\//i.test(u));
       if (candidates.length > 0) {
         restoreUrls = candidates.slice(0, 3);
         // attempt to ensure at least the first two are different when possible
         if (restoreUrls.length >= 2 && restoreUrls[0] === restoreUrls[1]) {
-          const altCandidates = (prevTabs || []).map((t:any)=> (t && t.url) ? String(t.url) : '').filter((u:string)=> !!u && /^https?:\/\//i.test(u));
-          const alt = altCandidates.find((u:string) => u !== restoreUrls[0]);
+          const altCandidates = (prevTabs || []).map((t: any) => (t && t.url) ? String(t.url) : '').filter((u: string) => !!u && /^https?:\/\//i.test(u));
+          const alt = altCandidates.find((u: string) => u !== restoreUrls[0]);
           if (alt) restoreUrls[1] = alt;
         }
       }
@@ -2501,7 +2507,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       isRestoringGlobal = true;
       console.log('[main] starting restore load: firstTarget=', firstTarget, 'secondTarget=', secondTarget);
       // ensure tabIndex assignment
-      entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch {} });
+      entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch { } });
       // load sequentially and wait finish
       try { await firstView.webContents.loadURL(firstTarget); } catch (e) { console.error('[main] load firstTarget error', e); }
       if (!opts.singleTab) {
@@ -2514,7 +2520,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       }
       // after loads, write canonical entries into DB with tabIndex
       try {
-        const ctxTabs = entry.views.map((vv:any, i:number) => ({ url: vv.webContents.getURL(), tabIndex: i, title: vv.webContents.getTitle?.(), favicon: vv.webContents.getURL && undefined }));
+        const ctxTabs = entry.views.map((vv: any, i: number) => ({ url: vv.webContents.getURL(), tabIndex: i, title: vv.webContents.getTitle?.(), favicon: vv.webContents.getURL && undefined }));
         console.log('[main] restore finished, writing canonical tabs to DB:', ctxTabs);
         for (const t of ctxTabs) {
           try { DB.addOrUpdateTab({ containerId: container.id, sessionId, url: t.url, tabIndex: t.tabIndex, title: t.title ?? null, favicon: null, scrollY: 0, updatedAt: Date.now() }); } catch (e) { console.error('[main] addOrUpdateTab restore write error', e); }
@@ -2531,10 +2537,10 @@ export function closeAllContainers() {
   try {
     console.log('[main] closeAllContainers: closing', openedById.size, 'containers');
     for (const entry of openedById.values()) {
-      try { entry.win.close(); } catch {}
+      try { entry.win.close(); } catch { }
     }
     openedById.clear();
-  } catch {}
+  } catch { }
 }
 
 export function closeAllNonMainWindows() {
@@ -2549,11 +2555,11 @@ export function closeAllNonMainWindows() {
         const looksLikeShell = url.includes('containerShell.html') || url.includes('/containerShell.html');
         if (isShell || looksLikeShell) {
           console.log('[main] closeAllNonMainWindows: closing window url=', url, 'isShellFlag=', isShell);
-          try { w.close(); } catch {}
+          try { w.close(); } catch { }
         }
       } catch (e) { console.error('[main] closeAllNonMainWindows error', e); }
     }
-  } catch {}
+  } catch { }
 }
 
 export function forceCloseAllNonMainWindows() {
@@ -2565,11 +2571,11 @@ export function forceCloseAllNonMainWindows() {
         const url = (w.webContents && typeof w.webContents.getURL === 'function') ? (w.webContents.getURL() || '') : '';
         const looksLikeShell = url.includes('containerShell.html') || url.includes('/containerShell.html');
         if (isShell || looksLikeShell) {
-          try { w.destroy(); } catch {}
+          try { w.destroy(); } catch { }
         }
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
 }
 
 export function getContextForWindow(win: BrowserWindow) {
@@ -2596,7 +2602,7 @@ export function getContextForWindow(win: BrowserWindow) {
             favicon = '/favicon.ico';
             return { url, title, favicon };
           }
-        } catch {}
+        } catch { }
         if (isDevtoolsUrl(String(url))) {
           title = `Dev-${containerName}`;
           // use common favicon served by renderer (dev server provides /favicon.ico)
@@ -2606,7 +2612,7 @@ export function getContextForWindow(win: BrowserWindow) {
       });
       const activeView = entry.views[entry.activeIndex] || entry.views[0];
       const currentUrl = activeView ? activeView.webContents.getURL() : undefined;
-      try { entry.win.setTitle(containerName || 'コンテナシェル'); } catch {}
+      try { entry.win.setTitle(containerName || 'コンテナシェル'); } catch { }
       return { containerId, sessionId: entry.sessionId, fingerprint: containerRecord.fingerprint, currentUrl, tabs, containerName };
     }
   }
@@ -2624,21 +2630,21 @@ export function createTab(containerId: string, url: string) {
   const { win } = entry;
   const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
   const v = new BrowserView({ webPreferences: { partition: entry.win.webContents.getWebPreferences().partition as any, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
-  
+
   // WebRTC非プロキシUDP禁止を確実に適用
   try {
     v.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
   } catch (e) {
     console.error('[main] failed to setWebRTCIPHandlingPolicy on createTab view', e);
   }
-  
+
   // Set containerId on view's webContents for app.on('login') handler
   try {
     (v.webContents as any)._containerId = containerId;
   } catch (e) {
     console.error('[main] failed to set containerId on createTab view webContents', e);
   }
-  
+
   const layoutView = () => {
     const [w, h] = win.getContentSize();
     const bar = BAR_HEIGHT; // use global BAR_HEIGHT so views align with shell UI
@@ -2646,19 +2652,19 @@ export function createTab(containerId: string, url: string) {
   };
   win.on('resize', layoutView);
   layoutView();
-  v.webContents.loadURL(url || 'about:blank').catch(()=>{});
+  v.webContents.loadURL(url || 'about:blank').catch(() => { });
   // record tab in DB under current session
-  try { DB.addOrUpdateTab({ containerId, sessionId: entry.sessionId, url: url || 'about:blank', title: null, favicon: null, scrollY: 0, updatedAt: Date.now() }); } catch {}
+  try { DB.addOrUpdateTab({ containerId, sessionId: entry.sessionId, url: url || 'about:blank', title: null, favicon: null, scrollY: 0, updatedAt: Date.now() }); } catch { }
   entry.views.push(v);
   entry.activeIndex = entry.views.length - 1;
   win.setBrowserView(v);
-  try { entry.win.focus(); try { v.webContents.focus(); } catch {} } catch {}
+  try { entry.win.focus(); try { v.webContents.focus(); } catch { } } catch { }
   // タブ変更をシェルへ通知
   try {
     const tabs = entry.views.map(v => ({ url: v.webContents.getURL(), title: v.webContents.getTitle?.() }));
     console.log('[main] createTab sendCtx', { containerId, sessionId: entry.sessionId, url: v.webContents.getURL(), tabsLength: tabs.length });
     win.webContents.send('container.context', { containerId, sessionId: entry.sessionId, fingerprint: container.fingerprint, currentUrl: v.webContents.getURL(), tabs });
-  } catch {}
+  } catch { }
   return true;
 }
 
@@ -2668,12 +2674,12 @@ export function switchTab(containerId: string, index: number) {
   if (index < 0 || index >= entry.views.length) return false;
   const v = entry.views[index];
   entry.activeIndex = index;
-  try { entry.win.setBrowserView(v); try { entry.win.focus(); v.webContents.focus(); } catch {} } catch {}
+  try { entry.win.setBrowserView(v); try { entry.win.focus(); v.webContents.focus(); } catch { } } catch { }
   try {
     // send updated context to shell
     const ctx = getContextForWindow(entry.win);
     if (ctx) entry.win.webContents.send('container.context', ctx);
-  } catch {}
+  } catch { }
   return true;
 }
 
@@ -2686,7 +2692,7 @@ export function closeTab(containerId: string, index: number) {
   try {
     const urlsBefore = entry.views.map(vv => { try { return vv.webContents.getURL(); } catch { return '<err>'; } });
     console.log('[main] views before close', urlsBefore);
-  } catch {}
+  } catch { }
   // If this is the only view, create a new blank view first so renderer always has a view
   if (entry.views.length === 1) {
     try {
@@ -2704,15 +2710,15 @@ export function closeTab(containerId: string, index: number) {
           const [w, h] = entry.win.getContentSize();
           const bar = BAR_HEIGHT;
           vNew.setBounds({ x: 0, y: bar, width: w, height: Math.max(0, h - bar) });
-        } catch {}
+        } catch { }
       };
       entry.win.on('resize', layoutViewNew);
       layoutViewNew();
-      try { vNew.webContents.setZoomFactor(container?.fingerprint?.deviceScaleFactor || 1.0); } catch {}
-      vNew.webContents.loadURL('about:blank').catch(()=>{});
+      try { vNew.webContents.setZoomFactor(container?.fingerprint?.deviceScaleFactor || 1.0); } catch { }
+      vNew.webContents.loadURL('about:blank').catch(() => { });
       entry.views.push(vNew);
       // set the new view visible before removing the old one
-      try { entry.win.setBrowserView(vNew); } catch {}
+      try { entry.win.setBrowserView(vNew); } catch { }
     } catch (e) { console.error('[main] error creating blank view before close', e); }
   }
 
@@ -2721,7 +2727,7 @@ export function closeTab(containerId: string, index: number) {
     // switch to another view if possible
     const otherIndex = (index === 0) ? 1 : 0;
     if (entry.views.length > 1 && entry.views[otherIndex]) {
-      try { entry.win.setBrowserView(entry.views[otherIndex]); } catch {}
+      try { entry.win.setBrowserView(entry.views[otherIndex]); } catch { }
     }
     console.log('[main] removing view at index', index);
     try { entry.win.removeBrowserView(v); } catch (e) { console.error('[main] removeBrowserView error', e); }
@@ -2731,14 +2737,14 @@ export function closeTab(containerId: string, index: number) {
   if (entry.activeIndex >= entry.views.length) entry.activeIndex = Math.max(0, entry.views.length - 1);
   // prefer to set a valid view if available
   if (entry.views.length > 0) {
-    try { entry.win.setBrowserView(entry.views[entry.activeIndex]); } catch {}
+    try { entry.win.setBrowserView(entry.views[entry.activeIndex]); } catch { }
   } else {
-    try { entry.win.setBrowserView(null as any); } catch {}
+    try { entry.win.setBrowserView(null as any); } catch { }
   }
   try {
     const urlsAfter = entry.views.map(vv => { try { return vv.webContents.getURL(); } catch { return '<err>'; } });
     console.log('[main] views after close', urlsAfter);
-  } catch {}
+  } catch { }
   // If all tabs closed, create a new blank tab to avoid empty view
   if (entry.views.length === 0) {
     try {
@@ -2757,12 +2763,12 @@ export function closeTab(containerId: string, index: number) {
           const [w, h] = entry.win.getContentSize();
           const bar = BAR_HEIGHT;
           v2.setBounds({ x: 0, y: bar, width: w, height: Math.max(0, h - bar) });
-        } catch {}
+        } catch { }
       };
       entry.win.on('resize', layoutView2);
       layoutView2();
-      try { v2.webContents.setZoomFactor(container?.fingerprint?.deviceScaleFactor || 1.0); } catch {}
-      v2.webContents.loadURL('about:blank').catch(()=>{});
+      try { v2.webContents.setZoomFactor(container?.fingerprint?.deviceScaleFactor || 1.0); } catch { }
+      v2.webContents.loadURL('about:blank').catch(() => { });
       entry.views.push(v2);
       entry.activeIndex = 0;
       entry.win.setBrowserView(v2);
@@ -2775,7 +2781,7 @@ export function closeTab(containerId: string, index: number) {
     try {
       const ctx = getContextForWindow(entry.win);
       if (ctx) entry.win.webContents.send('container.context', ctx);
-    } catch {}
+    } catch { }
   }
   return true;
 }
@@ -2800,7 +2806,7 @@ export function goBack(containerId: string) {
   try {
     const view = it.views[it.activeIndex] || it.views[0];
     if (view.webContents.canGoBack()) { view.webContents.goBack(); return true; }
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -2810,7 +2816,7 @@ export function goForward(containerId: string) {
   try {
     const view = it.views[it.activeIndex] || it.views[0];
     if (view.webContents.canGoForward()) { view.webContents.goForward(); return true; }
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -2831,19 +2837,19 @@ export function clearContainerCache(containerId: string) {
       console.error('[main] clearContainerCache: containerId is missing');
       return false;
     }
-    
+
     const container = DB.getContainer(containerId);
     if (!container) {
       console.error('[main] clearContainerCache: container not found', containerId);
       return false;
     }
-    
+
     const part = container.partition;
     if (!part) {
       console.error('[main] clearContainerCache: container has no partition', containerId);
       return false;
     }
-    
+
     const ses = session.fromPartition(part, { cache: true });
     ses.clearCache((error) => {
       if (error) {
@@ -2852,7 +2858,7 @@ export function clearContainerCache(containerId: string) {
         console.log('[main] clearContainerCache: cache cleared for container', containerId);
       }
     });
-    
+
     return true;
   } catch (e) {
     console.error('[main] clearContainerCache error', e);
@@ -2869,21 +2875,21 @@ export async function clearContainerCacheOnClose(containerId: string): Promise<v
       console.warn('[main] clearContainerCacheOnClose: containerId is missing');
       return;
     }
-    
+
     const container = DB.getContainer(containerId);
     if (!container) {
       console.warn('[main] clearContainerCacheOnClose: container not found', containerId);
       return;
     }
-    
+
     const part = container.partition;
     if (!part) {
       console.warn('[main] clearContainerCacheOnClose: container has no partition', containerId);
       return;
     }
-    
+
     const ses = session.fromPartition(part, { cache: true });
-    
+
     // Clear HTTP cache
     await new Promise<void>((resolve) => {
       ses.clearCache((error) => {
@@ -2895,7 +2901,7 @@ export async function clearContainerCacheOnClose(containerId: string): Promise<v
         resolve();
       });
     });
-    
+
     // Clear ServiceWorker cache and CacheStorage (preserving cookies)
     try {
       await ses.clearStorageData({
@@ -2905,7 +2911,7 @@ export async function clearContainerCacheOnClose(containerId: string): Promise<v
     } catch (e) {
       console.warn('[main] clearContainerCacheOnClose: failed to clear ServiceWorker/CacheStorage', e);
     }
-    
+
   } catch (e) {
     // エラーはログのみ（コンテナの閉じる処理をブロックしない）
     console.warn('[main] clearContainerCacheOnClose error', e);
@@ -2919,21 +2925,21 @@ export async function clearContainerStorageForX(containerId: string): Promise<bo
       console.error('[main] clearContainerStorageForX: containerId is missing');
       return false;
     }
-    
+
     const container = DB.getContainer(containerId);
     if (!container) {
       console.error('[main] clearContainerStorageForX: container not found', containerId);
       return false;
     }
-    
+
     const part = container.partition;
     if (!part) {
       console.error('[main] clearContainerStorageForX: container has no partition', containerId);
       return false;
     }
-    
+
     const ses = session.fromPartition(part, { cache: true });
-    
+
     // X関連ドメインのリスト
     const xDomains = [
       'x.com',
@@ -2942,7 +2948,7 @@ export async function clearContainerStorageForX(containerId: string): Promise<bo
       'abs.twimg.com',
       'twimg.com'
     ];
-    
+
     // 各ドメインのstorageをクリア
     for (const domain of xDomains) {
       try {
@@ -2955,7 +2961,7 @@ export async function clearContainerStorageForX(containerId: string): Promise<bo
         console.warn(`[main] clearContainerStorageForX: failed to clear storage for ${domain}:`, e);
       }
     }
-    
+
     console.log('[main] clearContainerStorageForX: storage cleared for X domains', containerId);
     return true;
   } catch (e) {
@@ -2971,26 +2977,26 @@ export async function clearContainerAllData(containerId: string): Promise<boolea
       console.error('[main] clearContainerAllData: containerId is missing');
       return false;
     }
-    
+
     const container = DB.getContainer(containerId);
     if (!container) {
       console.error('[main] clearContainerAllData: container not found', containerId);
       return false;
     }
-    
+
     const part = container.partition;
     if (!part) {
       console.error('[main] clearContainerAllData: container has no partition', containerId);
       return false;
     }
-    
+
     const ses = session.fromPartition(part, { cache: true });
-    
+
     // Clear all storage data (cookies, localStorage, IndexedDB, etc.) from all origins
     await ses.clearStorageData({
       storages: ['cookies', 'localstorage', 'indexdb', 'websql', 'serviceworkers', 'cachestorage', 'filesystem']
     });
-    
+
     // Also clear HTTP cache
     await new Promise<void>((resolve, reject) => {
       ses.clearCache((error) => {
@@ -3002,7 +3008,7 @@ export async function clearContainerAllData(containerId: string): Promise<boolea
         resolve();
       });
     });
-    
+
     console.log('[main] clearContainerAllData: all data cleared for container', containerId);
     return true;
   } catch (e) {

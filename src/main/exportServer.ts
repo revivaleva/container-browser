@@ -1182,8 +1182,8 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           if (isContainerOpen(id)) {
             try {
               // Try to gently close it first
-              const { closeContainerTabRestored } = await import('./containerManager');
-              await closeContainerTabRestored(id);
+              const { closeContainer } = await import('./containerManager');
+              closeContainer(id);
             } catch (e: any) {
               console.error('[exportServer] close error during delete', e);
             }
