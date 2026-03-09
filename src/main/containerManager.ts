@@ -1,4 +1,12 @@
-import { app, BrowserWindow, BrowserView, ipcMain, session, net } from 'electron';
+import electron from 'electron';
+const app = (electron as any).app;
+const BrowserWindow = (electron as any).BrowserWindow;
+const BrowserView = (electron as any).BrowserView;
+const ipcMain_ = (electron as any).ipcMain;
+const session = (electron as any).session;
+const net = (electron as any).net;
+import type { BrowserWindow as BrowserWindowType, BrowserView as BrowserViewType, Session as SessionType, WebContents as WebContentsType } from 'electron';
+
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Container } from '../shared/types';
@@ -94,10 +102,10 @@ if (LOG_ONLY_PROXY) {
 
 type OpenOpts = { restore?: boolean; singleTab?: boolean };
 
-type OpenedContainer = { win: BrowserWindow; views: BrowserView[]; activeIndex: number; sessionId: string };
+type OpenedContainer = { win: BrowserWindowType; views: BrowserViewType[]; activeIndex: number; sessionId: string };
 const openedById = new Map<string, OpenedContainer>();
 let isRestoringGlobal = false;
-let mainWindowRef: BrowserWindow | null = null;
+let mainWindowRef: BrowserWindowType | null = null;
 
 // warmup状態管理（containerId -> {ok: boolean}）
 // warmup失敗時はX系URLへの自動アクセスを完全ブロックするために使用
@@ -284,7 +292,7 @@ function waitForNavigationComplete(wc: Electron.WebContents, timeoutMs: number):
 // Hidden BrowserWindowを使ってwarmupする（webContents経路でloginイベントが確実に発火する）
 // BrowserViewではなくBrowserWindow(show:false)を使用することで、より安定したwarmupを実現
 // warmup用のhidden BrowserWindowでURLをロードし、イベント駆動で成功/失敗を判定する
-async function warmupLoad(win: BrowserWindow, url: string, timeoutMs: number): Promise<{ ok: boolean; ttfb?: number; error?: string; errorCode?: number; errorDescription?: string; validatedURL?: string; isMainFrame?: boolean }> {
+async function warmupLoad(win: BrowserWindowType, url: string, timeoutMs: number): Promise<{ ok: boolean; ttfb?: number; error?: string; errorCode?: number; errorDescription?: string; validatedURL?: string; isMainFrame?: boolean }> {
   return new Promise((resolve) => {
     const startTime = Date.now();
     let resolved = false;
@@ -423,7 +431,7 @@ async function runWarmupViaHiddenView(options: {
 }): Promise<{ ok: boolean; error?: string; details?: any }> {
   const { ses, partition, startUrl, proxyServer, containerId } = options;
   const hostPort = extractProxyHostPort(proxyServer);
-  let warmupWin: BrowserWindow | null = null;
+  let warmupWin: BrowserWindowType | null = null;
 
   try {
     // warmup用のhidden BrowserWindowを作成（show: false で表示しない）
@@ -1899,6 +1907,12 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       // X関連URLの診断ログ: onBeforeRequest
       // onboarding/task.json の400エラー時にレスポンスボディを取得するため filterResponseData を有効化
       ses.webRequest.onBeforeRequest((details, cb) => {
+        // 画像ブロック機能
+        if (container.blockImages && (details.resourceType === 'image' || details.resourceType === 'media' || details.resourceType === 'font')) {
+          cb({ cancel: true });
+          return;
+        }
+
         // warmup失敗時はX系URLへのアクセスを完全ブロック
         const state = warmupState.get(container.id);
         if (state && !state.ok && isXUrl(details.url)) {
@@ -2798,7 +2812,7 @@ export function navigateContainer(containerId: string, url: string) {
   return true;
 }
 
-ipcMain.handle('container.navigate', (_e, { containerId, url }) => navigateContainer(containerId, url));
+ipcMain_.handle('container.navigate', (_e, { containerId, url }) => navigateContainer(containerId, url));
 
 export function goBack(containerId: string) {
   const it = openedById.get(containerId);
@@ -3017,5 +3031,5 @@ export async function clearContainerAllData(containerId: string): Promise<boolea
   }
 }
 
-ipcMain.handle('tabs.goBack', (_e, { containerId }) => goBack(containerId));
-ipcMain.handle('tabs.goForward', (_e, { containerId }) => goForward(containerId));
+ipcMain_.handle('tabs.goBack', (_e, { containerId }) => goBack(containerId));
+ipcMain_.handle('tabs.goForward', (_e, { containerId }) => goForward(containerId));

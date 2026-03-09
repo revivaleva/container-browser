@@ -1,5 +1,14 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session } from 'electron';
-import { dialog } from 'electron';
+import electron from 'electron';
+const app = (electron as any).app;
+const BrowserWindow = (electron as any).BrowserWindow;
+const ipcMain = (electron as any).ipcMain;
+const Tray = (electron as any).Tray;
+const Menu = (electron as any).Menu;
+const nativeImage = (electron as any).nativeImage;
+const globalShortcut = (electron as any).globalShortcut;
+const session = (electron as any).session;
+const dialog = (electron as any).dialog;
+import type { BrowserWindow as BrowserWindowType, Tray as TrayType } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -110,8 +119,8 @@ function adjustDevtoolsWindowForWebContents(targetWC: Electron.WebContents) {
   } catch { }
 }
 
-let mainWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
+let mainWindow: BrowserWindowType | null = null;
+let tray: TrayType | null = null;
 let isQuitting = false;
 // prevent duplicate container opens from rapid repeated handleArgv calls
 const _pendingOpenNames = new Set<string>();
@@ -309,166 +318,157 @@ async function createMainWindow() {
     logger.error('[FATAL] createMainWindow() failed:', error);
     throw error;
   }
+}
 
-  // Create a separate Settings window that loads the renderer with ?settings=1
-  function createSettingsWindow() {
-    try {
-      const devUrl = process.env['ELECTRON_RENDERER_URL'];
-      // In dev mode the renderer dev server root is provided in devUrl.
-      // Use the root (or index) and append ?settings=1 so the renderer shows the Settings-only UI.
-      let url: string;
-      if (devUrl) {
-        url = `${devUrl.replace(/\/$/, '')}/?settings=1`;
-      } else {
-        url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html')).toString() + '?settings=1';
+// --- Module-scope Helpers & Settings ---
+
+// Create a separate Settings window that loads the renderer with ?settings=1
+function createSettingsWindow() {
+  try {
+    const devUrl = process.env['ELECTRON_RENDERER_URL'];
+    // In dev mode the renderer dev server root is provided in devUrl.
+    // Use the root (or index) and append ?settings=1 so the renderer shows the Settings-only UI.
+    let url: string;
+    if (devUrl) {
+      url = `${devUrl.slice(-1) === '/' ? devUrl : devUrl + '/'}/?settings=1`;
+    } else {
+      url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html')).toString() + '?settings=1';
+    }
+    const win = new BrowserWindow({
+      width: 600,
+      height: 420,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs')
       }
-      const win = new BrowserWindow({
-        width: 600,
-        height: 420,
-        webPreferences: {
-          contextIsolation: true,
-          nodeIntegration: false,
-          preload: path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs')
+    });
+    win.loadURL(url).catch(() => { });
+    // Notify renderer instance that it should show Settings-only view after load
+    win.webContents.once('did-finish-load', () => {
+      try { win.webContents.send('open-settings'); } catch (e) { /* ignore */ }
+    });
+    return win;
+  } catch (e) {
+    logger.error('[main] createSettingsWindow error', e);
+    return null;
+  }
+}
+
+// Consume quota from token via auth API
+async function callAuthUse(token: string, deviceId: string, count: number = 1): Promise<{ ok: boolean; data?: any; status?: number; body?: any; error?: string }> {
+  const MAX_RETRIES = 3;
+  const BASE_URL = getAuthApiBase();
+  const timeoutMs = getAuthTimeoutMs();
+
+  const doFetch = async () => {
+    const ac = new AbortController();
+    const id = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const res = await (global as any).fetch(
+        (BASE_URL.replace(/\/$/, '')) + '/auth/use',
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: deviceId, count }),
+          signal: ac.signal
         }
-      });
-      win.loadURL(url).catch(() => { });
-      // Notify renderer instance that it should show Settings-only view after load
-      win.webContents.once('did-finish-load', () => {
-        try { win.webContents.send('open-settings'); } catch (e) { /* ignore */ }
-      });
-      return win;
-    } catch (e) {
-      logger.error('[main] createSettingsWindow error', e);
-      return null;
+      );
+      clearTimeout(id);
+      const j = await res.json().catch(() => null);
+      return { res, j };
+    } catch (err: any) {
+      clearTimeout(id);
+      throw err;
+    }
+  };
+
+  let attempt = 0;
+  while (true) {
+    try {
+      attempt++;
+      const { res, j } = await doFetch();
+      if (!res.ok) {
+        if (res.status >= 400 && res.status < 500) {
+          return { ok: false, status: res.status, body: j };
+        }
+        if (res.status >= 500) throw new Error(`server ${res.status}`);
+      }
+      const data = j && j.data ? j.data : j;
+      return { ok: true, data };
+    } catch (err: any) {
+      logger.warn('[auth] use attempt failed', attempt, err?.message || String(err));
+      if (attempt >= MAX_RETRIES) {
+        logger.error('[auth] use: exhausted retries', err);
+        return { ok: false, error: err?.message || String(err) };
+      }
+      const backoff = 200 * Math.pow(2, attempt - 1);
+      await new Promise(r => setTimeout(r, backoff));
     }
   }
+}
 
-  // IPC handlers for app actions exposed to renderer via preload
-  ipcMain.handle('app.getVersion', () => {
-    try { return app.getVersion(); } catch { return 'unknown'; }
-  });
-  ipcMain.handle('app.openSettings', () => {
-    try { createSettingsWindow(); return { ok: true }; } catch (e: any) { logger.error('[ipc] app.openSettings error', e); return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('app.checkForUpdates', async () => {
-    return { ok: false, error: 'Auto-update disabled in this version' };
-  });
-  // Token storage IPC
-  ipcMain.handle('auth.saveToken', async (_e, { token }) => {
-    try { const ok = await saveToken(token); return { ok }; } catch (e: any) { logger.error('[auth] saveToken error', e); return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('auth.getToken', async () => {
-    try { const t = await getToken(); return { ok: true, token: t }; } catch (e: any) { logger.error('[auth] getToken error', e); return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('auth.clearToken', async () => {
-    try { await clearToken(); return { ok: true }; } catch (e: any) { logger.error('[auth] clearToken error', e); return { ok: false, error: e?.message || String(e) }; }
-  });
+// IPC handlers for app actions exposed to renderer via preload
+ipcMain.handle('app.getVersion', () => {
+  try { return app.getVersion(); } catch { return 'unknown'; }
+});
+ipcMain.handle('app.openSettings', () => {
+  try { createSettingsWindow(); return { ok: true }; } catch (e: any) { logger.error('[ipc] app.openSettings error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+ipcMain.handle('app.checkForUpdates', async () => {
+  return { ok: false, error: 'Auto-update disabled in this version' };
+});
+// Token storage IPC
+ipcMain.handle('auth.saveToken', async (_e, { token }) => {
+  try { const ok = await saveToken(token); return { ok }; } catch (e: any) { logger.error('[auth] saveToken error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+ipcMain.handle('auth.getToken', async () => {
+  try { const t = await getToken(); return { ok: true, token: t }; } catch (e: any) { logger.error('[auth] getToken error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+ipcMain.handle('auth.clearToken', async () => {
+  try { await clearToken(); return { ok: true }; } catch (e: any) { logger.error('[auth] clearToken error', e); return { ok: false, error: e?.message || String(e) }; }
+});
 
-  ipcMain.handle('auth.getDeviceId', async () => {
-    try {
-      const id = getOrCreateDeviceId();
-      logger.debug('[auth] getDeviceId', id);
-      return { ok: true, deviceId: id };
-    } catch (e: any) {
-      logger.error('[auth] getDeviceId error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
+ipcMain.handle('auth.getDeviceId', async () => {
+  try {
+    const id = getOrCreateDeviceId();
+    logger.debug('[auth] getDeviceId', id);
+    return { ok: true, deviceId: id };
+  } catch (e: any) {
+    logger.error('[auth] getDeviceId error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
 
-  // Validate token against auth API (uses AUTH_API_BASE env var or config)
-  ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
-    const MAX_RETRIES = 3;
-    const BASE_URL = getAuthApiBase();
-    const timeoutMs = getAuthTimeoutMs();
-    try {
-      const t = token || await getToken();
-      if (!t) return { ok: false, code: 'NO_TOKEN' };
-      const deviceId = getOrCreateDeviceId();
-      const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
+// Validate token against auth API (uses AUTH_API_BASE env var or config)
+ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
+  const MAX_RETRIES = 3;
+  const BASE_URL = getAuthApiBase();
+  const timeoutMs = getAuthTimeoutMs();
+  try {
+    const t = token || await getToken();
+    if (!t) return { ok: false, code: 'NO_TOKEN' };
+    const deviceId = getOrCreateDeviceId();
+    const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
 
-      // Get current container count
-      const containerCount = DB.listContainers().length;
+    // Get current container count
+    const containerCount = DB.listContainers().length;
 
-      // helper to perform fetch with timeout
-      const doFetch = async () => {
-        const ac = new AbortController();
-        const id = setTimeout(() => ac.abort(), timeoutMs);
-        try {
-          const res = await (global as any).fetch(url, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              device_id: deviceId,
-              device_info: { name: app.getName(), hostname: app.getName() },
-              current_container_count: containerCount
-            }),
-            signal: ac.signal
-          });
-          clearTimeout(id);
-          const j = await res.json().catch(() => null);
-          return { res, j };
-        } catch (err: any) {
-          clearTimeout(id);
-          throw err;
-        }
-      };
-
-      let attempt = 0;
-      while (true) {
-        try {
-          attempt++;
-          logger.debug('[auth] validateToken attempt', attempt, 'to', url);
-          const { res, j } = await doFetch();
-          if (!res.ok) {
-            // 4xx -> do not retry
-            if (res.status >= 400 && res.status < 500) {
-              logger.warn('[auth] validateToken 4xx error', res.status, j?.code || j?.error || 'unknown');
-              return { ok: false, status: res.status, body: j };
-            }
-            // 5xx -> may retry
-            if (res.status >= 500) throw new Error(`server ${res.status}`);
-          }
-          // success
-          const data = j && j.data ? j.data : j;
-          logger.info('[auth] validateToken success');
-          return { ok: true, data };
-        } catch (err: any) {
-          logger.warn('[auth] validateToken attempt failed', attempt, { message: err?.message, code: err?.code, errno: err?.errno });
-          if (attempt >= MAX_RETRIES) {
-            logger.error('[auth] validateToken: exhausted retries after', MAX_RETRIES, 'attempts. URL:', url, 'Error:', err?.message);
-            return { ok: false, error: err?.message || String(err), details: { url, timeout: timeoutMs, attempts: MAX_RETRIES } };
-          }
-          // exponential backoff
-          const backoff = 200 * Math.pow(2, attempt - 1);
-          logger.debug('[auth] validateToken retrying in', backoff, 'ms');
-          await new Promise(r => setTimeout(r, backoff));
-        }
-      }
-    } catch (err: any) {
-      logger.error('[auth] validateToken error', { message: err?.message, stack: err?.stack, url: getAuthApiBase() });
-      return { ok: false, error: err?.message || String(err) };
-    }
-  });
-
-  // Consume quota from token via auth API
-  async function callAuthUse(token: string, deviceId: string, count: number = 1) {
-    const MAX_RETRIES = 3;
-    const BASE_URL = getAuthApiBase();
-    const timeoutMs = getAuthTimeoutMs();
-
+    // helper to perform fetch with timeout
     const doFetch = async () => {
       const ac = new AbortController();
       const id = setTimeout(() => ac.abort(), timeoutMs);
       try {
-        const res = await (global as any).fetch(
-          (BASE_URL.replace(/\/$/, '')) + '/auth/use',
-          {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ device_id: deviceId, count }),
-            signal: ac.signal
-          }
-        );
+        const res = await (global as any).fetch(url, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            device_id: deviceId,
+            device_info: { name: app.getName(), hostname: app.getName() },
+            current_container_count: containerCount
+          }),
+          signal: ac.signal
+        });
         clearTimeout(id);
         const j = await res.json().catch(() => null);
         return { res, j };
@@ -482,144 +482,157 @@ async function createMainWindow() {
     while (true) {
       try {
         attempt++;
+        logger.debug('[auth] validateToken attempt', attempt, 'to', url);
+        const { res, j } = await doFetch();
+        if (!res.ok) {
+          // 4xx -> do not retry
+          if (res.status >= 400 && res.status < 500) {
+            logger.warn('[auth] validateToken 4xx error', res.status, j?.code || j?.error || 'unknown');
+            return { ok: false, status: res.status, body: j };
+          }
+          // 5xx -> may retry
+          if (res.status >= 500) throw new Error(`server ${res.status}`);
+        }
+        // success
+        const data = j && j.data ? j.data : j;
+        logger.info('[auth] validateToken success');
+        return { ok: true, data };
+      } catch (err: any) {
+        logger.warn('[auth] validateToken attempt failed', attempt, { message: err?.message, code: err?.code, errno: err?.errno });
+        if (attempt >= MAX_RETRIES) {
+          logger.error('[auth] validateToken: exhausted retries after', MAX_RETRIES, 'attempts. URL:', url, 'Error:', err?.message);
+          return { ok: false, error: err?.message || String(err), details: { url, timeout: timeoutMs, attempts: MAX_RETRIES } };
+        }
+        // exponential backoff
+        const backoff = 200 * Math.pow(2, attempt - 1);
+        logger.debug('[auth] validateToken retrying in', backoff, 'ms');
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+  } catch (err: any) {
+    logger.error('[auth] validateToken error', { message: err?.message, stack: err?.stack, url: getAuthApiBase() });
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+
+
+ipcMain.handle('auth.getQuota', async () => {
+  try {
+    const resp = await (ipcMain as any).emit ? null : null; // placeholder
+    // reuse validateToken handler to get current token state
+    const out = await (exports as any).authValidate?.() || null;
+    // Instead call validateToken IPC synchronously
+    const r = await (async () => { return await (global as any).Promise.resolve(); })();
+    // For simplicity, call the validateToken handler we just defined via ipcMain.handle directly
+    const val = await (ipcMain as any).handlers && (ipcMain as any).handlers['auth.validateToken'] ? null : null;
+    // Fallback: call validateToken by invoking via this process
+    const v = await (exports as any).authValidate?.().catch(() => ({}));
+    return { ok: false, message: 'not implemented' };
+  } catch (e: any) { logger.error('[auth] getQuota error', e); return { ok: false, error: e?.message || String(e) }; }
+});
+// Heartbeat to keep session alive
+ipcMain.handle('auth.heartbeat', async (_e, { token }: { token?: string }) => {
+  const MAX_RETRIES = 3;
+  const BASE_URL = getAuthApiBase();
+  const timeoutMs = getAuthTimeoutMs();
+  try {
+    const t = token || await getToken();
+    if (!t) return { ok: false, code: 'NO_TOKEN' };
+    const deviceId = getOrCreateDeviceId();
+    const url = (BASE_URL.replace(/\/$/, '')) + '/auth/heartbeat';
+
+    // Get current container count
+    const containerCount = DB.listContainers().length;
+
+    // helper to perform fetch with timeout
+    const doFetch = async () => {
+      const ac = new AbortController();
+      const id = setTimeout(() => ac.abort(), timeoutMs);
+      try {
+        const res = await (global as any).fetch(url, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            device_id: deviceId,
+            current_container_count: containerCount
+          }),
+          signal: ac.signal
+        });
+        clearTimeout(id);
+        const j = await res.json().catch(() => null);
+        return { res, j };
+      } catch (err: any) {
+        clearTimeout(id);
+        throw err;
+      }
+    };
+
+    let attempt = 0;
+    while (true) {
+      try {
+        attempt++;
+        logger.debug('[auth] heartbeat attempt', attempt, 'to', url);
         const { res, j } = await doFetch();
         if (!res.ok) {
           if (res.status >= 400 && res.status < 500) {
+            logger.warn('[auth] heartbeat 4xx error', res.status, j?.code || j?.error || 'unknown');
             return { ok: false, status: res.status, body: j };
           }
           if (res.status >= 500) throw new Error(`server ${res.status}`);
         }
         const data = j && j.data ? j.data : j;
+        logger.info('[auth] heartbeat success', { session_expires_at: data?.session_expires_at });
         return { ok: true, data };
       } catch (err: any) {
-        logger.warn('[auth] use attempt failed', attempt, err?.message || String(err));
+        logger.warn('[auth] heartbeat attempt failed', attempt, { message: err?.message, code: err?.code });
         if (attempt >= MAX_RETRIES) {
-          logger.error('[auth] use: exhausted retries', err);
+          logger.error('[auth] heartbeat: exhausted retries after', MAX_RETRIES, 'attempts. Error:', err?.message);
           return { ok: false, error: err?.message || String(err) };
         }
         const backoff = 200 * Math.pow(2, attempt - 1);
+        logger.debug('[auth] heartbeat retrying in', backoff, 'ms');
         await new Promise(r => setTimeout(r, backoff));
       }
     }
+  } catch (err: any) {
+    logger.error('[auth] heartbeat error', { message: err?.message, stack: err?.stack });
+    return { ok: false, error: err?.message || String(err) };
   }
+});
 
-  ipcMain.handle('auth.getQuota', async () => {
-    try {
-      const resp = await (ipcMain as any).emit ? null : null; // placeholder
-      // reuse validateToken handler to get current token state
-      const out = await (exports as any).authValidate?.() || null;
-      // Instead call validateToken IPC synchronously
-      const r = await (async () => { return await (global as any).Promise.resolve(); })();
-      // For simplicity, call the validateToken handler we just defined via ipcMain.handle directly
-      const val = await (ipcMain as any).handlers && (ipcMain as any).handlers['auth.validateToken'] ? null : null;
-      // Fallback: call validateToken by invoking via this process
-      const v = await (exports as any).authValidate?.().catch(() => ({}));
-      return { ok: false, message: 'not implemented' };
-    } catch (e: any) { logger.error('[auth] getQuota error', e); return { ok: false, error: e?.message || String(e) }; }
-  });
-  // Heartbeat to keep session alive
-  ipcMain.handle('auth.heartbeat', async (_e, { token }: { token?: string }) => {
-    const MAX_RETRIES = 3;
-    const BASE_URL = getAuthApiBase();
-    const timeoutMs = getAuthTimeoutMs();
-    try {
-      const t = token || await getToken();
-      if (!t) return { ok: false, code: 'NO_TOKEN' };
-      const deviceId = getOrCreateDeviceId();
-      const url = (BASE_URL.replace(/\/$/, '')) + '/auth/heartbeat';
+ipcMain.handle('auth.getSettings', async () => {
+  try {
+    const settings = getAuthSettings();
+    return { ok: true, data: settings };
+  } catch (e: any) {
+    logger.error('[auth] getSettings error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
 
-      // Get current container count
-      const containerCount = DB.listContainers().length;
-
-      // helper to perform fetch with timeout
-      const doFetch = async () => {
-        const ac = new AbortController();
-        const id = setTimeout(() => ac.abort(), timeoutMs);
-        try {
-          const res = await (global as any).fetch(url, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              device_id: deviceId,
-              current_container_count: containerCount
-            }),
-            signal: ac.signal
-          });
-          clearTimeout(id);
-          const j = await res.json().catch(() => null);
-          return { res, j };
-        } catch (err: any) {
-          clearTimeout(id);
-          throw err;
-        }
-      };
-
-      let attempt = 0;
-      while (true) {
-        try {
-          attempt++;
-          logger.debug('[auth] heartbeat attempt', attempt, 'to', url);
-          const { res, j } = await doFetch();
-          if (!res.ok) {
-            if (res.status >= 400 && res.status < 500) {
-              logger.warn('[auth] heartbeat 4xx error', res.status, j?.code || j?.error || 'unknown');
-              return { ok: false, status: res.status, body: j };
-            }
-            if (res.status >= 500) throw new Error(`server ${res.status}`);
-          }
-          const data = j && j.data ? j.data : j;
-          logger.info('[auth] heartbeat success', { session_expires_at: data?.session_expires_at });
-          return { ok: true, data };
-        } catch (err: any) {
-          logger.warn('[auth] heartbeat attempt failed', attempt, { message: err?.message, code: err?.code });
-          if (attempt >= MAX_RETRIES) {
-            logger.error('[auth] heartbeat: exhausted retries after', MAX_RETRIES, 'attempts. Error:', err?.message);
-            return { ok: false, error: err?.message || String(err) };
-          }
-          const backoff = 200 * Math.pow(2, attempt - 1);
-          logger.debug('[auth] heartbeat retrying in', backoff, 'ms');
-          await new Promise(r => setTimeout(r, backoff));
-        }
+ipcMain.handle('auth.saveSettings', async (_e, { apiBase }: { apiBase?: string }) => {
+  try {
+    if (apiBase) {
+      // Validate URL format
+      try {
+        new URL(apiBase);
+      } catch {
+        return { ok: false, error: 'Invalid URL format' };
       }
-    } catch (err: any) {
-      logger.error('[auth] heartbeat error', { message: err?.message, stack: err?.stack });
-      return { ok: false, error: err?.message || String(err) };
+      setAuthSettings({ apiBase });
+      logger.info('[auth] saveSettings: apiBase updated', apiBase);
     }
-  });
+    return { ok: true };
+  } catch (e: any) {
+    logger.error('[auth] saveSettings error', e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
 
-  ipcMain.handle('auth.getSettings', async () => {
-    try {
-      const settings = getAuthSettings();
-      return { ok: true, data: settings };
-    } catch (e: any) {
-      logger.error('[auth] getSettings error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  ipcMain.handle('auth.saveSettings', async (_e, { apiBase }: { apiBase?: string }) => {
-    try {
-      if (apiBase) {
-        // Validate URL format
-        try {
-          new URL(apiBase);
-        } catch {
-          return { ok: false, error: 'Invalid URL format' };
-        }
-        setAuthSettings({ apiBase });
-        logger.info('[auth] saveSettings: apiBase updated', apiBase);
-      }
-      return { ok: true };
-    } catch (e: any) {
-      logger.error('[auth] saveSettings error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  ipcMain.handle('app.exit', () => {
-    try { isQuitting = true; app.quit(); return { ok: true }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-}
+ipcMain.handle('app.exit', () => {
+  try { isQuitting = true; app.quit(); return { ok: true }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+});
 
 // Module-scope interactive update check used by menus/tray
 async function checkForUpdatesInteractive() {
@@ -1022,7 +1035,7 @@ app.whenReady().then(async () => {
         } else {
           try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: null }); } catch { }
         }
-      } catch (e) {
+      } catch (e: any) {
         logger.error('[main] failed to start export server', e);
         try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: String(e?.message || e) }); } catch { }
       }
@@ -1040,6 +1053,155 @@ app.whenReady().then(async () => {
     // アプリ初期化失敗時は終了
     process.exit(1);
   }
+
+  // --- IPC ハンドラの登録 (ウィンドウ作成前に実行してレースコンディションを防止) ---
+
+  // IPC: get/save export settings & status
+  ipcMain.handle('export.getSettings', () => {
+    try { return { ok: true, settings: getExportSettings() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.saveSettings', async (_e, payload: any) => {
+    try {
+      const ok = setExportSettings(payload || {});
+      // If enabling, try to start the export server immediately (best-effort)
+      try {
+        const cfg = loadConfig();
+        const s = cfg.exportServer || getExportSettings();
+        if (s && s.enabled) {
+          const es = await import('./exportServer');
+          try {
+            // start server on configured port
+            const port = Number(s.port || 3001);
+            es.startExportServer(Number(port));
+            try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(port), error: null }); } catch { }
+          } catch (e) {
+            try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s.port || 3001), error: String(e?.message || e) }); } catch { }
+          }
+        } else {
+          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s?.port || 3001), error: null }); } catch { }
+        }
+      } catch (e) { /* ignore best-effort start errors */ }
+      return { ok };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.getConfigPath', () => {
+    try {
+      const p = require('./settings').configPath();
+      return { ok: true, path: p };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.getStatus', () => {
+    try {
+      // best-effort: check if server is listening by reading config + env
+      const envPort2 = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
+      const cur = loadConfig();
+      const s = cur.exportServer || getExportSettings();
+      const running = !!envPort2 || !!s.enabled;
+      const port = envPort2 || Number(s.port || 3001);
+      return { ok: true, running, port };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  // Graphics/GPU設定のIPCハンドラ
+  ipcMain.handle('graphics.getSettings', () => {
+    try {
+      const settings = getGraphicsSettings();
+      return { ok: true, data: settings };
+    } catch (e: any) {
+      logger.error('[graphics] getSettings error', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
+  ipcMain.handle('graphics.saveSettings', async (_e, { graphicsMode, angleMode, disableHttp2, disableQuic, debugGpu }: { graphicsMode?: string; angleMode?: string; disableHttp2?: boolean; disableQuic?: boolean; debugGpu?: boolean }) => {
+    try {
+      const updates: any = {};
+      if (graphicsMode !== undefined) updates.graphicsMode = graphicsMode;
+      if (angleMode !== undefined) updates.angleMode = angleMode;
+      if (disableHttp2 !== undefined) updates.disableHttp2 = disableHttp2;
+      if (disableQuic !== undefined) updates.disableQuic = disableQuic;
+      if (debugGpu !== undefined) updates.debugGpu = debugGpu;
+
+      const ok = setGraphicsSettings(updates);
+      if (ok) {
+        logger.info('[graphics] saveSettings: updated', updates);
+      }
+      return { ok };
+    } catch (e: any) {
+      logger.error('[graphics] saveSettings error', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
+  // 移行機能: コンテナのパスを更新
+  ipcMain.handle('migration.updatePaths', async (_e, { oldBasePath, newBasePath }: { oldBasePath: string; newBasePath: string }) => {
+    try {
+      const updatedCount = DB.updateContainerPaths(oldBasePath, newBasePath);
+      logger.info(`[migration] Updated ${updatedCount} container paths from ${oldBasePath} to ${newBasePath}`);
+      return { ok: true, updatedCount };
+    } catch (e: any) {
+      logger.error('[migration] updatePaths error:', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
+  // 移行機能: 現在のuserDataパスを取得
+  ipcMain.handle('migration.getUserDataPath', () => {
+    try {
+      const userDataPath = app.getPath('userData');
+      return { ok: true, path: userDataPath };
+    } catch (e: any) {
+      logger.error('[migration] getUserDataPath error:', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+
+  // DevTools toggle handler (used by renderer via preload -> ipc)
+  ipcMain.handle('devtools.toggle', (_e) => {
+    try {
+      const all = BrowserWindow.getAllWindows();
+      for (const w of all) {
+        if (w.webContents && w.webContents.isDevToolsOpened && w.webContents.isDevToolsOpened()) {
+          w.webContents.closeDevTools();
+        } else {
+          w.webContents.openDevTools({ mode: 'detach' });
+        }
+      }
+      return true;
+    } catch (e) { return false; }
+  });
+
+  // Toggle DevTools for the focused BrowserView (tab) if any; otherwise fall back to focused window
+  ipcMain.handle('devtools.toggleView', (_e) => {
+    try {
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      const windows = focusedWindow ? [focusedWindow] : BrowserWindow.getAllWindows();
+      for (const w of windows) {
+        try {
+          const getViews = (w as any).getBrowserViews;
+          const views = typeof getViews === 'function' ? (w as any).getBrowserViews() as any[] : [];
+          // Prefer the focused view
+          const targetView = (views || []).find(v => v && v.webContents && typeof v.webContents.isFocused === 'function' && v.webContents.isFocused());
+          if (targetView && targetView.webContents) {
+            if (typeof targetView.webContents.isDevToolsOpened === 'function' && targetView.webContents.isDevToolsOpened()) {
+              targetView.webContents.closeDevTools();
+            } else {
+              targetView.webContents.openDevTools({ mode: 'detach' });
+            }
+            return true;
+          }
+        } catch (e) { /* ignore view-level errors */ }
+      }
+      // fallback: toggle focused window's webContents
+      const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+      if (fw && fw.webContents) {
+        if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
+        else fw.webContents.openDevTools({ mode: 'detach' });
+        return true;
+      }
+      return false;
+    } catch (e) { return false; }
+  });
 
   // IPC: get/save export settings & status
   ipcMain.handle('export.getSettings', () => {
@@ -1196,52 +1358,7 @@ app.on('second-instance', (_event, argv) => {
   } catch (e) { console.error('[main] second-instance handleArgv error', e); }
 });
 
-// DevTools toggle handler (used by renderer via preload -> ipc)
-ipcMain.handle('devtools.toggle', (_e) => {
-  try {
-    const all = BrowserWindow.getAllWindows();
-    for (const w of all) {
-      if (w.webContents && w.webContents.isDevToolsOpened && w.webContents.isDevToolsOpened()) {
-        w.webContents.closeDevTools();
-      } else {
-        w.webContents.openDevTools({ mode: 'detach' });
-      }
-    }
-    return true;
-  } catch (e) { return false; }
-});
 
-// Toggle DevTools for the focused BrowserView (tab) if any; otherwise fall back to focused window
-ipcMain.handle('devtools.toggleView', (_e) => {
-  try {
-    const focusedWindow = BrowserWindow.getFocusedWindow();
-    const windows = focusedWindow ? [focusedWindow] : BrowserWindow.getAllWindows();
-    for (const w of windows) {
-      try {
-        const getViews = (w as any).getBrowserViews;
-        const views = typeof getViews === 'function' ? (w as any).getBrowserViews() as any[] : [];
-        // Prefer the focused view
-        const targetView = (views || []).find(v => v && v.webContents && typeof v.webContents.isFocused === 'function' && v.webContents.isFocused());
-        if (targetView && targetView.webContents) {
-          if (typeof targetView.webContents.isDevToolsOpened === 'function' && targetView.webContents.isDevToolsOpened()) {
-            targetView.webContents.closeDevTools();
-          } else {
-            targetView.webContents.openDevTools({ mode: 'detach' });
-          }
-          return true;
-        }
-      } catch (e) { /* ignore view-level errors */ }
-    }
-    // fallback: toggle focused window's webContents
-    const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    if (fw && fw.webContents) {
-      if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
-      else fw.webContents.openDevTools({ mode: 'detach' });
-      return true;
-    }
-    return false;
-  } catch (e) { return false; }
-});
 
 app.on('window-all-closed', () => {
   // Protection: Don't quit if mainWindow still exists (e.g., after container close)

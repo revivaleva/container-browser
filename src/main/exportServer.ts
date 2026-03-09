@@ -3,13 +3,14 @@ import { URL } from 'node:url';
 import { promises as fsp, existsSync, cpSync, rmSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { app } from 'electron';
+import electron from 'electron';
+const app = (electron as any).app;
+const session = (electron as any).session;
+import type { WebContents } from 'electron';
 import { DB } from './db';
 import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, getActiveWebContents } from './containerManager';
 import { getToken, getOrCreateDeviceId } from './tokenStore';
 import { getAuthApiBase, getAuthTimeoutMs } from './settings';
-import { session } from 'electron';
-import type { WebContents } from 'electron';
 import setCookieParser from 'set-cookie-parser';
 import crypto, { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint, ProxyConfig } from '../shared/types';
@@ -1139,6 +1140,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             webglVendor: gpu.vendor,
             webglRenderer: gpu.renderer,
           };
+          const blockImages = !!body.blockImages;
           const c: Container = {
             id,
             name,
@@ -1149,6 +1151,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             timezone: 'Asia/Tokyo',
             fingerprint: fp,
             proxy: proxy,
+            blockImages: blockImages,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             lastSessionId: null

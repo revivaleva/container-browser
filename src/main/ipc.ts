@@ -1,8 +1,11 @@
-import { ipcMain, dialog } from 'electron';
+import electron from 'electron';
+const ipcMain = (electron as any).ipcMain;
+const dialog = (electron as any).dialog;
+const app = (electron as any).app;
+const session = (electron as any).session;
 import keytar from 'keytar';
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, session } from 'electron';
 import { DB } from './db';
 import { zipAllProfiles, extractProfiles } from './profileExporter';
 import archiver from 'archiver';

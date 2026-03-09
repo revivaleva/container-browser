@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app } from 'electron';
+import electron from 'electron';
+const app = (electron as any).app;
 import archiver from 'archiver';
 import extractZip from 'extract-zip';
 import { DB } from './db';
@@ -30,7 +31,7 @@ const EXCLUDE_PATTERNS = [
   '**/Media Cache/**',
   '**/ShaderCache/**',
   '**/VideoDecodeStats/**',
-  
+
   // 一時ファイル・ロックファイル
   '**/SingletonLock',
   '**/LOCK',
@@ -38,12 +39,12 @@ const EXCLUDE_PATTERNS = [
   '**/*.tmp',
   '**/*.temp',
   '**/*.log',
-  
+
   // ダウンロード履歴（通常は不要）
   '**/History*',
   '**/Top Sites*',
   '**/Favicons*',
-  
+
   // その他の不要なファイル
   '**/Current Session',
   '**/Current Tabs',
@@ -59,7 +60,7 @@ const EXCLUDE_PATTERNS = [
 function shouldExclude(filePath: string, basePath: string): boolean {
   const relativePath = path.relative(basePath, filePath).replace(/\\/g, '/');
   const fileName = path.basename(filePath);
-  
+
   for (const pattern of EXCLUDE_PATTERNS) {
     // シンプルなパターンマッチング（glob風）
     const regex = new RegExp(
@@ -68,12 +69,12 @@ function shouldExclude(filePath: string, basePath: string): boolean {
         .replace(/\*/g, '[^/]*')
         .replace(/\//g, '/')
     );
-    
+
     if (regex.test(relativePath) || regex.test(fileName)) {
       return true;
     }
   }
-  
+
   return false;
 }
 
@@ -88,16 +89,16 @@ function addDirectoryFiltered(
 ): void {
   try {
     const entries = fs.readdirSync(sourcePath, { withFileTypes: true });
-    
+
     for (const entry of entries) {
       const fullPath = path.join(sourcePath, entry.name);
       const archiveEntryPath = path.join(archivePath, entry.name);
-      
+
       // 除外チェック
       if (shouldExclude(fullPath, basePath)) {
         continue;
       }
-      
+
       if (entry.isDirectory()) {
         // ディレクトリの場合は再帰的に処理
         addDirectoryFiltered(archive, fullPath, archiveEntryPath, basePath);

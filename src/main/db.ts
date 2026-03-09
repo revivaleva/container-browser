@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
-import { app } from 'electron';
+import electron from 'electron';
+const app = (electron as any).app;
 import type { Container, CredentialRow, SitePref, TabEntry } from '@shared/types';
 
 let db: Database.Database;
@@ -41,6 +42,7 @@ export function initDB() {
   timezone TEXT,
   fingerprint TEXT,
   proxy TEXT,
+  blockImages INTEGER DEFAULT 0,
   createdAt INTEGER,
   updatedAt INTEGER,
   lastSessionId TEXT
@@ -111,6 +113,11 @@ export function initDB() {
     if (!hasNote) {
       try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
     }
+    // migrate: add blockImages column if missing
+    const hasBlockImages = cols.some(c => c.name === 'blockImages');
+    if (!hasBlockImages) {
+      try { db.prepare('ALTER TABLE containers ADD COLUMN blockImages INTEGER DEFAULT 0').run(); } catch (e) { /* ignore */ }
+    }
     // migrate: ensure bookmarks have sortOrder column
     try {
       const bcols = db.prepare("PRAGMA table_info(bookmarks)").all() as any[];
@@ -137,8 +144,8 @@ export function initDB() {
 export const DB = {
   upsertContainer(c: Container) {
     const stmt = db.prepare(`
-      INSERT INTO containers(id, name, note, status, userDataDir, partition, userAgent, locale, timezone, fingerprint, proxy, createdAt, updatedAt, lastSessionId)
-VALUES(@id, @name, @note, @status, @userDataDir, @partition, @userAgent, @locale, @timezone, @fingerprint, @proxy, @createdAt, @updatedAt, @lastSessionId)
+      INSERT INTO containers(id, name, note, status, userDataDir, partition, userAgent, locale, timezone, fingerprint, proxy, blockImages, createdAt, updatedAt, lastSessionId)
+VALUES(@id, @name, @note, @status, @userDataDir, @partition, @userAgent, @locale, @timezone, @fingerprint, @proxy, @blockImages, @createdAt, @updatedAt, @lastSessionId)
       ON CONFLICT(id) DO UPDATE SET
 name = excluded.name,
   note = excluded.note,
@@ -150,6 +157,7 @@ name = excluded.name,
   timezone = excluded.timezone,
   fingerprint = excluded.fingerprint,
   proxy = excluded.proxy,
+  blockImages = excluded.blockImages,
   updatedAt = excluded.updatedAt,
   lastSessionId = excluded.lastSessionId
     `);
@@ -159,6 +167,7 @@ name = excluded.name,
       status: c.status ?? '未使用',
       fingerprint: c.fingerprint ? JSON.stringify(c.fingerprint) : null,
       proxy: c.proxy ? JSON.stringify(c.proxy) : null,
+      blockImages: c.blockImages ? 1 : 0,
     });
   },
   listContainers(): Container[] {
@@ -169,6 +178,7 @@ name = excluded.name,
       status: r.status ?? '未使用',
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
+      blockImages: !!r.blockImages,
     }));
   },
   getContainer(id: string): Container | undefined {
@@ -180,6 +190,7 @@ name = excluded.name,
       status: r.status ?? '未使用',
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
+      blockImages: !!r.blockImages,
     } as Container;
   },
   getContainerByName(name: string): Container | undefined {
@@ -189,6 +200,7 @@ name = excluded.name,
       ...r,
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
+      blockImages: !!r.blockImages,
     } as Container;
   },
   asyncDeleteContainer(id: string) {

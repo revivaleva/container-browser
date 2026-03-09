@@ -41,6 +41,7 @@ export type Container = {
   timezone?: string;        // 互換: 旧フィールド
   fingerprint?: Fingerprint; // 新: 指紋設定
   proxy?: ProxyConfig | null;
+  blockImages?: boolean;  // 新: 画像ブロック設定
   createdAt: number;
   updatedAt: number;
   lastSessionId?: string | null;
@@ -57,8 +58,8 @@ export type CredentialRow = {
 export type SitePref = {
   containerId: string;
   origin: string;
-  autoFill: 0|1;
-  autoSaveForms: 0|1;
+  autoFill: 0 | 1;
+  autoSaveForms: 0 | 1;
 };
 
 export type TabEntry = {

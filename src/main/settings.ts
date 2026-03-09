@@ -1,7 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { app } from 'electron';
+import electron from 'electron';
+const app = (electron as any).app;
 
 type ExportConfig = {
   enabled: boolean;
@@ -27,7 +28,7 @@ type AppConfig = {
   graphics?: GraphicsConfig;
 };
 
-const DEFAULT: AppConfig = { 
+const DEFAULT: AppConfig = {
   exportServer: { enabled: false, port: 3001 },
   auth: {
     apiBase: 'https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod',
