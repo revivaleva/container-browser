@@ -1,26 +1,18 @@
-import electron from 'electron';
-const app = (electron as any).app;
-const BrowserWindow = (electron as any).BrowserWindow;
-const ipcMain = (electron as any).ipcMain;
-const Tray = (electron as any).Tray;
-const Menu = (electron as any).Menu;
-const nativeImage = (electron as any).nativeImage;
-const globalShortcut = (electron as any).globalShortcut;
-const session = (electron as any).session;
-const dialog = (electron as any).dialog;
-import type { BrowserWindow as BrowserWindowType, Tray as TrayType } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, dialog, shell } from 'electron';
+import type { BrowserWindow as BrowserWindowType, Tray as TrayType, nativeImage as NativeImageType } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
-import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows } from './containerManager';
-import './ipc';
+import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows, cleanupOrphans, deleteContainerStorage, registerContainerIpcHandlers } from './containerManager';
+import { registerGeneralIpcHandlers } from './ipc';
 import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings, getGraphicsSettings, setGraphicsSettings } from './settings';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint } from '../shared/types';
 import logger from '../shared/logger';
 import { saveToken, getToken, clearToken, getOrCreateDeviceId } from './tokenStore';
+import { proxyCredentialsByPartition, proxyCredentialsByHostPort } from './containerState';
 
 // LOG_ONLY_PROXY=1時、console.log/warn/errorを上書きしてフィルタリング（直接consoleを使っている箇所も対象）
 const LOG_ONLY_PROXY = process.env.LOG_ONLY_PROXY === '1';
@@ -68,10 +60,7 @@ if (LOG_ONLY_PROXY) {
   };
 }
 
-// Proxy認証情報の管理: partition -> { username, password }
-export const proxyCredentialsByPartition = new Map<string, { username: string; password: string }>();
-// host:portキーでも認証情報を引けるようにする（net.request等でwebContentsがない場合に使用）
-export const proxyCredentialsByHostPort = new Map<string, { username: string; password: string }>();
+// Proxy認証情報の管理 moved to containerState.ts
 
 // グローバルな未処理例外ハンドラー: ERR_TUNNEL_CONNECTION_FAILED エラーを無視（エラーダイアログを表示しない）
 process.on('uncaughtException', (error: Error) => {
@@ -127,6 +116,7 @@ const _pendingOpenNames = new Set<string>();
 
 async function createMainWindow() {
   try {
+    console.log('[DEBUG] process.versions', process.versions);
     console.log('[DEBUG] createMainWindow() started');
     const preloadPath = path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs');
     console.log('[DEBUG] Preload path:', preloadPath, 'exists=', existsSync(preloadPath));
@@ -150,7 +140,7 @@ async function createMainWindow() {
 
     // When the main window is closed, ensure all container shells are also closed
     try {
-      mainWindow.on('close', (e) => {
+      mainWindow?.on('close', (e) => {
         if (isQuitting) return;
         try {
           e.preventDefault();
@@ -166,65 +156,48 @@ async function createMainWindow() {
 
     const devUrl = process.env['ELECTRON_RENDERER_URL'];
     if (devUrl) {
-      // In dev mode the renderer dev server root is provided in devUrl.
-      // Instead of immediately calling loadURL, poll the dev server HTTP endpoint and
-      // only call loadURL once it responds. Try localhost then 127.0.0.1 as fallback.
-      if (devUrl) {
-        const maxAttempts = 40;
-        let attempt = 0;
-        const tryUrl = async (u: string) => {
-          try {
-            // simple HEAD request using node http/https
-            const parsed = new URL(u);
-            const mod = parsed.protocol === 'https:' ? require('https') : require('http');
-            return await new Promise((resolve) => {
-              const req = mod.request({ method: 'HEAD', hostname: parsed.hostname, port: parsed.port, path: parsed.pathname || '/', timeout: 1000 }, (res: any) => {
-                resolve(res.statusCode && res.statusCode >= 200 && res.statusCode < 500);
-              });
-              req.on('error', () => resolve(false));
-              req.on('timeout', () => { req.destroy(); resolve(false); });
-              req.end();
-            });
-          } catch (e) { return false; }
-        };
-
-        // compute candidate URLs
-        const candidates = [devUrl];
+      const maxAttempts = 40;
+      let attempt = 0;
+      const tryUrl = async (u: string) => {
         try {
-          const parsed = new URL(devUrl);
-          if (parsed.hostname === 'localhost') {
-            const alt = `${parsed.protocol}//127.0.0.1:${parsed.port}${parsed.pathname || ''}`;
-            candidates.push(alt);
-          }
-        } catch (e) { }
+          const parsed = new URL(u);
+          const mod = parsed.protocol === 'https:' ? require('https') : require('http');
+          return await new Promise((resolve) => {
+            const req = mod.request({ method: 'HEAD', hostname: parsed.hostname, port: parsed.port, path: parsed.pathname || '/', timeout: 1000 }, (res: any) => {
+              resolve(res.statusCode && res.statusCode >= 200 && res.statusCode < 500);
+            });
+            req.on('error', () => resolve(false));
+            req.on('timeout', () => { req.destroy(); resolve(false); });
+            req.end();
+          });
+        } catch (e) { return false; }
+      };
 
-        let loaded = false;
-        while (attempt < maxAttempts && !loaded) {
-          attempt++;
-          for (const c of candidates) {
-            const ok = await tryUrl(c).catch(() => false);
-            if (ok) {
-              try {
-                await mainWindow.loadURL(c);
-                loaded = true;
-                break;
-              } catch (e) {
-                // continue to next candidate or retry
-              }
+      const candidates = [devUrl];
+      try {
+        const parsed = new URL(devUrl);
+        if (parsed.hostname === 'localhost') {
+          candidates.push(`${parsed.protocol}//127.0.0.1:${parsed.port}${parsed.pathname || ''}`);
+        }
+      } catch (e) { }
+
+      let loaded = false;
+      while (attempt < maxAttempts && !loaded) {
+        attempt++;
+        for (const c of candidates) {
+          if (await tryUrl(c).catch(() => false)) {
+            if (mainWindow) {
+              try { await mainWindow.loadURL(c); loaded = true; break; } catch { }
             }
           }
-          if (!loaded) await new Promise(r => setTimeout(r, 250));
         }
-        if (!loaded) {
-          // fallback to file if dev server not reachable
-          const url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html'));
-          await mainWindow.loadURL(url.toString());
-        }
-      } else {
+        if (!loaded) await new Promise(r => setTimeout(r, 250));
+      }
+      if (!loaded && mainWindow) {
         const url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html'));
         await mainWindow.loadURL(url.toString());
       }
-    } else {
+    } else if (mainWindow) {
       const url = new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'index.html'));
       await mainWindow.loadURL(url.toString());
     }
@@ -408,231 +381,6 @@ async function callAuthUse(token: string, deviceId: string, count: number = 1): 
   }
 }
 
-// IPC handlers for app actions exposed to renderer via preload
-ipcMain.handle('app.getVersion', () => {
-  try { return app.getVersion(); } catch { return 'unknown'; }
-});
-ipcMain.handle('app.openSettings', () => {
-  try { createSettingsWindow(); return { ok: true }; } catch (e: any) { logger.error('[ipc] app.openSettings error', e); return { ok: false, error: e?.message || String(e) }; }
-});
-ipcMain.handle('app.checkForUpdates', async () => {
-  return { ok: false, error: 'Auto-update disabled in this version' };
-});
-// Token storage IPC
-ipcMain.handle('auth.saveToken', async (_e, { token }) => {
-  try { const ok = await saveToken(token); return { ok }; } catch (e: any) { logger.error('[auth] saveToken error', e); return { ok: false, error: e?.message || String(e) }; }
-});
-ipcMain.handle('auth.getToken', async () => {
-  try { const t = await getToken(); return { ok: true, token: t }; } catch (e: any) { logger.error('[auth] getToken error', e); return { ok: false, error: e?.message || String(e) }; }
-});
-ipcMain.handle('auth.clearToken', async () => {
-  try { await clearToken(); return { ok: true }; } catch (e: any) { logger.error('[auth] clearToken error', e); return { ok: false, error: e?.message || String(e) }; }
-});
-
-ipcMain.handle('auth.getDeviceId', async () => {
-  try {
-    const id = getOrCreateDeviceId();
-    logger.debug('[auth] getDeviceId', id);
-    return { ok: true, deviceId: id };
-  } catch (e: any) {
-    logger.error('[auth] getDeviceId error', e);
-    return { ok: false, error: e?.message || String(e) };
-  }
-});
-
-// Validate token against auth API (uses AUTH_API_BASE env var or config)
-ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
-  const MAX_RETRIES = 3;
-  const BASE_URL = getAuthApiBase();
-  const timeoutMs = getAuthTimeoutMs();
-  try {
-    const t = token || await getToken();
-    if (!t) return { ok: false, code: 'NO_TOKEN' };
-    const deviceId = getOrCreateDeviceId();
-    const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
-
-    // Get current container count
-    const containerCount = DB.listContainers().length;
-
-    // helper to perform fetch with timeout
-    const doFetch = async () => {
-      const ac = new AbortController();
-      const id = setTimeout(() => ac.abort(), timeoutMs);
-      try {
-        const res = await (global as any).fetch(url, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            device_id: deviceId,
-            device_info: { name: app.getName(), hostname: app.getName() },
-            current_container_count: containerCount
-          }),
-          signal: ac.signal
-        });
-        clearTimeout(id);
-        const j = await res.json().catch(() => null);
-        return { res, j };
-      } catch (err: any) {
-        clearTimeout(id);
-        throw err;
-      }
-    };
-
-    let attempt = 0;
-    while (true) {
-      try {
-        attempt++;
-        logger.debug('[auth] validateToken attempt', attempt, 'to', url);
-        const { res, j } = await doFetch();
-        if (!res.ok) {
-          // 4xx -> do not retry
-          if (res.status >= 400 && res.status < 500) {
-            logger.warn('[auth] validateToken 4xx error', res.status, j?.code || j?.error || 'unknown');
-            return { ok: false, status: res.status, body: j };
-          }
-          // 5xx -> may retry
-          if (res.status >= 500) throw new Error(`server ${res.status}`);
-        }
-        // success
-        const data = j && j.data ? j.data : j;
-        logger.info('[auth] validateToken success');
-        return { ok: true, data };
-      } catch (err: any) {
-        logger.warn('[auth] validateToken attempt failed', attempt, { message: err?.message, code: err?.code, errno: err?.errno });
-        if (attempt >= MAX_RETRIES) {
-          logger.error('[auth] validateToken: exhausted retries after', MAX_RETRIES, 'attempts. URL:', url, 'Error:', err?.message);
-          return { ok: false, error: err?.message || String(err), details: { url, timeout: timeoutMs, attempts: MAX_RETRIES } };
-        }
-        // exponential backoff
-        const backoff = 200 * Math.pow(2, attempt - 1);
-        logger.debug('[auth] validateToken retrying in', backoff, 'ms');
-        await new Promise(r => setTimeout(r, backoff));
-      }
-    }
-  } catch (err: any) {
-    logger.error('[auth] validateToken error', { message: err?.message, stack: err?.stack, url: getAuthApiBase() });
-    return { ok: false, error: err?.message || String(err) };
-  }
-});
-
-
-
-ipcMain.handle('auth.getQuota', async () => {
-  try {
-    const resp = await (ipcMain as any).emit ? null : null; // placeholder
-    // reuse validateToken handler to get current token state
-    const out = await (exports as any).authValidate?.() || null;
-    // Instead call validateToken IPC synchronously
-    const r = await (async () => { return await (global as any).Promise.resolve(); })();
-    // For simplicity, call the validateToken handler we just defined via ipcMain.handle directly
-    const val = await (ipcMain as any).handlers && (ipcMain as any).handlers['auth.validateToken'] ? null : null;
-    // Fallback: call validateToken by invoking via this process
-    const v = await (exports as any).authValidate?.().catch(() => ({}));
-    return { ok: false, message: 'not implemented' };
-  } catch (e: any) { logger.error('[auth] getQuota error', e); return { ok: false, error: e?.message || String(e) }; }
-});
-// Heartbeat to keep session alive
-ipcMain.handle('auth.heartbeat', async (_e, { token }: { token?: string }) => {
-  const MAX_RETRIES = 3;
-  const BASE_URL = getAuthApiBase();
-  const timeoutMs = getAuthTimeoutMs();
-  try {
-    const t = token || await getToken();
-    if (!t) return { ok: false, code: 'NO_TOKEN' };
-    const deviceId = getOrCreateDeviceId();
-    const url = (BASE_URL.replace(/\/$/, '')) + '/auth/heartbeat';
-
-    // Get current container count
-    const containerCount = DB.listContainers().length;
-
-    // helper to perform fetch with timeout
-    const doFetch = async () => {
-      const ac = new AbortController();
-      const id = setTimeout(() => ac.abort(), timeoutMs);
-      try {
-        const res = await (global as any).fetch(url, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            device_id: deviceId,
-            current_container_count: containerCount
-          }),
-          signal: ac.signal
-        });
-        clearTimeout(id);
-        const j = await res.json().catch(() => null);
-        return { res, j };
-      } catch (err: any) {
-        clearTimeout(id);
-        throw err;
-      }
-    };
-
-    let attempt = 0;
-    while (true) {
-      try {
-        attempt++;
-        logger.debug('[auth] heartbeat attempt', attempt, 'to', url);
-        const { res, j } = await doFetch();
-        if (!res.ok) {
-          if (res.status >= 400 && res.status < 500) {
-            logger.warn('[auth] heartbeat 4xx error', res.status, j?.code || j?.error || 'unknown');
-            return { ok: false, status: res.status, body: j };
-          }
-          if (res.status >= 500) throw new Error(`server ${res.status}`);
-        }
-        const data = j && j.data ? j.data : j;
-        logger.info('[auth] heartbeat success', { session_expires_at: data?.session_expires_at });
-        return { ok: true, data };
-      } catch (err: any) {
-        logger.warn('[auth] heartbeat attempt failed', attempt, { message: err?.message, code: err?.code });
-        if (attempt >= MAX_RETRIES) {
-          logger.error('[auth] heartbeat: exhausted retries after', MAX_RETRIES, 'attempts. Error:', err?.message);
-          return { ok: false, error: err?.message || String(err) };
-        }
-        const backoff = 200 * Math.pow(2, attempt - 1);
-        logger.debug('[auth] heartbeat retrying in', backoff, 'ms');
-        await new Promise(r => setTimeout(r, backoff));
-      }
-    }
-  } catch (err: any) {
-    logger.error('[auth] heartbeat error', { message: err?.message, stack: err?.stack });
-    return { ok: false, error: err?.message || String(err) };
-  }
-});
-
-ipcMain.handle('auth.getSettings', async () => {
-  try {
-    const settings = getAuthSettings();
-    return { ok: true, data: settings };
-  } catch (e: any) {
-    logger.error('[auth] getSettings error', e);
-    return { ok: false, error: e?.message || String(e) };
-  }
-});
-
-ipcMain.handle('auth.saveSettings', async (_e, { apiBase }: { apiBase?: string }) => {
-  try {
-    if (apiBase) {
-      // Validate URL format
-      try {
-        new URL(apiBase);
-      } catch {
-        return { ok: false, error: 'Invalid URL format' };
-      }
-      setAuthSettings({ apiBase });
-      logger.info('[auth] saveSettings: apiBase updated', apiBase);
-    }
-    return { ok: true };
-  } catch (e: any) {
-    logger.error('[auth] saveSettings error', e);
-    return { ok: false, error: e?.message || String(e) };
-  }
-});
-
-ipcMain.handle('app.exit', () => {
-  try { isQuitting = true; app.quit(); return { ok: true }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-});
 
 // Module-scope interactive update check used by menus/tray
 async function checkForUpdatesInteractive() {
@@ -849,6 +597,20 @@ if (!appLoginHandlerRegistered) {
 }
 
 app.whenReady().then(async () => {
+  // Register container IPC handlers after app is ready to avoid module initialization issues
+  registerContainerIpcHandlers();
+  registerGeneralIpcHandlers();
+  registerMainIpcHandlers();
+
+  // 起動時に不要なフォルダ（削除済みコンテナの残りカスや古いバックアップ）をクリーンアップ
+  cleanupOrphans().catch(err => console.error('[main] cleanupOrphans failed', err));
+
+  // 連続稼働時、24時間ごとに自動削除を実行するように設定
+  setInterval(() => {
+    console.log('[main] Running scheduled daily orphan cleanup...');
+    cleanupOrphans().catch(err => console.error('[main] Scheduled cleanupOrphans failed', err));
+  }, 24 * 60 * 60 * 1000); // 24時間間隔
+
   // --- UserAgent のクリーニング (Stealth 対策) ---
   // Electron や container-browser 固有の文字列が含まれると bot 判定されるため除去
   if (app.userAgentFallback) {
@@ -889,7 +651,7 @@ app.whenReady().then(async () => {
           driverVersion: gpuInfo.auxAttributes?.driverVersion,
           driverDate: gpuInfo.auxAttributes?.driverDate,
           glVersion: gpuInfo.auxAttributes?.glVersion,
-          glVendor: gpuInfo.auxAttributes?.glVendor,
+          glVendor: gpuInfo.auxAttributes?.glRenderer,
           glRenderer: gpuInfo.auxAttributes?.glRenderer
         };
         console.log('[gpu] gpuInfo.basic (summary)', JSON.stringify(gpuInfoSummary, null, 2));
@@ -968,7 +730,6 @@ app.whenReady().then(async () => {
                   mainWindow.removeAllListeners();
                   mainWindow.destroy();
                 }
-                await new Promise(resolve => setTimeout(resolve, 200));
               } catch (e) {
                 console.error('[auto-updater] Error closing main window:', e);
               }
@@ -1054,289 +815,6 @@ app.whenReady().then(async () => {
     process.exit(1);
   }
 
-  // --- IPC ハンドラの登録 (ウィンドウ作成前に実行してレースコンディションを防止) ---
-
-  // IPC: get/save export settings & status
-  ipcMain.handle('export.getSettings', () => {
-    try { return { ok: true, settings: getExportSettings() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('export.saveSettings', async (_e, payload: any) => {
-    try {
-      const ok = setExportSettings(payload || {});
-      // If enabling, try to start the export server immediately (best-effort)
-      try {
-        const cfg = loadConfig();
-        const s = cfg.exportServer || getExportSettings();
-        if (s && s.enabled) {
-          const es = await import('./exportServer');
-          try {
-            // start server on configured port
-            const port = Number(s.port || 3001);
-            es.startExportServer(Number(port));
-            try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(port), error: null }); } catch { }
-          } catch (e) {
-            try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s.port || 3001), error: String(e?.message || e) }); } catch { }
-          }
-        } else {
-          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s?.port || 3001), error: null }); } catch { }
-        }
-      } catch (e) { /* ignore best-effort start errors */ }
-      return { ok };
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('export.getConfigPath', () => {
-    try {
-      const p = require('./settings').configPath();
-      return { ok: true, path: p };
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('export.getStatus', () => {
-    try {
-      // best-effort: check if server is listening by reading config + env
-      const envPort2 = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
-      const cur = loadConfig();
-      const s = cur.exportServer || getExportSettings();
-      const running = !!envPort2 || !!s.enabled;
-      const port = envPort2 || Number(s.port || 3001);
-      return { ok: true, running, port };
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-
-  // Graphics/GPU設定のIPCハンドラ
-  ipcMain.handle('graphics.getSettings', () => {
-    try {
-      const settings = getGraphicsSettings();
-      return { ok: true, data: settings };
-    } catch (e: any) {
-      logger.error('[graphics] getSettings error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  ipcMain.handle('graphics.saveSettings', async (_e, { graphicsMode, angleMode, disableHttp2, disableQuic, debugGpu }: { graphicsMode?: string; angleMode?: string; disableHttp2?: boolean; disableQuic?: boolean; debugGpu?: boolean }) => {
-    try {
-      const updates: any = {};
-      if (graphicsMode !== undefined) updates.graphicsMode = graphicsMode;
-      if (angleMode !== undefined) updates.angleMode = angleMode;
-      if (disableHttp2 !== undefined) updates.disableHttp2 = disableHttp2;
-      if (disableQuic !== undefined) updates.disableQuic = disableQuic;
-      if (debugGpu !== undefined) updates.debugGpu = debugGpu;
-
-      const ok = setGraphicsSettings(updates);
-      if (ok) {
-        logger.info('[graphics] saveSettings: updated', updates);
-      }
-      return { ok };
-    } catch (e: any) {
-      logger.error('[graphics] saveSettings error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  // 移行機能: コンテナのパスを更新
-  ipcMain.handle('migration.updatePaths', async (_e, { oldBasePath, newBasePath }: { oldBasePath: string; newBasePath: string }) => {
-    try {
-      const updatedCount = DB.updateContainerPaths(oldBasePath, newBasePath);
-      logger.info(`[migration] Updated ${updatedCount} container paths from ${oldBasePath} to ${newBasePath}`);
-      return { ok: true, updatedCount };
-    } catch (e: any) {
-      logger.error('[migration] updatePaths error:', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  // 移行機能: 現在のuserDataパスを取得
-  ipcMain.handle('migration.getUserDataPath', () => {
-    try {
-      const userDataPath = app.getPath('userData');
-      return { ok: true, path: userDataPath };
-    } catch (e: any) {
-      logger.error('[migration] getUserDataPath error:', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  // DevTools toggle handler (used by renderer via preload -> ipc)
-  ipcMain.handle('devtools.toggle', (_e) => {
-    try {
-      const all = BrowserWindow.getAllWindows();
-      for (const w of all) {
-        if (w.webContents && w.webContents.isDevToolsOpened && w.webContents.isDevToolsOpened()) {
-          w.webContents.closeDevTools();
-        } else {
-          w.webContents.openDevTools({ mode: 'detach' });
-        }
-      }
-      return true;
-    } catch (e) { return false; }
-  });
-
-  // Toggle DevTools for the focused BrowserView (tab) if any; otherwise fall back to focused window
-  ipcMain.handle('devtools.toggleView', (_e) => {
-    try {
-      const focusedWindow = BrowserWindow.getFocusedWindow();
-      const windows = focusedWindow ? [focusedWindow] : BrowserWindow.getAllWindows();
-      for (const w of windows) {
-        try {
-          const getViews = (w as any).getBrowserViews;
-          const views = typeof getViews === 'function' ? (w as any).getBrowserViews() as any[] : [];
-          // Prefer the focused view
-          const targetView = (views || []).find(v => v && v.webContents && typeof v.webContents.isFocused === 'function' && v.webContents.isFocused());
-          if (targetView && targetView.webContents) {
-            if (typeof targetView.webContents.isDevToolsOpened === 'function' && targetView.webContents.isDevToolsOpened()) {
-              targetView.webContents.closeDevTools();
-            } else {
-              targetView.webContents.openDevTools({ mode: 'detach' });
-            }
-            return true;
-          }
-        } catch (e) { /* ignore view-level errors */ }
-      }
-      // fallback: toggle focused window's webContents
-      const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-      if (fw && fw.webContents) {
-        if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
-        else fw.webContents.openDevTools({ mode: 'detach' });
-        return true;
-      }
-      return false;
-    } catch (e) { return false; }
-  });
-
-  // IPC: get/save export settings & status
-  ipcMain.handle('export.getSettings', () => {
-    try { return { ok: true, settings: getExportSettings() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('export.saveSettings', async (_e, payload: any) => {
-    try {
-      const ok = setExportSettings(payload || {});
-      // If enabling, try to start the export server immediately (best-effort)
-      try {
-        const cfg = loadConfig();
-        const s = cfg.exportServer || getExportSettings();
-        if (s && s.enabled) {
-          const es = await import('./exportServer');
-          try {
-            // start server on configured port
-            const port = Number(s.port || 3001);
-            es.startExportServer(Number(port));
-            try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(port), error: null }); } catch { }
-          } catch (e) {
-            try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s.port || 3001), error: String(e?.message || e) }); } catch { }
-          }
-        } else {
-          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s?.port || 3001), error: null }); } catch { }
-        }
-      } catch (e) { /* ignore best-effort start errors */ }
-      return { ok };
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('export.getConfigPath', () => {
-    try {
-      const p = require('./settings').configPath();
-      return { ok: true, path: p };
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-  ipcMain.handle('export.getStatus', () => {
-    try {
-      // best-effort: check if server is listening by reading config + env
-      const envPort2 = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
-      const cur = loadConfig();
-      const s = cur.exportServer || getExportSettings();
-      const running = !!envPort2 || !!s.enabled;
-      const port = envPort2 || Number(s.port || 3001);
-      return { ok: true, running, port };
-    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
-  });
-
-  // Graphics/GPU設定のIPCハンドラ
-  ipcMain.handle('graphics.getSettings', () => {
-    try {
-      const settings = getGraphicsSettings();
-      return { ok: true, data: settings };
-    } catch (e: any) {
-      logger.error('[graphics] getSettings error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  ipcMain.handle('graphics.saveSettings', async (_e, { graphicsMode, angleMode, disableHttp2, disableQuic, debugGpu }: { graphicsMode?: string; angleMode?: string; disableHttp2?: boolean; disableQuic?: boolean; debugGpu?: boolean }) => {
-    try {
-      const updates: any = {};
-      if (graphicsMode !== undefined) updates.graphicsMode = graphicsMode;
-      if (angleMode !== undefined) updates.angleMode = angleMode;
-      if (disableHttp2 !== undefined) updates.disableHttp2 = disableHttp2;
-      if (disableQuic !== undefined) updates.disableQuic = disableQuic;
-      if (debugGpu !== undefined) updates.debugGpu = debugGpu;
-
-      const ok = setGraphicsSettings(updates);
-      if (ok) {
-        logger.info('[graphics] saveSettings: updated', updates);
-      }
-      return { ok };
-    } catch (e: any) {
-      logger.error('[graphics] saveSettings error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  // 移行機能: コンテナのパスを更新
-  ipcMain.handle('migration.updatePaths', async (_e, { oldBasePath, newBasePath }: { oldBasePath: string; newBasePath: string }) => {
-    try {
-      const updatedCount = DB.updateContainerPaths(oldBasePath, newBasePath);
-      logger.info(`[migration] Updated ${updatedCount} container paths from ${oldBasePath} to ${newBasePath}`);
-      return { ok: true, updatedCount };
-    } catch (e: any) {
-      logger.error('[migration] updatePaths error:', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  // 移行機能: 現在のuserDataパスを取得
-  ipcMain.handle('migration.getUserDataPath', () => {
-    try {
-      const userDataPath = app.getPath('userData');
-      return { ok: true, path: userDataPath };
-    } catch (e: any) {
-      logger.error('[migration] getUserDataPath error:', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
-
-  // Register F11 global shortcut to toggle DevTools for focused view/window
-  try {
-    globalShortcut.register('F11', () => {
-      try {
-        const focusedWindow = BrowserWindow.getFocusedWindow();
-        const windows = focusedWindow ? [focusedWindow] : BrowserWindow.getAllWindows();
-        for (const w of windows) {
-          try {
-            const getViews = (w as any).getBrowserViews;
-            const views = typeof getViews === 'function' ? (w as any).getBrowserViews() as any[] : [];
-            const targetView = (views || []).find(v => v && v.webContents && typeof v.webContents.isFocused === 'function' && v.webContents.isFocused());
-            if (targetView && targetView.webContents) {
-              if (typeof targetView.webContents.isDevToolsOpened === 'function' && targetView.webContents.isDevToolsOpened()) {
-                targetView.webContents.closeDevTools();
-              } else {
-                targetView.webContents.openDevTools({ mode: 'detach' });
-              }
-              return;
-            }
-          } catch (e) { /* ignore per-window errors */ }
-        }
-        const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-        if (fw && fw.webContents) {
-          if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
-          else fw.webContents.openDevTools({ mode: 'detach' });
-        }
-      } catch (e) { /* swallow */ }
-    });
-  } catch (e) { logger.error('[main] globalShortcut.register F11 error', e); }
-
-  app.on('activate', async () => {
-    if (BrowserWindow.getAllWindows().length === 0) await createMainWindow();
-  });
-  handleArgv(process.argv);
 });
 
 // If app is launched externally with a container request, open the requested container(s).
@@ -1393,406 +871,7 @@ app.on('will-quit', () => {
   try { if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows(); } catch (e) { console.error('[main] will-quit force close error', e); }
 });
 
-// === IPC（メインUI向け） ===
-ipcMain.handle('containers.list', () => {
-  console.log('[ipc] containers.list');
-  return DB.listContainers();
-});
-ipcMain.handle('containers.get', (_e, { id }: { id: string }) => {
-  console.log('[ipc] containers.get', { id });
-  const container = DB.getContainer(id);
-  if (!container) {
-    throw new Error('container not found');
-  }
-  return container;
-});
-ipcMain.handle('containers.getByName', (_e, { name }: { name: string }) => {
-  console.log('[ipc] containers.getByName', { name });
-  const container = DB.getContainerByName(name);
-  if (!container) {
-    throw new Error('container not found');
-  }
-  return container;
-});
-// コンテナ設定比較機能
-ipcMain.handle('containers.compare', (_e, { successName, failNameOrId }: { successName: string; failNameOrId: string }) => {
-  try {
-    console.log('[ipc] containers.compare', { successName, failNameOrId });
-    const success = DB.getContainerByName(successName);
-    const fail = DB.getContainerByName(failNameOrId) || DB.getContainer(failNameOrId);
 
-    if (!success) {
-      return { ok: false, error: `成功したコンテナ "${successName}" が見つかりません` };
-    }
-
-    if (!fail) {
-      return { ok: false, error: `失敗したコンテナ "${failNameOrId}" が見つかりません` };
-    }
-
-    // 比較結果を生成
-    const differences: string[] = [];
-    const details: any = {
-      success: {
-        id: success.id,
-        name: success.name,
-        partition: success.partition,
-        userAgent: success.userAgent,
-        locale: success.locale,
-        timezone: success.timezone,
-        proxy: success.proxy ? {
-          server: success.proxy.server,
-          hasUsername: !!success.proxy.username,
-          hasPassword: !!success.proxy.password
-        } : null,
-        fingerprint: success.fingerprint
-      },
-      fail: {
-        id: fail.id,
-        name: fail.name,
-        partition: fail.partition,
-        userAgent: fail.userAgent,
-        locale: fail.locale,
-        timezone: fail.timezone,
-        proxy: fail.proxy ? {
-          server: fail.proxy.server,
-          hasUsername: !!fail.proxy.username,
-          hasPassword: !!fail.proxy.password
-        } : null,
-        fingerprint: fail.fingerprint
-      },
-      differences: []
-    };
-
-    // 各フィールドを比較
-    const compareField = (field: string, successVal: any, failVal: any) => {
-      if (JSON.stringify(successVal) !== JSON.stringify(failVal)) {
-        differences.push(field);
-        details.differences.push({
-          field,
-          success: successVal,
-          fail: failVal
-        });
-      }
-    };
-
-    compareField('partition', success.partition, fail.partition);
-    compareField('userAgent', success.userAgent, fail.userAgent);
-    compareField('locale', success.locale, fail.locale);
-    compareField('timezone', success.timezone, fail.timezone);
-    compareField('proxy.server', success.proxy?.server, fail.proxy?.server);
-    compareField('proxy.hasUsername', !!success.proxy?.username, !!fail.proxy?.username);
-    compareField('proxy.hasPassword', !!success.proxy?.password, !!fail.proxy?.password);
-
-    // Fingerprintの比較
-    if (success.fingerprint && fail.fingerprint) {
-      compareField('fingerprint.acceptLanguage', success.fingerprint.acceptLanguage, fail.fingerprint.acceptLanguage);
-      compareField('fingerprint.viewportWidth', success.fingerprint.viewportWidth, fail.fingerprint.viewportWidth);
-      compareField('fingerprint.viewportHeight', success.fingerprint.viewportHeight, fail.fingerprint.viewportHeight);
-      compareField('fingerprint.deviceScaleFactor', success.fingerprint.deviceScaleFactor, fail.fingerprint.deviceScaleFactor);
-      compareField('fingerprint.screenWidth', success.fingerprint.screenWidth, fail.fingerprint.screenWidth);
-      compareField('fingerprint.screenHeight', success.fingerprint.screenHeight, fail.fingerprint.screenHeight);
-      compareField('fingerprint.colorDepth', success.fingerprint.colorDepth, fail.fingerprint.colorDepth);
-      compareField('fingerprint.connectionType', success.fingerprint.connectionType, fail.fingerprint.connectionType);
-      compareField('fingerprint.canvasNoise', success.fingerprint.canvasNoise, fail.fingerprint.canvasNoise);
-      compareField('fingerprint.fakeIp', success.fingerprint.fakeIp, fail.fingerprint.fakeIp);
-    } else if (success.fingerprint !== fail.fingerprint) {
-      differences.push('fingerprint');
-      details.differences.push({
-        field: 'fingerprint',
-        success: success.fingerprint ? 'あり' : 'なし',
-        fail: fail.fingerprint ? 'あり' : 'なし'
-      });
-    }
-
-    console.log('[ipc] containers.compare result', {
-      successName: success.name,
-      failName: fail.name,
-      differencesCount: differences.length,
-      differences
-    });
-
-    return {
-      ok: true,
-      successName: success.name,
-      failName: fail.name,
-      differences,
-      details
-    };
-  } catch (e: any) {
-    console.error('[ipc] containers.compare error', e);
-    return { ok: false, error: e?.message || String(e) };
-  }
-});
-ipcMain.handle('containers.setNote', (_e, { id, note }) => {
-  try {
-    console.log('[ipc] containers.setNote called', { id, note });
-    const cur = DB.getContainer(id);
-    if (!cur) {
-      console.log('[ipc] containers.setNote: container not found', id);
-      throw new Error('container not found');
-    }
-    DB.upsertContainer({ ...cur, note });
-    console.log('[ipc] containers.setNote: success', { id });
-    return { ok: true };
-  } catch (e: any) {
-    console.error('[ipc] containers.setNote error', e?.message || String(e));
-    return { ok: false, error: e?.message || String(e) };
-  }
-});
-
-// Receive logs from renderer for easier debugging in terminal
-ipcMain.on('renderer.log', (_e, msg) => {
-  try { logger.info('[renderer]', msg); } catch { console.log('[renderer]', msg); }
-});
-ipcMain.handle('containers.create', async (_e, { name, ua, locale, timezone, proxy }) => {
-  console.log('[ipc] containers.create', { name });
-  const id = randomUUID();
-
-  // Consume quota from token before creating container (only if token exists)
-  try {
-    const token = await getToken();
-
-    // If no token, skip quota check and allow creation
-    if (!token) {
-      logger.debug('[containers.create] no token set, creating without quota check');
-    } else {
-      const deviceId = getOrCreateDeviceId();
-      const useResp = await callAuthUse(token, deviceId, 1);
-      if (!useResp.ok) {
-        const errorCode = useResp.status === 409 ? 'QUOTA_EXCEEDED' : 'AUTH_FAILED';
-        const errorMsg = useResp.status === 409 ? 'Quota exceeded' : (useResp.error || 'Failed to consume quota');
-        logger.warn('[containers.create] quota consumption failed', { code: errorCode, msg: errorMsg });
-        throw new Error(errorMsg);
-      }
-      logger.debug('[containers.create] quota consumed, remaining:', useResp.data?.remaining_quota);
-    }
-  } catch (err: any) {
-    logger.error('[containers.create] quota check failed', err);
-    throw err;
-  }
-
-  // Create container with fingerprint
-  const fp: Fingerprint = {
-    // ユーザ要望: Accept-Language 日本語固定 / timezone 日本時間固定
-    // locale は ja-JP を既定（後で UI から変更可能）
-    acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
-    locale: 'ja-JP',
-    timezone: 'Asia/Tokyo',
-    platform: 'Win32',
-    hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
-    deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
-    canvasNoise: true,
-    screenWidth: 2560,
-    screenHeight: 1440,
-    viewportWidth: 1280,
-    viewportHeight: 800,
-    colorDepth: 24,
-    maxTouchPoints: 0,
-    deviceScaleFactor: 1.0,
-    cookieEnabled: true,
-    connectionType: '4g',
-    batteryLevel: 1,
-    batteryCharging: true,
-    fakeIp: undefined,
-  };
-  const c: Container = {
-    id,
-    name,
-    userDataDir: path.join(app.getPath('userData'), 'profiles', id),
-    partition: `persist:container-${id}`,
-    userAgent: ua || undefined,
-    locale: locale || 'ja-JP',
-    timezone: timezone || 'Asia/Tokyo',
-    fingerprint: fp,
-    proxy: proxy || null,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    lastSessionId: null
-  };
-  DB.upsertContainer(c);
-  return c;
-});
-
-ipcMain.handle('containers.open', async (_e, { id, url }) => {
-  const c = DB.getContainer(id);
-  if (!c) throw new Error('container not found');
-  const win = await openContainerWindow(c, url);
-  return !!win;
-});
-ipcMain.handle('tabs.navigate', async (_e, { containerId, url }) => {
-  try {
-    const cm = await import('./containerManager');
-    // create a new tab and navigate
-    return cm.createTab(containerId, url);
-  } catch { return false; }
-});
-ipcMain.handle('tabs.create', async (_e, { containerId, url }) => {
-  try { const cm = await import('./containerManager'); return cm.createTab(containerId, url); } catch { return false; }
-});
-ipcMain.handle('tabs.switch', async (_e, { containerId, index }) => {
-  try { const cm = await import('./containerManager'); return cm.switchTab(containerId, index); } catch { return false; }
-});
-ipcMain.handle('tabs.close', async (_e, { containerId, index }) => {
-  try { const cm = await import('./containerManager'); return cm.closeTab(containerId, index); } catch { return false; }
-});
-ipcMain.handle('tabs.back', async (_e, { containerId }) => {
-  try { const cm = await import('./containerManager'); return cm.goBack(containerId); } catch { return false; }
-});
-ipcMain.handle('containers.openByName', async (_e, { name, url }) => {
-  const c = DB.getContainerByName(name) || createContainerWithName(name);
-  const win = await openContainerWindow(c, url);
-  return !!win;
-});
-ipcMain.handle('containers.delete', async (_e, { id }) => {
-  const c = DB.getContainer(id);
-  if (!c) return false;
-  try {
-    const part = c.partition;
-    const { session } = await import('electron');
-    const ses = session.fromPartition(part, { cache: true });
-    await ses.clearStorageData({});
-  } catch { }
-  DB.asyncDeleteContainer(id);
-  return true;
-});
-
-ipcMain.handle('containers.update', async (_e, payload: Partial<Container> & { id: string }) => {
-  console.log('[ipc] containers.update payload=', payload && { id: payload.id, proxy: (payload as any).proxy });
-  const cur = DB.getContainer(payload.id);
-  if (!cur) throw new Error('container not found');
-  const next: Container = {
-    ...cur,
-    ...payload,
-    fingerprint: payload.fingerprint ?? cur.fingerprint,
-    updatedAt: Date.now(),
-  } as Container;
-  // handle proxy if provided
-  if ((payload as any).proxy !== undefined) next.proxy = (payload as any).proxy;
-  DB.upsertContainer(next);
-  return next;
-});
-
-// proxy test endpoint: try to create a request via the proxy (basic TCP connect)
-ipcMain.handle('proxy.test', async (_e, { proxy }) => {
-  console.log('[ipc] proxy.test called, proxy=', proxy);
-  // Enhanced proxy test: supports HTTP proxy (with CONNECT check) and SOCKS5 handshake
-  try {
-    if (!proxy || !proxy.server) return { ok: false, errorCode: 'no_proxy', error: 'no proxy' };
-    const server = String(proxy.server).trim();
-    const username = proxy.username ? String(proxy.username) : undefined;
-    const password = proxy.password ? String(proxy.password) : undefined;
-    const net = await import('node:net');
-
-    // helper: parse host:port pair
-    const parseHostPort = (s: string) => {
-      // remove any scheme or leading "type=" prefix (e.g. "http=", "https=", "socks5=")
-      let t = s.replace(/^\s+|\s+$/g, '');
-      t = t.replace(/^[a-z0-9]+=/i, '');
-      t = t.replace(/^.*:\/\//, '');
-      const parts = t.split(':');
-      const host = parts[0] || '';
-      const port = parseInt(parts[1] || '0');
-      return { host, port };
-    };
-
-    // detect SOCKS5 (prefix or scheme)
-    if (/^socks5:\/\//i.test(server) || /^socks5=/i.test(server)) {
-      // normalize to host:port
-      const withoutScheme = server.replace(/^socks5:\/\//i, '').replace(/^socks5=/i, '');
-      const { host, port } = parseHostPort(withoutScheme);
-      if (!host || !port) return { ok: false, errorCode: 'invalid_format', error: 'invalid socks5 format' };
-
-      return await new Promise((resolve) => {
-        const sock = net.createConnection({ host, port }, async () => {
-          try {
-            // SOCKS5 greeting: no authentication
-            sock.write(Buffer.from([0x05, 0x01, 0x00]));
-            sock.once('data', (d: Buffer) => {
-              if (d.length < 2 || d[0] !== 0x05) {
-                sock.destroy();
-                return resolve({ ok: false, errorCode: 'socks5_invalid_response', error: 'invalid socks5 greeting' });
-              }
-              const method = d[1];
-              if (method !== 0x00) {
-                sock.destroy();
-                return resolve({ ok: false, errorCode: 'socks5_auth_required', error: 'socks5 requires auth', method });
-              }
-              // send CONNECT request to test remote reachability (use 1.1.1.1:443 as target)
-              const addr = Buffer.from([0x01, 1, 1, 1, 1]);
-              const portBuf = Buffer.alloc(2);
-              portBuf.writeUInt16BE(443, 0);
-              const req = Buffer.concat([Buffer.from([0x05, 0x01, 0x00]), addr, portBuf]);
-              sock.write(req);
-              sock.once('data', (resp: Buffer) => {
-                // resp[1] == 0x00 means succeeded
-                const status = resp && resp.length >= 2 ? resp[1] : undefined;
-                sock.end();
-                if (status === 0x00) return resolve({ ok: true, protocol: 'socks5', host, port });
-                else return resolve({ ok: false, errorCode: 'socks5_connect_failed', error: 'socks5 connect failed', status });
-              });
-            });
-          } catch (err: any) {
-            sock.destroy();
-            return resolve({ ok: false, errorCode: 'socks5_error', error: err?.message || String(err) });
-          }
-        });
-        sock.on('error', (err) => resolve({ ok: false, errorCode: 'connect_error', error: err?.message || String(err) }));
-        setTimeout(() => { try { sock.destroy(); } catch { }; resolve({ ok: false, errorCode: 'timeout', error: 'timeout' }); }, 7000);
-      });
-    }
-
-    // HTTP-style proxy rule: could be 'http=host:port;https=host:port' or plain 'host:port' (normalized earlier)
-    // Pick first host:port we can find
-    let candidate = server;
-    // if rules like 'http=host:port;https=host:port', prefer https= then http=
-    const httpsMatch = server.match(/https=([^;]+)/i);
-    const httpMatch = server.match(/http=([^;]+)/i);
-    if (httpsMatch) candidate = httpsMatch[1];
-    else if (httpMatch) candidate = httpMatch[1];
-    // if still contains '=', fallback to after '='
-    if (candidate.includes('=')) candidate = candidate.split('=')[1] || candidate;
-
-    const { host: phost, port: pport } = parseHostPort(candidate);
-    if (!phost || !pport) return { ok: false, errorCode: 'invalid_format', error: 'invalid proxy format' };
-
-    // TCP connect first
-    return await new Promise((resolve) => {
-      const s = net.createConnection({ host: phost, port: pport }, () => {
-        // attempt HTTP CONNECT to example.com:443 to verify tunnel
-        try {
-          let connectReq = `CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n`;
-          // Add Proxy-Authorization header if credentials are provided
-          if (username && password) {
-            const auth = Buffer.from(`${username}:${password}`).toString('base64');
-            connectReq += `Proxy-Authorization: Basic ${auth}\r\n`;
-          }
-          connectReq += `\r\n`;
-          s.write(connectReq);
-          let acc = '';
-          const onData = (d: Buffer) => {
-            acc += d.toString('utf8');
-            // check for status line
-            const m = acc.match(/^HTTP\/\d\.\d\s+(\d{3})/m);
-            if (m) {
-              const status = parseInt(m[1], 10);
-              s.end();
-              if (status >= 200 && status < 300) return resolve({ ok: true, protocol: 'http', host: phost, port: pport, httpStatus: status });
-              return resolve({ ok: false, errorCode: 'http_tunnel_failed', error: `tunnel status ${status}`, httpStatus: status });
-            }
-            // simple safety: if headers exceed 8kb, bail
-            if (acc.length > 8192) { s.end(); return resolve({ ok: false, errorCode: 'http_no_status', error: 'no http status in response' }); }
-          };
-          s.on('data', onData);
-          s.on('error', (err) => { try { s.destroy(); } catch { }; resolve({ ok: false, errorCode: 'connect_error', error: err?.message || String(err) }); });
-          setTimeout(() => { try { s.destroy(); } catch { }; resolve({ ok: false, errorCode: 'timeout', error: 'timeout' }); }, 7000);
-        } catch (err: any) { try { s.destroy(); } catch { }; resolve({ ok: false, errorCode: 'write_error', error: err?.message || String(err) }); }
-      });
-      s.on('error', (err) => resolve({ ok: false, errorCode: 'connect_error', error: err?.message || String(err) }));
-    });
-  } catch (e: any) {
-    return { ok: false, errorCode: 'unknown', error: e?.message || String(e) };
-  }
-});
 
 // Bookmarks IPC handlers are defined in src/main/ipc.ts to avoid duplicate registration
 
@@ -1896,3 +975,375 @@ app.on('second-instance', (_event, argv) => {
     mainWindow.focus();
   }
 });
+
+export function registerMainIpcHandlers() {
+
+  // --- App Actions ---
+  ipcMain.handle('app.getVersion', () => {
+    try { return app.getVersion(); } catch { return 'unknown'; }
+  });
+  ipcMain.handle('app.openSettings', () => {
+    try { createSettingsWindow(); return { ok: true }; } catch (e: any) { logger.error('[ipc] app.openSettings error', e); return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('app.checkForUpdates', async () => {
+    return { ok: false, error: 'Auto-update disabled in this version' };
+  });
+  ipcMain.handle('app.exit', () => {
+    try { isQuitting = true; app.quit(); return { ok: true }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  // --- Auth/Token Actions ---
+  ipcMain.handle('auth.saveToken', async (_e, { token }) => {
+    try { const ok = await saveToken(token); return { ok }; } catch (e: any) { logger.error('[auth] saveToken error', e); return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('auth.getToken', async () => {
+    try { const t = await getToken(); return { ok: true, token: t }; } catch (e: any) { logger.error('[auth] getToken error', e); return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('auth.clearToken', async () => {
+    try { await clearToken(); return { ok: true }; } catch (e: any) { logger.error('[auth] clearToken error', e); return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('auth.getDeviceId', async () => {
+    try {
+      const id = getOrCreateDeviceId();
+      return { ok: true, deviceId: id };
+    } catch (e: any) {
+      logger.error('[auth] getDeviceId error', e);
+      return { ok: false, error: e?.message || String(e) };
+    }
+  });
+  ipcMain.handle('auth.validateToken', async (_e, { token }: { token?: string }) => {
+    const MAX_RETRIES = 3;
+    const BASE_URL = getAuthApiBase();
+    const timeoutMs = getAuthTimeoutMs();
+    try {
+      const t = token || await getToken();
+      if (!t) return { ok: false, code: 'NO_TOKEN' };
+      const deviceId = getOrCreateDeviceId();
+      const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
+      const containerCount = DB.listContainers().length;
+      const doFetch = async () => {
+        const ac = new AbortController();
+        const id = setTimeout(() => ac.abort(), timeoutMs);
+        try {
+          const res = await (global as any).fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              device_id: deviceId,
+              device_info: { name: app.getName(), hostname: app.getName() },
+              current_container_count: containerCount
+            }),
+            signal: ac.signal
+          });
+          clearTimeout(id);
+          const j = await res.json().catch(() => null);
+          return { res, j };
+        } catch (err: any) { clearTimeout(id); throw err; }
+      };
+      let attempt = 0;
+      while (true) {
+        try {
+          attempt++;
+          const { res, j } = await doFetch();
+          if (!res.ok) {
+            if (res.status >= 400 && res.status < 500) return { ok: false, status: res.status, body: j };
+            if (res.status >= 500) throw new Error(`server ${res.status}`);
+          }
+          const data = j && j.data ? j.data : j;
+          return { ok: true, data };
+        } catch (err: any) {
+          if (attempt >= MAX_RETRIES) return { ok: false, error: err?.message || String(err) };
+          const backoff = 200 * Math.pow(2, attempt - 1);
+          await new Promise(r => setTimeout(r, backoff));
+        }
+      }
+    } catch (err: any) { return { ok: false, error: err?.message || String(err) }; }
+  });
+  ipcMain.handle('auth.heartbeat', async (_e, { token }: { token?: string }) => {
+    const MAX_RETRIES = 3;
+    const BASE_URL = getAuthApiBase();
+    const timeoutMs = getAuthTimeoutMs();
+    try {
+      const t = token || await getToken();
+      if (!t) return { ok: false, code: 'NO_TOKEN' };
+      const deviceId = getOrCreateDeviceId();
+      const url = (BASE_URL.replace(/\/$/, '')) + '/auth/heartbeat';
+      const containerCount = DB.listContainers().length;
+      const doFetch = async () => {
+        const ac = new AbortController();
+        const id = setTimeout(() => ac.abort(), timeoutMs);
+        try {
+          const res = await (global as any).fetch(url, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId, current_container_count: containerCount }),
+            signal: ac.signal
+          });
+          clearTimeout(id);
+          const j = await res.json().catch(() => null);
+          return { res, j };
+        } catch (err: any) { clearTimeout(id); throw err; }
+      };
+      let attempt = 0;
+      while (true) {
+        try {
+          attempt++;
+          const { res, j } = await doFetch();
+          if (!res.ok) {
+            if (res.status >= 400 && res.status < 500) return { ok: false, status: res.status, body: j };
+            if (res.status >= 500) throw new Error(`server ${res.status}`);
+          }
+          const data = j && j.data ? j.data : j;
+          return { ok: true, data };
+        } catch (err: any) {
+          if (attempt >= MAX_RETRIES) return { ok: false, error: err?.message || String(err) };
+          const backoff = 200 * Math.pow(2, attempt - 1);
+          await new Promise(r => setTimeout(r, backoff));
+        }
+      }
+    } catch (err: any) { return { ok: false, error: err?.message || String(err) }; }
+  });
+  ipcMain.handle('auth.getSettings', async () => {
+    try { return { ok: true, data: getAuthSettings() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('auth.saveSettings', async (_e, { apiBase }: { apiBase?: string }) => {
+    try {
+      if (apiBase) {
+        try { new URL(apiBase); } catch { return { ok: false, error: 'Invalid URL format' }; }
+        setAuthSettings({ apiBase });
+      }
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  // --- Container Actions ---
+  ipcMain.handle('containers.list', () => { return DB.listContainers(); });
+  ipcMain.handle('containers.get', (_e, { id }: { id: string }) => {
+    const c = DB.getContainer(id);
+    if (!c) throw new Error('container not found');
+    return c;
+  });
+  ipcMain.handle('containers.getByName', (_e, { name }: { name: string }) => {
+    const c = DB.getContainerByName(name);
+    if (!c) throw new Error('container not found');
+    return c;
+  });
+  ipcMain.handle('containers.create', async (_e, { name, ua, locale, timezone, proxy }) => {
+    try {
+      const token = await getToken();
+      if (token) {
+        const deviceId = getOrCreateDeviceId();
+        const useResp = await callAuthUse(token, deviceId, 1);
+        if (!useResp.ok) throw new Error(useResp.status === 409 ? 'Quota exceeded' : 'Auth failed');
+      }
+    } catch (err: any) { throw err; }
+
+    const id = randomUUID();
+    const fp: Fingerprint = {
+      acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
+      locale: 'ja-JP',
+      timezone: 'Asia/Tokyo',
+      platform: 'Win32',
+      hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
+      deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
+      canvasNoise: true,
+      screenWidth: 2560,
+      screenHeight: 1440,
+      viewportWidth: 1280,
+      viewportHeight: 800,
+      colorDepth: 24,
+      maxTouchPoints: 0,
+      deviceScaleFactor: 1.0,
+      cookieEnabled: true,
+      connectionType: '4g',
+      batteryLevel: 1,
+      batteryCharging: true
+    };
+    const c: Container = {
+      id, name, userDataDir: path.join(app.getPath('userData'), 'profiles', id),
+      partition: `persist:container-${id}`,
+      userAgent: ua || undefined, locale: locale || 'ja-JP', timezone: timezone || 'Asia/Tokyo',
+      fingerprint: fp, proxy: proxy || null, createdAt: Date.now(), updatedAt: Date.now(), lastSessionId: null
+    };
+    DB.upsertContainer(c);
+    return c;
+  });
+  ipcMain.handle('containers.open', async (_e, { id, url }) => {
+    const c = DB.getContainer(id);
+    if (!c) throw new Error('container not found');
+    return !!(await openContainerWindow(c, url));
+  });
+  ipcMain.handle('containers.openByName', async (_e, { name, url }) => {
+    const c = DB.getContainerByName(name) || createContainerWithName(name);
+    return !!(await openContainerWindow(c, url));
+  });
+  ipcMain.handle('containers.delete', async (_e, { id }) => {
+    const c = DB.getContainer(id);
+    if (!c) return false;
+    try {
+      const ses = session.fromPartition(c.partition, { cache: true });
+      await ses.clearStorageData({});
+    } catch { }
+    await deleteContainerStorage(id);
+    DB.asyncDeleteContainer(id);
+    return true;
+  });
+  ipcMain.handle('containers.update', async (_e, payload: Partial<Container> & { id: string }) => {
+    const cur = DB.getContainer(payload.id);
+    if (!cur) throw new Error('container not found');
+    const next: Container = { ...cur, ...payload, updatedAt: Date.now() } as Container;
+    // handle proxy if provided
+    if ((payload as any).proxy !== undefined) next.proxy = (payload as any).proxy;
+    DB.upsertContainer(next);
+    return next;
+  });
+  ipcMain.handle('containers.setNote', (_e, { id, note }) => {
+    const cur = DB.getContainer(id);
+    if (!cur) throw new Error('container not found');
+    DB.upsertContainer({ ...cur, note });
+    return { ok: true };
+  });
+
+  // --- Tab Actions ---
+  ipcMain.handle('tabs.navigate', async (_e, { containerId, url }) => {
+    try { const cm = await import('./containerManager'); return cm.createTab(containerId, url); } catch { return false; }
+  });
+  ipcMain.handle('tabs.create', async (_e, { containerId, url }) => {
+    try { const cm = await import('./containerManager'); return cm.createTab(containerId, url); } catch { return false; }
+  });
+  ipcMain.handle('tabs.switch', async (_e, { containerId, index }) => {
+    try { const cm = await import('./containerManager'); return cm.switchTab(containerId, index); } catch { return false; }
+  });
+  ipcMain.handle('tabs.close', async (_e, { containerId, index }) => {
+    try { const cm = await import('./containerManager'); return cm.closeTab(containerId, index); } catch { return false; }
+  });
+  ipcMain.handle('tabs.back', async (_e, { containerId }) => {
+    try { const cm = await import('./containerManager'); return cm.goBack(containerId); } catch { return false; }
+  });
+
+  // --- Export Server Actions ---
+  ipcMain.handle('export.getSettings', () => {
+    try { return { ok: true, settings: getExportSettings() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.saveSettings', async (_e, payload: any) => {
+    try {
+      const ok = setExportSettings(payload || {});
+      try {
+        const cfg = loadConfig();
+        const s = cfg.exportServer || getExportSettings();
+        if (s && s.enabled) {
+          const es = await import('./exportServer');
+          const port = Number(s.port || 3001);
+          es.startExportServer(port);
+          try { mainWindow?.webContents.send('export.server.status', { running: true, port, error: null }); } catch { }
+        } else {
+          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(s?.port || 3001), error: null }); } catch { }
+        }
+      } catch (e) { }
+      return { ok };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.getConfigPath', () => {
+    try { return { ok: true, path: require('./settings').configPath() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('export.getStatus', () => {
+    try {
+      const envPort2 = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
+      const cur = loadConfig();
+      const s = cur.exportServer || getExportSettings();
+      const running = !!envPort2 || !!s.enabled;
+      const port = envPort2 || Number(s.port || 3001);
+      return { ok: true, running, port };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  // --- Graphics Actions ---
+  ipcMain.handle('graphics.getSettings', () => {
+    try { return { ok: true, data: getGraphicsSettings() }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('graphics.saveSettings', async (_e, updates: any) => {
+    try { return { ok: setGraphicsSettings(updates) }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  // --- Migration Actions ---
+  ipcMain.handle('migration.updatePaths', async (_e, { oldBasePath, newBasePath }: { oldBasePath: string; newBasePath: string }) => {
+    try { return { ok: true, updatedCount: DB.updateContainerPaths(oldBasePath, newBasePath) }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+  ipcMain.handle('migration.getUserDataPath', () => {
+    try { return { ok: true, path: app.getPath('userData') }; } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  // --- DevTools Actions ---
+  ipcMain.handle('devtools.toggle', (_e) => {
+    try {
+      const all = BrowserWindow.getAllWindows();
+      for (const w of all) {
+        if (w.webContents && w.webContents.isDevToolsOpened && w.webContents.isDevToolsOpened()) w.webContents.closeDevTools();
+        else w.webContents.openDevTools({ mode: 'detach' });
+      }
+      return true;
+    } catch (e) { return false; }
+  });
+  ipcMain.handle('devtools.toggleView', (_e) => {
+    try {
+      const fw = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+      if (fw && fw.webContents) {
+        if (typeof fw.webContents.isDevToolsOpened === 'function' && fw.webContents.isDevToolsOpened()) fw.webContents.closeDevTools();
+        else fw.webContents.openDevTools({ mode: 'detach' });
+        return true;
+      }
+      return false;
+    } catch (e) { return false; }
+  });
+
+  // --- Proxy Test ---
+  ipcMain.handle('proxy.test', async (_e, { proxy }) => {
+    try {
+      if (!proxy || !proxy.server) return { ok: false, errorCode: 'no_proxy', error: 'no proxy' };
+      const server = String(proxy.server).trim();
+      const username = proxy.username ? String(proxy.username) : undefined;
+      const password = proxy.password ? String(proxy.password) : undefined;
+      const net = await import('node:net');
+      const parseHostPort = (s: string) => {
+        let t = s.replace(/^\s+|\s+$/g, '').replace(/^[a-z0-9]+=/i, '').replace(/^.*:\/\//, '');
+        const parts = t.split(':');
+        return { host: parts[0] || '', port: parseInt(parts[1] || '0') };
+      };
+      if (/^socks5/i.test(server)) {
+        const { host, port } = parseHostPort(server);
+        return await new Promise((resolve) => {
+          const sock = net.createConnection({ host, port }, async () => {
+            try {
+              sock.write(Buffer.from([0x05, 0x01, 0x00]));
+              sock.once('data', (d: Buffer) => {
+                const m = d[1];
+                if (m !== 0x00) { sock.destroy(); return resolve({ ok: false, error: 'socks5 auth required' }); }
+                sock.write(Buffer.concat([Buffer.from([0x05, 0x01, 0x00, 0x01, 1, 1, 1, 1]), Buffer.alloc(2)]));
+                sock.once('data', (resp) => { sock.end(); resolve({ ok: resp[1] === 0x00 }); });
+              });
+            } catch (err) { sock.destroy(); resolve({ ok: false, error: String(err) }); }
+          });
+          sock.on('error', (err) => resolve({ ok: false, error: err.message }));
+          setTimeout(() => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); }, 5000);
+        });
+      }
+      const { host: phost, port: pport } = parseHostPort(server);
+      return await new Promise((resolve) => {
+        const s = net.createConnection({ host: phost, port: pport }, () => {
+          let connectReq = `CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n`;
+          if (username && password) connectReq += `Proxy-Authorization: Basic ${Buffer.from(`${username}:${password}`).toString('base64')}\r\n`;
+          connectReq += `\r\n`;
+          s.write(connectReq);
+          s.on('data', (d) => { s.end(); resolve({ ok: d.toString().includes('200') }); });
+          s.on('error', (err) => { s.destroy(); resolve({ ok: false, error: err.message }); });
+        });
+        s.on('error', (err) => resolve({ ok: false, error: err.message }));
+        setTimeout(() => { s.destroy(); resolve({ ok: false, error: 'timeout' }); }, 5000);
+      });
+    } catch (e: any) { return { ok: false, error: e.message }; }
+  });
+
+  // --- Misc ---
+  ipcMain.on('renderer.log', (_e: any, msg: any) => { logger.info('[renderer]', msg); });
+  app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createMainWindow(); });
+}

@@ -1,16 +1,29 @@
-import { defineConfig } from 'electron-vite';
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import { resolve } from 'node:path';
 
 export default defineConfig({
   main: {
+    plugins: [
+      externalizeDepsPlugin(),
+      {
+        name: 'transform-electron-require',
+        renderChunk(code) {
+          return code.replace(/require\(['"]electron['"]\)/g, 'eval("require")("electron")');
+        }
+      }
+    ],
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),
-        external: ['better-sqlite3', 'keytar'],
+        external: ['electron', 'better-sqlite3', 'keytar', /^node:/],
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs',
+        },
       },
     },
     ssr: {
-      external: ['better-sqlite3', 'keytar'],
+      external: ['electron', 'better-sqlite3', 'keytar'],
     },
   },
   preload: {

@@ -5,7 +5,7 @@
   "author": "revivaleva",
   "private": true,
   "type": "module",
-  "main": "out/main/index.js",
+  "main": "out/main/index.cjs",
   "scripts": {
     "dev": "set ELECTRON_RENDERER_URL=http://127.0.0.1:5173 && set PORT=5173 && set BROWSER=none && electron-vite dev",
     "postinstall": "electron-builder install-app-deps && npm rebuild better-sqlite3 --update-binary || true",
@@ -44,12 +44,7 @@
       "buildResources": "build-resources"
     },
     "files": [
-      "out/**/*",
-      "!node_modules/**/*",
-      "node_modules/better-sqlite3/**/*",
-      "node_modules/keytar/**/*",
-      "node_modules/bindings/**/*",
-      "node_modules/file-uri-to-path/**/*"
+      "out/**/*"
     ],
     "extraResources": [
       {

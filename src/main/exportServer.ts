@@ -3,13 +3,13 @@ import { URL } from 'node:url';
 import { promises as fsp, existsSync, cpSync, rmSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import electron from 'electron';
-const app = (electron as any).app;
-const session = (electron as any).session;
+import { createRequire } from 'node:module';
+const { app, session } = createRequire(import.meta.url)('electron');
 import type { WebContents } from 'electron';
 import { DB } from './db';
 import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, getActiveWebContents } from './containerManager';
 import { getToken, getOrCreateDeviceId } from './tokenStore';
+import { openedById } from './containerState';
 import { getAuthApiBase, getAuthTimeoutMs } from './settings';
 import setCookieParser from 'set-cookie-parser';
 import crypto, { randomUUID } from 'node:crypto';
@@ -1031,6 +1031,16 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
       }
 
+      // List active containers endpoint
+      if (req.method === 'GET' && u.pathname === '/internal/containers/active') {
+        try {
+          const activeIds = Array.from(openedById.keys());
+          return jsonResponse(res, 200, { ok: true, activeIds });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
       // List containers endpoint
       if (req.method === 'GET' && (u.pathname === '/internal/containers/list' || u.pathname === '/internal/containers')) {
         try {
@@ -1218,7 +1228,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           }
 
           // Parse proxy config
-          const proxy: ProxyConfig | null = body.proxy ? {
+          const proxy: ProxyConfig | null | undefined = body.proxy ? {
             server: String(body.proxy.server || ''),
             username: body.proxy.username ? String(body.proxy.username) : undefined,
             password: body.proxy.password ? String(body.proxy.password) : undefined
@@ -1260,7 +1270,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           }
 
           // Parse proxy config if provided (for backward compatibility, but prefer set-proxy endpoint)
-          const proxy: ProxyConfig | null = body.proxy ? {
+          const proxy: ProxyConfig | null | undefined = body.proxy ? {
             server: String(body.proxy.server || ''),
             username: body.proxy.username ? String(body.proxy.username) : undefined,
             password: body.proxy.password ? String(body.proxy.password) : undefined

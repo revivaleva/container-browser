@@ -217,10 +217,10 @@ if (Test-Path -LiteralPath $partitionPath) {
 # Clear cache from profile directory (if exists)
 Write-Log "`n--- Clearing Cache from Profile ---"
 $profilesDir = Join-Path $userDataBase 'profiles'
-$profilePath = Join-Path $profilesDir $container.id
+$profilePath = Join-Path $profilesDir $containerId
 
 if (Test-Path -LiteralPath $profilePath) {
-    Write-Log "Processing profile: $($container.id)"
+    Write-Log "Processing profile: $($containerId)"
     
     foreach ($cacheDirName in $cacheDirNames) {
         $cachePath = Join-Path $profilePath $cacheDirName

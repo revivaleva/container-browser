@@ -1,8 +1,7 @@
+import { app } from 'electron';
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
-import electron from 'electron';
-const app = (electron as any).app;
 import type { Container, CredentialRow, SitePref, TabEntry } from '@shared/types';
 
 let db: Database.Database;
@@ -281,6 +280,15 @@ VALUES(@containerId, @origin, @autoFill, @autoSaveForms)
       }
     });
     tx(ids);
+  },
+  listAllSessions() {
+    return db.prepare('SELECT * FROM sessions ORDER BY startedAt DESC').all();
+  },
+  listAllTabs() {
+    return db.prepare('SELECT * FROM tabs ORDER BY updatedAt DESC').all();
+  },
+  listAllSitePrefs() {
+    return db.prepare('SELECT * FROM site_prefs').all();
   },
   // 移行機能: コンテナのuserDataDirパスを更新
   updateContainerPaths(oldBasePath: string, newBasePath: string) {

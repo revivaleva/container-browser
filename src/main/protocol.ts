@@ -1,5 +1,4 @@
-import electron from 'electron';
-const app = (electron as any).app;
+import { app } from 'electron';
 import path from 'node:path';
 
 export function registerCustomProtocol() {

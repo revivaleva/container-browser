@@ -1,7 +1,6 @@
+import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import electron from 'electron';
-const app = (electron as any).app;
 import archiver from 'archiver';
 import extractZip from 'extract-zip';
 import { DB } from './db';

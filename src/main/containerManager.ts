@@ -1,18 +1,12 @@
-import electron from 'electron';
-const app = (electron as any).app;
-const BrowserWindow = (electron as any).BrowserWindow;
-const BrowserView = (electron as any).BrowserView;
-const ipcMain_ = (electron as any).ipcMain;
-const session = (electron as any).session;
-const net = (electron as any).net;
+import { app, BrowserWindow, BrowserView, session, net, ipcMain } from 'electron';
 import type { BrowserWindow as BrowserWindowType, BrowserView as BrowserViewType, Session as SessionType, WebContents as WebContentsType } from 'electron';
 
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Container } from '../shared/types';
 import { DB } from './db';
-import { existsSync } from 'node:fs';
-import { proxyCredentialsByPartition, proxyCredentialsByHostPort } from './index';
+import fs, { existsSync } from 'node:fs';
+import { OpenedContainer, openedById, proxyCredentialsByPartition, proxyCredentialsByHostPort } from './containerState';
 
 // プロキシ関連ログのみを表示するモード（LOG_ONLY_PROXY=1）
 const LOG_ONLY_PROXY = process.env.LOG_ONLY_PROXY === '1';
@@ -102,8 +96,7 @@ if (LOG_ONLY_PROXY) {
 
 type OpenOpts = { restore?: boolean; singleTab?: boolean };
 
-type OpenedContainer = { win: BrowserWindowType; views: BrowserViewType[]; activeIndex: number; sessionId: string };
-const openedById = new Map<string, OpenedContainer>();
+// State moved to containerState.ts
 let isRestoringGlobal = false;
 let mainWindowRef: BrowserWindowType | null = null;
 
@@ -709,7 +702,7 @@ async function runWarmupViaHiddenView(options: {
 
       // 補助warmup: loadURL（任意、失敗してもwarmup全体の合否には影響しない）
       try {
-        const testWin = new BrowserWindow({
+        const authWindow = new BrowserWindow({
           show: false,
           webPreferences: {
             partition: partition,
@@ -721,11 +714,11 @@ async function runWarmupViaHiddenView(options: {
         });
 
         try {
-          testWin.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
-          (testWin.webContents as any)._containerId = containerId;
+          authWindow.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+          (authWindow.webContents as any)._containerId = containerId;
         } catch (e) { }
 
-        const loadUrlResult = await warmupLoad(testWin, nonSnsUrls[0].url, 8000);
+        const loadUrlResult = await warmupLoad(authWindow, nonSnsUrls[0].url, 8000);
         proxyLog.log(`[proxy-warmup] loadURL warmup (auxiliary) result`, {
           containerId,
           proxy: hostPort,
@@ -736,7 +729,7 @@ async function runWarmupViaHiddenView(options: {
         });
 
         try {
-          testWin.destroy();
+          authWindow.destroy();
         } catch (e) { }
       } catch (e) {
         // 補助warmupの失敗は無視
@@ -2296,6 +2289,23 @@ export async function openContainerWindow(container: Container, startUrl?: strin
 
     // Forward navigation/title/favicon events from the BrowserView to the shell window
     try {
+      v.webContents.on('did-redirect-navigation', (_e: Electron.Event, details: Electron.DidRedirectNavigationEvent) => {
+        try {
+          const entry = openedById.get(container.id);
+          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+          console.log('[main] view did-redirect-navigation', {
+            url: details.url,
+            containerId: container.id,
+            sessionId,
+            tabIndex,
+            isMainFrame: details.isMainFrame,
+            resourceType: details.resourceType,
+            httpResponseCode: details.httpResponseCode,
+            referrer: details.referrer,
+            originalUrl: details.originalURL
+          });
+        } catch (e) { console.error('[main] did-redirect-navigation handler error', e); }
+      });
       v.webContents.on('did-navigate', (_e, url) => {
         try {
           const entry = openedById.get(container.id);
@@ -2321,7 +2331,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           console.log('[main] view did-finish-load url=', url, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
         } catch (e) { console.error('[main] did-finish-load handler error', e); }
       });
-      v.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      v.webContents.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string, isMainFrame: boolean) => {
         try {
           const entry = openedById.get(container.id);
           const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
@@ -2364,7 +2374,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           }
         } catch (e) { console.error('[main] render-process-gone handler error', e); }
       });
-      v.webContents.on('page-title-updated', (_e, title) => {
+      v.webContents.on('page-title-updated', (_e: any, title: string) => {
         try {
           const entry = openedById.get(container.id);
           const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
@@ -2379,7 +2389,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
           }
         } catch (e) { console.error('[main] sendCtx from view title-updated error', e); }
       });
-      v.webContents.on('page-favicon-updated', (_e, favs) => {
+      v.webContents.on('page-favicon-updated', (_e: any, favs: string[]) => {
         try {
           const entry = openedById.get(container.id);
           const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
@@ -2405,7 +2415,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title: `Dev-${containerName}`, favicon: '/favicon.ico', scrollY: 0, updatedAt: Date.now() });
             const ctx = getContextForWindow(win);
             if (ctx) win.webContents.send('container.context', ctx);
-            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: true, containerName }); } catch (e) { /* ignore */ }
+            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: true, containerName: containerName || '' }); } catch (e) { /* ignore */ }
           } catch (e) { console.error('[main] devtools-opened handler error', e); }
         });
         v.webContents.on('devtools-closed', () => {
@@ -2413,11 +2423,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
             const entry = openedById.get(container.id);
             const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
             // restore title from page when devtools closed
-            const title = v.webContents.getTitle?.() ?? null;
+            const title = v.webContents.getTitle?.() ?? '';
             DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title, favicon: null, scrollY: 0, updatedAt: Date.now() });
             const ctx = getContextForWindow(win);
             if (ctx) win.webContents.send('container.context', ctx);
-            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: false, containerName: containerRecord.name ?? container.name ?? '' }); } catch (e) { /* ignore */ }
+            const containerRecord = DB.getContainer(container.id);
+            const containerName = containerRecord?.name ?? container.name ?? '';
+            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: false, containerName }); } catch (e) { /* ignore */ }
           } catch (e) { console.error('[main] devtools-closed handler error', e); }
         });
       } catch (e) { /* ignore if devtools events unsupported */ }
@@ -2469,16 +2481,62 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     });
   });
 
-  // startUrlをロード
+  // 1) 先にシェルUI（アドレスバー等）をロードし、ブラウザウィンドウを表示する
+  // これにより、サイトのロードを待たずにUIが表示され「真っ白で固まった」ように見えるのを防ぐ
+  const devUrl = process.env['ELECTRON_RENDERER_URL'];
+  const shellHtml = devUrl ? `${devUrl.replace(/\/\/$/, '')}/containerShell.html` : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'containerShell.html')).toString();
+
+  // シェルUIをロードして表示
+  await win.loadURL(shellHtml);
+  win.show();
+
+  // 2) プロキシが設定されている場合はウォームアップを実行（接続確認）
+  if (container.proxy?.server) {
+    try {
+      proxyLog.log(`[proxy-warmup] Starting warmup for container ${container.id}...`);
+      const warmupResult = await runWarmupViaHiddenView({
+        ses,
+        partition: part,
+        startUrl,
+        proxyServer: container.proxy.server,
+        containerId: container.id
+      });
+
+      warmupState.set(container.id, { ok: warmupResult.ok });
+
+      if (!warmupResult.ok) {
+        proxyLog.warn(`[proxy-warmup] Warmup failed for container ${container.id}: ${warmupResult.error}`);
+        // ウォームアップ失敗でも続行するが、エラーは記録する
+      } else {
+        proxyLog.log(`[proxy-warmup] Warmup SUCCESS for container ${container.id}`);
+      }
+    } catch (e) {
+      console.error('[proxy-warmup] Unexpected error during warmup', e);
+      warmupState.set(container.id, { ok: false });
+    }
+  } else {
+    warmupState.set(container.id, { ok: true });
+  }
+
+  // 3) startUrlをロード（非同期で待機は最小限に）
   if (startUrl) {
     try {
-      // ナビゲーション完了を待機する（API呼び出し時にURLが正しく返るようにするため）
+      // 既にUIは見えているので、ロードを開始
+      console.log('[main] starting startUrl load', { containerId: container.id, startUrl });
+
+      // 非同期でロード（完了を待つが、UIは既に操作可能）
       const navPromise = waitForNavigationComplete(firstView.webContents, 30000); // 30秒タイムアウト
       await firstView.webContents.loadURL(startUrl);
-      await navPromise;
-      console.log('[main] startUrl navigation completed', { containerId: container.id, startUrl, finalUrl: firstView.webContents.getURL() });
+
+      // ナビゲーション完了を待つのをバックグラウンドで行うか検討
+      // ここで await しても、既に win.show() されているので UI は表示されている
+      await navPromise.catch(e => {
+        console.warn('[main] startUrl navigation timeout or error', e.message);
+      });
+
+      console.log('[main] startUrl navigation done', { containerId: container.id, finalUrl: firstView.webContents.getURL() });
     } catch (e) {
-      console.error('[main] load startUrl error', e, { containerId: container.id, startUrl, currentUrl: firstView.webContents.getURL() });
+      console.error('[main] load startUrl error', e, { containerId: container.id, startUrl });
     }
   }
 
@@ -2508,11 +2566,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   const secondTarget = restoreUrls[1] ?? 'about:blank';
   const thirdTarget = restoreUrls[2] ?? 'about:blank';
 
-  // シェルUI（簡易アドレスバー付き）
-  // During development, prefer the renderer dev server so UI changes are hot-reloaded.
-  const devUrl = process.env['ELECTRON_RENDERER_URL'];
-  const shellHtml = devUrl ? `${devUrl.replace(/\/\/$/, '')}/containerShell.html` : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'containerShell.html')).toString();
-  await win.loadURL(shellHtml);
+  // シェルUIは既にロード済み
   // load restored URLs into the two views (firstView and second view if present).
   // If singleTab option is set, only load the first target.
   // Skip restore if startUrl is explicitly provided (to avoid double navigation)
@@ -2537,12 +2591,12 @@ export async function openContainerWindow(container: Container, startUrl?: strin
         const ctxTabs = entry.views.map((vv: any, i: number) => ({ url: vv.webContents.getURL(), tabIndex: i, title: vv.webContents.getTitle?.(), favicon: vv.webContents.getURL && undefined }));
         console.log('[main] restore finished, writing canonical tabs to DB:', ctxTabs);
         for (const t of ctxTabs) {
-          try { DB.addOrUpdateTab({ containerId: container.id, sessionId, url: t.url, tabIndex: t.tabIndex, title: t.title ?? null, favicon: null, scrollY: 0, updatedAt: Date.now() }); } catch (e) { console.error('[main] addOrUpdateTab restore write error', e); }
+          try { DB.addOrUpdateTab({ containerId: container.id, sessionId, url: t.url, tabIndex: t.tabIndex, title: t.title ?? '', favicon: '', scrollY: 0, updatedAt: Date.now() }); } catch (e) { console.error('[main] addOrUpdateTab restore write error', e); }
         }
       } catch (e) { console.error('[main] restore db write error', e); }
     } finally { isRestoringGlobal = false; }
   }
-  win.show();
+  // 既に表示済み
 
   return win;
 }
@@ -2677,7 +2731,8 @@ export function createTab(containerId: string, url: string) {
   try {
     const tabs = entry.views.map(v => ({ url: v.webContents.getURL(), title: v.webContents.getTitle?.() }));
     console.log('[main] createTab sendCtx', { containerId, sessionId: entry.sessionId, url: v.webContents.getURL(), tabsLength: tabs.length });
-    win.webContents.send('container.context', { containerId, sessionId: entry.sessionId, fingerprint: container.fingerprint, currentUrl: v.webContents.getURL(), tabs });
+    const container = DB.getContainer(containerId);
+    win.webContents.send('container.context', { containerId, sessionId: entry.sessionId, fingerprint: container?.fingerprint, currentUrl: v.webContents.getURL(), tabs });
   } catch { }
   return true;
 }
@@ -2812,7 +2867,13 @@ export function navigateContainer(containerId: string, url: string) {
   return true;
 }
 
-ipcMain_.handle('container.navigate', (_e, { containerId, url }) => navigateContainer(containerId, url));
+export function registerContainerIpcHandlers() {
+  const ipc = ipcMain;
+  if (!ipc) return;
+  ipc.handle('container.navigate', (_e, { containerId, url }) => navigateContainer(containerId, url));
+  ipc.handle('tabs.goBack', (_e: any, { containerId }: { containerId: string }) => goBack(containerId));
+  ipc.handle('tabs.goForward', (_e: any, { containerId }: { containerId: string }) => goForward(containerId));
+}
 
 export function goBack(containerId: string) {
   const it = openedById.get(containerId);
@@ -3031,5 +3092,116 @@ export async function clearContainerAllData(containerId: string): Promise<boolea
   }
 }
 
-ipcMain_.handle('tabs.goBack', (_e, { containerId }) => goBack(containerId));
-ipcMain_.handle('tabs.goForward', (_e, { containerId }) => goForward(containerId));
+// handled in registerContainerIpcHandlers
+
+/**
+ * Physically delete storage folders for a container.
+ * This should be called after the container is removed from the database
+ * or during a cleanup of orphaned folders.
+ */
+export async function deleteContainerStorage(containerId: string) {
+  try {
+    const userDataPath = app.getPath('userData');
+    const partitionDirName = `container-${containerId}`;
+
+    const partitionPath = path.join(userDataPath, 'Partitions', partitionDirName);
+    const profilePath = path.join(userDataPath, 'profiles', containerId);
+
+    // Delete partition folder
+    if (fs.existsSync(partitionPath)) {
+      try {
+        fs.rmSync(partitionPath, { recursive: true, force: true });
+        console.log(`[main] Deleted partition folder: ${partitionPath}`);
+      } catch (e) {
+        console.warn(`[main] Failed to delete partition folder (likely in use): ${partitionPath}`);
+      }
+    }
+
+    // Delete profile folder
+    if (fs.existsSync(profilePath)) {
+      try {
+        fs.rmSync(profilePath, { recursive: true, force: true });
+        console.log(`[main] Deleted profile folder: ${profilePath}`);
+      } catch (e) {
+        console.warn(`[main] Failed to delete profile folder (likely in use): ${profilePath}`);
+      }
+    }
+
+    // Delete any backup folders
+    const partitionsParent = path.join(userDataPath, 'Partitions');
+    if (fs.existsSync(partitionsParent)) {
+      const folders = fs.readdirSync(partitionsParent);
+      for (const folder of folders) {
+        if (folder.startsWith(`${partitionDirName}.backup.`)) {
+          const backupPath = path.join(partitionsParent, folder);
+          try {
+            fs.rmSync(backupPath, { recursive: true, force: true });
+            console.log(`[main] Deleted orphan backup partition: ${backupPath}`);
+          } catch (e) { /* ignore */ }
+        }
+      }
+    }
+  } catch (e) {
+    console.error(`[main] Error during deleteContainerStorage for ${containerId}`, e);
+  }
+}
+
+/**
+ * Scans Partitions and profiles directories for folders that don't match any container in the DB.
+ * This helps prevent disk space accumulation from incomplete deletions or migration artifacts.
+ */
+export async function cleanupOrphans() {
+  try {
+    console.log('[main] Starting orphan folder cleanup...');
+    const containers = DB.listContainers();
+    const activeIds = new Set(containers.map(c => c.id));
+    const userDataPath = app.getPath('userData');
+
+    // 1. Cleanup Partitions
+    const partitionsDir = path.join(userDataPath, 'Partitions');
+    if (fs.existsSync(partitionsDir)) {
+      const folders = fs.readdirSync(partitionsDir);
+      for (const folder of folders) {
+        if (!folder.startsWith('container-')) continue;
+
+        // Extract ID (handling both container-ID and container-ID.backup.TIMESTAMP)
+        const idMatch = folder.match(/^container-([0-9a-f-]{36})/i);
+        if (idMatch) {
+          const id = idMatch[1];
+          if (!activeIds.has(id)) {
+            const target = path.join(partitionsDir, folder);
+            console.log(`[main] Found orphan partition folder: ${folder}. Deleting...`);
+            try {
+              fs.rmSync(target, { recursive: true, force: true });
+            } catch (e) {
+              console.warn(`[main] Could not delete orphan partition ${folder} (maybe in use)`);
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Cleanup profiles
+    const profilesDir = path.join(userDataPath, 'profiles');
+    if (fs.existsSync(profilesDir)) {
+      const folders = fs.readdirSync(profilesDir);
+      for (const folder of folders) {
+        // profile folders are just the UUID
+        if (/^[0-9a-f-]{36}$/i.test(folder)) {
+          if (!activeIds.has(folder)) {
+            const target = path.join(profilesDir, folder);
+            console.log(`[main] Found orphan profile folder: ${folder}. Deleting...`);
+            try {
+              fs.rmSync(target, { recursive: true, force: true });
+            } catch (e) {
+              console.warn(`[main] Could not delete orphan profile ${folder}`);
+            }
+          }
+        }
+      }
+    }
+    console.log('[main] Orphan cleanup finished.');
+  } catch (e) {
+    console.error('[main] Error during cleanupOrphans', e);
+  }
+}

@@ -1,5 +1,22 @@
 {
   "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "chat.tools.edit.autoApprove": true,
+  "chat.tools.browser_subagent.autoApprove": true,
+  "chat.tools.autoApprove": true,
+  "chat.agent.autoRun": "always",
+  "chat.agent.autoApprove": true,
+  "composer.tools.terminal.autoApprove": {
+    "/^.*$/i": true,
+    "*": true
+  },
+  "chat.tools.terminal.autoApprove": {
+    "/^.*$/i": true,
+    "*": true,
+    "/^(?:powershell|pwsh|Get-Content|sed|Select-Object|grep|ls|cat|rm|mv|cp|mkdir|npm|node|npx|tsx)\\b/i": {
+      "approve": true,
+      "matchCommandLine": false
+    }
+  },
   "terminal.integrated.profiles.windows": {
     "PowerShell": {
       "source": "PowerShell",
