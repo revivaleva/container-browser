@@ -44,7 +44,11 @@ export function initDB() {
   blockImages INTEGER DEFAULT 0,
   createdAt INTEGER,
   updatedAt INTEGER,
-  lastSessionId TEXT
+  lastSessionId TEXT,
+  kameleoProfileId TEXT,
+  isKameleoAttached INTEGER DEFAULT 0,
+  kameleoProfileMetadata TEXT,
+  kameleoEnv TEXT
 );
 
   CREATE TABLE IF NOT EXISTS sessions(
@@ -112,6 +116,14 @@ export function initDB() {
     if (!hasNote) {
       try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
     }
+    // migrate: add kameleo columns
+    const hasKameleoId = cols.some(c => c.name === 'kameleoProfileId');
+    if (!hasKameleoId) {
+      try { db.prepare('ALTER TABLE containers ADD COLUMN kameleoProfileId TEXT').run(); } catch { }
+      try { db.prepare('ALTER TABLE containers ADD COLUMN isKameleoAttached INTEGER DEFAULT 0').run(); } catch { }
+      try { db.prepare('ALTER TABLE containers ADD COLUMN kameleoProfileMetadata TEXT').run(); } catch { }
+      try { db.prepare('ALTER TABLE containers ADD COLUMN kameleoEnv TEXT').run(); } catch { }
+    }
     // migrate: add blockImages column if missing
     const hasBlockImages = cols.some(c => c.name === 'blockImages');
     if (!hasBlockImages) {
@@ -143,22 +155,34 @@ export function initDB() {
 export const DB = {
   upsertContainer(c: Container) {
     const stmt = db.prepare(`
-      INSERT INTO containers(id, name, note, status, userDataDir, partition, userAgent, locale, timezone, fingerprint, proxy, blockImages, createdAt, updatedAt, lastSessionId)
-VALUES(@id, @name, @note, @status, @userDataDir, @partition, @userAgent, @locale, @timezone, @fingerprint, @proxy, @blockImages, @createdAt, @updatedAt, @lastSessionId)
+      INSERT INTO containers(
+        id, name, note, status, userDataDir, partition, userAgent, locale, timezone, 
+        fingerprint, proxy, blockImages, createdAt, updatedAt, lastSessionId,
+        kameleoProfileId, isKameleoAttached, kameleoProfileMetadata, kameleoEnv
+      )
+      VALUES(
+        @id, @name, @note, @status, @userDataDir, @partition, @userAgent, @locale, @timezone, 
+        @fingerprint, @proxy, @blockImages, @createdAt, @updatedAt, @lastSessionId,
+        @kameleoProfileId, @isKameleoAttached, @kameleoProfileMetadata, @kameleoEnv
+      )
       ON CONFLICT(id) DO UPDATE SET
-name = excluded.name,
-  note = excluded.note,
-  status = excluded.status,
-  userDataDir = excluded.userDataDir,
-  partition = excluded.partition,
-  userAgent = excluded.userAgent,
-  locale = excluded.locale,
-  timezone = excluded.timezone,
-  fingerprint = excluded.fingerprint,
-  proxy = excluded.proxy,
-  blockImages = excluded.blockImages,
-  updatedAt = excluded.updatedAt,
-  lastSessionId = excluded.lastSessionId
+        name = excluded.name,
+        note = excluded.note,
+        status = excluded.status,
+        userDataDir = excluded.userDataDir,
+        partition = excluded.partition,
+        userAgent = excluded.userAgent,
+        locale = excluded.locale,
+        timezone = excluded.timezone,
+        fingerprint = excluded.fingerprint,
+        proxy = excluded.proxy,
+        blockImages = excluded.blockImages,
+        updatedAt = excluded.updatedAt,
+        lastSessionId = excluded.lastSessionId,
+        kameleoProfileId = excluded.kameleoProfileId,
+        isKameleoAttached = excluded.isKameleoAttached,
+        kameleoProfileMetadata = excluded.kameleoProfileMetadata,
+        kameleoEnv = excluded.kameleoEnv
     `);
     stmt.run({
       ...c,
@@ -167,6 +191,10 @@ name = excluded.name,
       fingerprint: c.fingerprint ? JSON.stringify(c.fingerprint) : null,
       proxy: c.proxy ? JSON.stringify(c.proxy) : null,
       blockImages: c.blockImages ? 1 : 0,
+      kameleoProfileId: c.kameleoProfileId ?? null,
+      isKameleoAttached: c.isKameleoAttached ? 1 : 0,
+      kameleoProfileMetadata: c.kameleoProfileMetadata ? JSON.stringify(c.kameleoProfileMetadata) : null,
+      kameleoEnv: c.kameleoEnv ? JSON.stringify(c.kameleoEnv) : null,
     });
   },
   listContainers(): Container[] {
@@ -178,6 +206,9 @@ name = excluded.name,
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
       blockImages: !!r.blockImages,
+      kameleoProfileMetadata: r.kameleoProfileMetadata ? JSON.parse(r.kameleoProfileMetadata) : undefined,
+      isKameleoAttached: !!r.isKameleoAttached,
+      kameleoEnv: r.kameleoEnv ? JSON.parse(r.kameleoEnv) : undefined,
     }));
   },
   getContainer(id: string): Container | undefined {
@@ -190,6 +221,9 @@ name = excluded.name,
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
       blockImages: !!r.blockImages,
+      kameleoProfileMetadata: r.kameleoProfileMetadata ? JSON.parse(r.kameleoProfileMetadata) : undefined,
+      isKameleoAttached: !!r.isKameleoAttached,
+      kameleoEnv: r.kameleoEnv ? JSON.parse(r.kameleoEnv) : undefined,
     } as Container;
   },
   getContainerByName(name: string): Container | undefined {
@@ -197,9 +231,14 @@ name = excluded.name,
     if (!r) return undefined;
     return {
       ...r,
+      note: r.note ?? undefined,
+      status: r.status ?? '未使用',
       proxy: r.proxy ? JSON.parse(r.proxy) : null,
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
       blockImages: !!r.blockImages,
+      kameleoProfileMetadata: r.kameleoProfileMetadata ? JSON.parse(r.kameleoProfileMetadata) : undefined,
+      isKameleoAttached: !!r.isKameleoAttached,
+      kameleoEnv: r.kameleoEnv ? JSON.parse(r.kameleoEnv) : undefined,
     } as Container;
   },
   asyncDeleteContainer(id: string) {

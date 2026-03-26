@@ -45,6 +45,19 @@ export type Container = {
   createdAt: number;
   updatedAt: number;
   lastSessionId?: string | null;
+  kameleoProfileId?: string; // 紐付けられた Kameleo Profile ID
+  isKameleoAttached?: boolean; // 既存プロファイル利用モードかどうかのフラグ
+  kameleoProfileMetadata?: {   // 表示用キャッシュ
+    name: string;
+    isCloud: boolean;
+    tags: string[];
+    status?: string;
+  };
+  kameleoEnv?: {
+    deviceType?: string;
+    os?: string;
+    browser?: string;
+  };
 };
 
 export type CredentialRow = {

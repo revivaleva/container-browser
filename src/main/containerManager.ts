@@ -1702,19 +1702,36 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     }
   } catch { }
   // --- Kameleo Integration Start ---
-  let kameleoProfileId = '';
+  let kameleoProfileId = container.kameleoProfileId || '';
   try {
     const profiles = await KameleoApi.listProfiles();
-    const profileName = `container-browser-${container.id}`;
-    let profile = profiles.find(p => p.name === profileName);
+    let profile: any = null;
+
+    if (kameleoProfileId) {
+      profile = profiles.find(p => p.id === kameleoProfileId);
+      if (!profile) {
+        console.warn(`[main] [kameleo] Explicitly attached profile ${kameleoProfileId} not found for container ${container.id}, searching by name`);
+      }
+    }
 
     if (!profile) {
-      console.log(`[main] [kameleo] Creating new profile for container ${container.id}`);
+      const profileName = `container-browser-${container.id}`;
+      profile = profiles.find(p => p.name === profileName);
+    }
+
+    if (!profile) {
+      console.log(`[main] [kameleo] Creating new profile for container ${container.id} with env:`, container.kameleoEnv);
       try {
         profile = await KameleoApi.createProfile({
-          name: profileName,
-          tags: ['container-browser']
+          name: `container-browser-${container.id}`,
+          tags: ['container-browser'],
+          deviceType: container.kameleoEnv?.deviceType,
+          os: container.kameleoEnv?.os,
+          browser: container.kameleoEnv?.browser,
         });
+        // Save the new ID to DB
+        container.kameleoProfileId = profile.id;
+        DB.upsertContainer(container);
       } catch (err: any) {
         console.warn(`[main] [kameleo] Profile creation failed, falling back to existing profile if possible: ${err.message}`);
         const allProfiles = await KameleoApi.listProfiles();

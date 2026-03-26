@@ -15,6 +15,7 @@ import { getAuthApiBase, getAuthTimeoutMs } from './settings';
 import setCookieParser from 'set-cookie-parser';
 import crypto, { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint, ProxyConfig } from '../shared/types';
+import { KameleoApi } from './kameleoApi';
 import logger from '../shared/logger';
 
 type MediaSelectorRule = { selector: string; type: 'image' | 'video' };
@@ -778,7 +779,8 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             blockImages: blockImages,
             createdAt: Date.now(),
             updatedAt: Date.now(),
-            lastSessionId: null
+            lastSessionId: null,
+            kameleoEnv: body.environment || {} // { deviceType, os, browser }
           };
           DB.upsertContainer(c);
 
@@ -790,6 +792,85 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             // Continue even if opening fails - container is created
           }
 
+          return jsonResponse(res, 200, { ok: true, container: c });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Kameleo Status
+      if (req.method === 'GET' && u.pathname === '/internal/kameleo/status') {
+        try {
+          const status = await KameleoApi.getStatus();
+          return jsonResponse(res, 200, { ok: true, status });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // List Kameleo Profiles
+      if (req.method === 'GET' && u.pathname === '/internal/kameleo/profiles') {
+        try {
+          const profiles = await KameleoApi.listProfiles();
+          return jsonResponse(res, 200, { ok: true, profiles });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Attach Kameleo Profile
+      if (req.method === 'POST' && u.pathname.match(/\/internal\/containers\/([^/]+)\/attach/)) {
+        const match = u.pathname.match(/\/internal\/containers\/([^/]+)\/attach/);
+        const id = match![1];
+        try {
+          const body = await parseBody(req);
+          const profileId = body.profileId;
+          if (!profileId) return jsonResponse(res, 400, { ok: false, error: 'missing profileId' });
+
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          c.kameleoProfileId = profileId;
+          c.isKameleoAttached = true;
+          c.updatedAt = Date.now();
+
+          // Fetch metadata for UI/Cache
+          try {
+            const profiles = await KameleoApi.listProfiles();
+            const p = profiles.find(x => x.id === profileId);
+            if (p) {
+              c.kameleoProfileMetadata = {
+                name: p.name,
+                isCloud: p.isCloud,
+                tags: p.tags,
+                status: p.status
+              };
+            }
+          } catch (me: any) {
+             console.warn('[exportServer] failed to fetch profile metadata for attach', me);
+          }
+
+          DB.upsertContainer(c);
+          return jsonResponse(res, 200, { ok: true, container: c });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Detach Kameleo Profile
+      if (req.method === 'POST' && u.pathname.match(/\/internal\/containers\/([^/]+)\/detach/)) {
+        const match = u.pathname.match(/\/internal\/containers\/([^/]+)\/detach/);
+        const id = match![1];
+        try {
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          c.kameleoProfileId = undefined;
+          c.isKameleoAttached = false;
+          c.kameleoProfileMetadata = undefined;
+          c.updatedAt = Date.now();
+
+          DB.upsertContainer(c);
           return jsonResponse(res, 200, { ok: true, container: c });
         } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });

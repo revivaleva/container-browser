@@ -5,19 +5,15 @@ const KAMELEO_BASE_URL = 'http://localhost:5050';
 export interface KameleoProfile {
   id: string;
   name: string;
+  tags: string[];
+  status: string; // 'running' | 'stopped'
+  persistence: string; // 'local' | 'cloud'
+  isCloud: boolean;
   device: {
     baseProfileId: string;
-    canvas: string;
-    webgl: string;
-    audio: string;
-    fonts: string;
-    geolocation: string;
-    screen: string;
-  };
-  browser: {
-    product: string;
-    majorVersion: number;
-    version: string;
+    platform: string;
+    browser: string;
+    deviceType: string;
   };
   proxy?: {
     type: string;
@@ -49,7 +45,8 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
           }
         } else {
           console.error(`[main] [kameleo] error response: ${res.statusCode} ${data} for ${method} ${path}`);
-          reject(new Error(`Kameleo API error: ${res.statusCode} ${data}`));
+          const errorMsg = data ? ` (${data})` : '';
+          reject(new Error(`Kameleo API error: ${res.statusCode}${errorMsg}`));
         }
       });
     });
@@ -65,20 +62,36 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
 
 export const KameleoApi = {
   async listProfiles(): Promise<KameleoProfile[]> {
-    return request<KameleoProfile[]>('GET', '/profiles');
+    const profiles = await request<any[]>('GET', '/profiles');
+    return profiles.map(p => ({
+        ...p,
+        isCloud: p.persistence === 'cloud'
+    }));
+  },
+
+  async getStatus(): Promise<any> {
+      return request<any>('GET', '/status');
   },
 
   async createProfile(options: { 
     name: string, 
+    deviceType?: string,
+    os?: string,
+    browser?: string,
     proxy?: { type: string, host: string, port: number, username?: string, password?: string },
     tags?: string[]
   }): Promise<KameleoProfile> {
-    // 1. Fetch fingerprints (prefer Windows/Chrome Desktop)
-    const fps = await request<any[]>('GET', '/fingerprints?limit=1&deviceType=desktop&os=windows&browser=chrome');
+    const deviceType = options.deviceType || 'desktop';
+    const os = options.os || 'windows';
+    const browser = options.browser || 'chrome';
+
+    // 1. Fetch fingerprints
+    const query = `limit=1&deviceType=${deviceType}&os=${os}&browser=${browser}`;
+    const fps = await request<any[]>('GET', `/fingerprints?${query}`);
     const fingerprint = (Array.isArray(fps) ? fps[0] : null) || (fps as any).value?.[0];
     
     if (!fingerprint) {
-      console.warn('[main] [kameleo] No specific fingerprints found, trying any desktop');
+      console.warn(`[main] [kameleo] No specific fingerprints found for ${query}, trying any desktop`);
       const anyFps = await request<any[]>('GET', '/fingerprints?limit=1&deviceType=desktop');
       const anyFp = (Array.isArray(anyFps) ? anyFps[0] : null) || (anyFps as any).value?.[0];
       if (!anyFp) throw new Error('No desktop fingerprints found in Kameleo');
@@ -91,7 +104,9 @@ export const KameleoApi = {
   async createProfileInternal(fingerprintId: string, options: any): Promise<KameleoProfile> {
     const body = {
       fingerprintId,
-      ...options,
+      name: options.name,
+      proxy: options.proxy,
+      tags: options.tags || [],
       browser: {
         launcher: 'playwright'
       }
@@ -111,7 +126,7 @@ export const KameleoApi = {
     await request('DELETE', `/profiles/${id}`);
   },
 
-  async updateProfile(id: string, options: Partial<KameleoProfile>): Promise<KameleoProfile> {
+  async updateProfile(id: string, options: any): Promise<KameleoProfile> {
       return request<KameleoProfile>('PATCH', `/profiles/${id}`, options);
   }
 };
