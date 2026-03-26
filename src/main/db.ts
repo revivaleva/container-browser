@@ -46,7 +46,7 @@ export function initDB() {
   updatedAt INTEGER,
   lastSessionId TEXT,
   kameleoProfileId TEXT,
-  isKameleoAttached INTEGER DEFAULT 0,
+  profileMode TEXT DEFAULT 'managed',
   kameleoProfileMetadata TEXT,
   kameleoEnv TEXT
 );
@@ -97,56 +97,61 @@ export function initDB() {
 );
 `);
 
-  // migrate: add fingerprint column if missing
+  // migrate: table_info check
   try {
     const cols = db.prepare('PRAGMA table_info(containers)').all() as any[];
-    const hasFingerprint = cols.some(c => c.name === 'fingerprint');
-    if (!hasFingerprint) {
-      db.prepare('ALTER TABLE containers ADD COLUMN fingerprint TEXT').run();
+    
+    if (!cols.some(c => c.name === 'fingerprint')) {
+        db.prepare('ALTER TABLE containers ADD COLUMN fingerprint TEXT').run();
     }
-    // migrate: add status column if missing (replaces note)
-    const hasStatus = cols.some(c => c.name === 'status');
-    const hasNote = cols.some(c => c.name === 'note');
-    if (!hasStatus) {
-      try {
+    if (!cols.some(c => c.name === 'status')) {
         db.prepare('ALTER TABLE containers ADD COLUMN status TEXT DEFAULT "未使用"').run();
-        // If note column exists, we can use it as reference but status is separate
-      } catch (e) { /* ignore */ }
     }
-    if (!hasNote) {
-      try { db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run(); } catch (e) { /* ignore */ }
+    if (!cols.some(c => c.name === 'note')) {
+        db.prepare('ALTER TABLE containers ADD COLUMN note TEXT').run();
     }
-    // migrate: add kameleo columns
-    const hasKameleoId = cols.some(c => c.name === 'kameleoProfileId');
-    if (!hasKameleoId) {
-      try { db.prepare('ALTER TABLE containers ADD COLUMN kameleoProfileId TEXT').run(); } catch { }
-      try { db.prepare('ALTER TABLE containers ADD COLUMN isKameleoAttached INTEGER DEFAULT 0').run(); } catch { }
-      try { db.prepare('ALTER TABLE containers ADD COLUMN kameleoProfileMetadata TEXT').run(); } catch { }
-      try { db.prepare('ALTER TABLE containers ADD COLUMN kameleoEnv TEXT').run(); } catch { }
+    if (!cols.some(c => c.name === 'kameleoProfileId')) {
+        db.prepare('ALTER TABLE containers ADD COLUMN kameleoProfileId TEXT').run();
     }
-    // migrate: add blockImages column if missing
-    const hasBlockImages = cols.some(c => c.name === 'blockImages');
-    if (!hasBlockImages) {
-      try { db.prepare('ALTER TABLE containers ADD COLUMN blockImages INTEGER DEFAULT 0').run(); } catch (e) { /* ignore */ }
+    
+    // migrate: isKameleoAttached -> profileMode
+    const hasAttached = cols.some(c => c.name === 'isKameleoAttached');
+    const hasMode = cols.some(c => c.name === 'profileMode');
+    if (hasAttached && !hasMode) {
+        db.prepare("ALTER TABLE containers ADD COLUMN profileMode TEXT DEFAULT 'managed'").run();
+        // data migration
+        db.prepare("UPDATE containers SET profileMode = 'attached' WHERE isKameleoAttached = 1").run();
+        db.prepare("UPDATE containers SET profileMode = 'managed' WHERE isKameleoAttached = 0 OR isKameleoAttached IS NULL").run();
+    } else if (!hasMode) {
+        db.prepare("ALTER TABLE containers ADD COLUMN profileMode TEXT DEFAULT 'managed'").run();
     }
-    // migrate: ensure bookmarks have sortOrder column
+
+    if (!cols.some(c => c.name === 'kameleoProfileMetadata')) {
+        db.prepare('ALTER TABLE containers ADD COLUMN kameleoProfileMetadata TEXT').run();
+    }
+    if (!cols.some(c => c.name === 'kameleoEnv')) {
+        db.prepare('ALTER TABLE containers ADD COLUMN kameleoEnv TEXT').run();
+    }
+    if (!cols.some(c => c.name === 'blockImages')) {
+        db.prepare('ALTER TABLE containers ADD COLUMN blockImages INTEGER DEFAULT 0').run();
+    }
+
+    // Bookmarks migration
     try {
       const bcols = db.prepare("PRAGMA table_info(bookmarks)").all() as any[];
-      const hasSort = bcols.some(c => c.name === 'sortOrder');
-      if (!hasSort) {
+      if (!bcols.some(c => c.name === 'sortOrder')) {
         db.prepare('ALTER TABLE bookmarks ADD COLUMN sortOrder INTEGER DEFAULT 0').run();
-        // populate sortOrder with createdAt ordering
         const rows = db.prepare('SELECT id FROM bookmarks ORDER BY createdAt ASC').all();
         const tx = db.transaction((r: any[]) => { for (let i = 0; i < r.length; i++) { db.prepare('UPDATE bookmarks SET sortOrder=? WHERE id=?').run(i, r[i].id); } });
         tx(rows);
       }
     } catch { }
-    // migrate: ensure tabs have tabIndex column
+
+    // Tabs migration
     try {
       const tcols = db.prepare("PRAGMA table_info(tabs)").all() as any[];
-      const hasTabIndex = tcols.some(c => c.name === 'tabIndex');
-      if (!hasTabIndex) {
-        try { db.prepare('ALTER TABLE tabs ADD COLUMN tabIndex INTEGER').run(); } catch (e) { /* ignore */ }
+      if (!tcols.some(c => c.name === 'tabIndex')) {
+        db.prepare('ALTER TABLE tabs ADD COLUMN tabIndex INTEGER').run();
       }
     } catch { }
   } catch { }
@@ -158,12 +163,12 @@ export const DB = {
       INSERT INTO containers(
         id, name, note, status, userDataDir, partition, userAgent, locale, timezone, 
         fingerprint, proxy, blockImages, createdAt, updatedAt, lastSessionId,
-        kameleoProfileId, isKameleoAttached, kameleoProfileMetadata, kameleoEnv
+        kameleoProfileId, profileMode, kameleoProfileMetadata, kameleoEnv
       )
       VALUES(
         @id, @name, @note, @status, @userDataDir, @partition, @userAgent, @locale, @timezone, 
         @fingerprint, @proxy, @blockImages, @createdAt, @updatedAt, @lastSessionId,
-        @kameleoProfileId, @isKameleoAttached, @kameleoProfileMetadata, @kameleoEnv
+        @kameleoProfileId, @profileMode, @kameleoProfileMetadata, @kameleoEnv
       )
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
@@ -180,7 +185,7 @@ export const DB = {
         updatedAt = excluded.updatedAt,
         lastSessionId = excluded.lastSessionId,
         kameleoProfileId = excluded.kameleoProfileId,
-        isKameleoAttached = excluded.isKameleoAttached,
+        profileMode = excluded.profileMode,
         kameleoProfileMetadata = excluded.kameleoProfileMetadata,
         kameleoEnv = excluded.kameleoEnv
     `);
@@ -192,7 +197,7 @@ export const DB = {
       proxy: c.proxy ? JSON.stringify(c.proxy) : null,
       blockImages: c.blockImages ? 1 : 0,
       kameleoProfileId: c.kameleoProfileId ?? null,
-      isKameleoAttached: c.isKameleoAttached ? 1 : 0,
+      profileMode: c.profileMode || 'managed',
       kameleoProfileMetadata: c.kameleoProfileMetadata ? JSON.stringify(c.kameleoProfileMetadata) : null,
       kameleoEnv: c.kameleoEnv ? JSON.stringify(c.kameleoEnv) : null,
     });
@@ -207,9 +212,9 @@ export const DB = {
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
       blockImages: !!r.blockImages,
       kameleoProfileMetadata: r.kameleoProfileMetadata ? JSON.parse(r.kameleoProfileMetadata) : undefined,
-      isKameleoAttached: !!r.isKameleoAttached,
+      profileMode: r.profileMode || 'managed',
       kameleoEnv: r.kameleoEnv ? JSON.parse(r.kameleoEnv) : undefined,
-    }));
+    } as Container));
   },
   getContainer(id: string): Container | undefined {
     const r = db.prepare('SELECT * FROM containers WHERE id=?').get(id);
@@ -222,7 +227,7 @@ export const DB = {
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
       blockImages: !!r.blockImages,
       kameleoProfileMetadata: r.kameleoProfileMetadata ? JSON.parse(r.kameleoProfileMetadata) : undefined,
-      isKameleoAttached: !!r.isKameleoAttached,
+      profileMode: r.profileMode || 'managed',
       kameleoEnv: r.kameleoEnv ? JSON.parse(r.kameleoEnv) : undefined,
     } as Container;
   },
@@ -237,7 +242,7 @@ export const DB = {
       fingerprint: r.fingerprint ? JSON.parse(r.fingerprint) : undefined,
       blockImages: !!r.blockImages,
       kameleoProfileMetadata: r.kameleoProfileMetadata ? JSON.parse(r.kameleoProfileMetadata) : undefined,
-      isKameleoAttached: !!r.isKameleoAttached,
+      profileMode: r.profileMode || 'managed',
       kameleoEnv: r.kameleoEnv ? JSON.parse(r.kameleoEnv) : undefined,
     } as Container;
   },

@@ -46,7 +46,7 @@ export type Container = {
   updatedAt: number;
   lastSessionId?: string | null;
   kameleoProfileId?: string; // 紐付けられた Kameleo Profile ID
-  isKameleoAttached?: boolean; // 既存プロファイル利用モードかどうかのフラグ
+  profileMode?: 'managed' | 'attached'; // プロファイル管理モード ('managed' | 'attached')
   kameleoProfileMetadata?: {   // 表示用キャッシュ
     name: string;
     isCloud: boolean;

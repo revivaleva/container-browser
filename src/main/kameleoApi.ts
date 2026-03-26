@@ -63,6 +63,7 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
 export const KameleoApi = {
   async listProfiles(): Promise<KameleoProfile[]> {
     const profiles = await request<any[]>('GET', '/profiles');
+    if (!Array.isArray(profiles)) return [];
     return profiles.map(p => ({
         ...p,
         isCloud: p.persistence === 'cloud'
@@ -79,7 +80,8 @@ export const KameleoApi = {
     os?: string,
     browser?: string,
     proxy?: { type: string, host: string, port: number, username?: string, password?: string },
-    tags?: string[]
+    tags?: string[],
+    allowFallback?: boolean
   }): Promise<KameleoProfile> {
     const deviceType = options.deviceType || 'desktop';
     const os = options.os || 'windows';
@@ -91,11 +93,15 @@ export const KameleoApi = {
     const fingerprint = (Array.isArray(fps) ? fps[0] : null) || (fps as any).value?.[0];
     
     if (!fingerprint) {
-      console.warn(`[main] [kameleo] No specific fingerprints found for ${query}, trying any desktop`);
-      const anyFps = await request<any[]>('GET', '/fingerprints?limit=1&deviceType=desktop');
-      const anyFp = (Array.isArray(anyFps) ? anyFps[0] : null) || (anyFps as any).value?.[0];
-      if (!anyFp) throw new Error('No desktop fingerprints found in Kameleo');
-      return this.createProfileInternal(anyFp.id, options);
+      if (options.allowFallback) {
+        console.warn(`[main] [kameleo] No specific fingerprints found for ${query}, trying any desktop fallback`);
+        const anyFps = await request<any[]>('GET', '/fingerprints?limit=1&deviceType=desktop');
+        const anyFp = (Array.isArray(anyFps) ? anyFps[0] : null) || (anyFps as any).value?.[0];
+        if (!anyFp) throw new Error('No desktop fingerprints found in Kameleo even with fallback');
+        return this.createProfileInternal(anyFp.id, options);
+      } else {
+        throw new Error(`No matching fingerprints found for: ${query}. Fallback disabled.`);
+      }
     }
 
     return this.createProfileInternal(fingerprint.id, options);

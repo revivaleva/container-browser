@@ -81,6 +81,30 @@ await migrationAPI.importCredentials({ credentials });
 - `containersAPI.update(payload)` - コンテナを更新（プロキシ、ステータス、メモなど）
 - `containersAPI.setNote({ id, note })` - メモのみを設定
 
-### 詳細ドキュメント
+## Kameleo 統合 (Internal API)
 
-詳細なAPI仕様は [プロジェクト概要](docs/PROJECT_OVERVIEW.md#コンテナ管理api) を参照してください。
+本アプリは Kameleo Local API と連携し、ブラウザの指紋偽装と Playwright による自動操作を提供します。
+
+### プロファイル管理モード (`profileMode`)
+- **`managed` (デフォルト)**: コンテナ作成時に Kameleo プロファイルを自動生成します。ウィンドウを閉じると自動的に停止します。
+- **`attached`**: 既存の Kameleo プロファイル ID をコンテナに紐付けます。他プロセスで起動中のプロファイルを共用する場合、本アプリ終了時にプロファイルを停止しません。
+
+### 内部 API エンドポイント (Port 3001)
+
+- `GET /internal/kameleo/status`: Kameleo との接続状態を確認。
+- `GET /internal/kameleo/profiles`: 利用可能な Kameleo プロファイル一覧を取得。
+- `POST /internal/containers/create`:
+  - `name`: コンテナ名
+  - `environment`: `{ deviceType, os, browser }` を指定して特定の指紋でプロファイルを生成。
+- `POST /internal/containers/{id}/attach`:
+  - `profileId`: 紐付ける Kameleo プロファイル ID。バリデーション（存在確認）が行われます。
+- `POST /internal/containers/{id}/detach`: 紐付けを解除し、`managed` モードに戻します。
+
+### 注意事項
+- **動作環境**: ローカルの Port 5050 で Kameleo が動作している必要があります。
+- **Single-tab 制約**: 現在のバージョンは 1 コンテナにつき 1 タブ (Single Window/Single Page) の操作を前提としています。`switchTab` などのマルチタブ操作 API は現在対応していません。
+- **プロキシ更新**: attached プロパティの場合、意図しない設定変更を防ぐため、プロファイルが `stopped` 状態の時のみプロキシ情報を更新します。
+
+## 詳細ドキュメント
+
+詳細な手順は [移行ガイド](docs/migration_guide.md) を参照してください。

@@ -830,28 +830,29 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           const c = DB.getContainer(id);
           if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
 
-          c.kameleoProfileId = profileId;
-          c.isKameleoAttached = true;
-          c.updatedAt = Date.now();
-
-          // Fetch metadata for UI/Cache
+          // Validation: Check if profile exists in Kameleo
           try {
             const profiles = await KameleoApi.listProfiles();
             const p = profiles.find(x => x.id === profileId);
-            if (p) {
-              c.kameleoProfileMetadata = {
-                name: p.name,
-                isCloud: p.isCloud,
-                tags: p.tags,
-                status: p.status
-              };
+            if (!p) {
+              return jsonResponse(res, 404, { ok: false, error: `Kameleo profile ${profileId} not found.` });
             }
-          } catch (me: any) {
-             console.warn('[exportServer] failed to fetch profile metadata for attach', me);
-          }
 
-          DB.upsertContainer(c);
-          return jsonResponse(res, 200, { ok: true, container: c });
+            c.kameleoProfileId = profileId;
+            c.profileMode = 'attached';
+            c.updatedAt = Date.now();
+            c.kameleoProfileMetadata = {
+              name: p.name,
+              isCloud: p.isCloud,
+              tags: p.tags,
+              status: p.status
+            };
+            
+            DB.upsertContainer(c);
+            return jsonResponse(res, 200, { ok: true, container: c, profileStatus: p.status });
+          } catch (me: any) {
+             return jsonResponse(res, 500, { ok: false, error: `Failed to validate Kameleo profile: ${me.message}` });
+          }
         } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
@@ -866,7 +867,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
 
           c.kameleoProfileId = undefined;
-          c.isKameleoAttached = false;
+          c.profileMode = 'managed'; // Reset to managed
           c.kameleoProfileMetadata = undefined;
           c.updatedAt = Date.now();
 

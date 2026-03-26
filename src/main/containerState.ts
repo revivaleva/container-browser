@@ -6,6 +6,7 @@ export type OpenedContainer = {
     kameleoProfileId: string;
     playwrightPage: any;
     sessionId: string;
+    startedByThisProcess: boolean; // このプロセスで起動 (start) したかどうか
 };
 
 // Container window state

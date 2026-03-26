@@ -1703,66 +1703,66 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   } catch { }
   // --- Kameleo Integration Start ---
   let kameleoProfileId = container.kameleoProfileId || '';
+  let startedByThisProcess = false;
   try {
     const profiles = await KameleoApi.listProfiles();
     let profile: any = null;
 
     if (kameleoProfileId) {
       profile = profiles.find(p => p.id === kameleoProfileId);
-      if (!profile) {
-        console.warn(`[main] [kameleo] Explicitly attached profile ${kameleoProfileId} not found for container ${container.id}, searching by name`);
-      }
     }
 
-    if (!profile) {
+    if (!profile && container.profileMode !== 'attached') {
       const profileName = `container-browser-${container.id}`;
       profile = profiles.find(p => p.name === profileName);
     }
 
     if (!profile) {
-      console.log(`[main] [kameleo] Creating new profile for container ${container.id} with env:`, container.kameleoEnv);
-      try {
-        profile = await KameleoApi.createProfile({
-          name: `container-browser-${container.id}`,
-          tags: ['container-browser'],
-          deviceType: container.kameleoEnv?.deviceType,
-          os: container.kameleoEnv?.os,
-          browser: container.kameleoEnv?.browser,
-        });
-        // Save the new ID to DB
-        container.kameleoProfileId = profile.id;
-        DB.upsertContainer(container);
-      } catch (err: any) {
-        console.warn(`[main] [kameleo] Profile creation failed, falling back to existing profile if possible: ${err.message}`);
-        const allProfiles = await KameleoApi.listProfiles();
-        profile = allProfiles.find(p => p.name === 'Kameleo-PoC') || allProfiles[0];
-        if (!profile) throw err;
-        console.log(`[main] [kameleo] Using fallback profile: ${profile.name} (${profile.id})`);
+      if (container.profileMode === 'attached') {
+        throw new Error(`Attached profile ${kameleoProfileId} not found in Kameleo.`);
       }
+      console.log(`[main] [kameleo] Creating new profile for container ${container.id} with env:`, container.kameleoEnv);
+      profile = await KameleoApi.createProfile({
+        name: `container-browser-${container.id}`,
+        tags: ['container-browser'],
+        deviceType: container.kameleoEnv?.deviceType,
+        os: container.kameleoEnv?.os,
+        browser: container.kameleoEnv?.browser,
+      });
+      // Save the new ID to DB
+      container.kameleoProfileId = profile.id;
+      container.profileMode = 'managed';
+      DB.upsertContainer(container);
     }
     kameleoProfileId = profile.id;
 
-    // Update profile with container settings (proxy, etc.)
-    const updateOptions: any = {};
-    if (container.proxy) {
-        const hostPort = extractProxyHostPort(container.proxy.server);
-        const [host, port] = hostPort.split(':');
-        updateOptions.proxy = {
-            type: container.proxy.server.startsWith('socks5') ? 'socks5' : 'http',
-            host,
-            port: parseInt(port) || 80,
-            username: container.proxy.username,
-            password: container.proxy.password
-        };
-    }
-    try {
+    // Proxy Update Policy: Only if stopped (avoid side effects during run)
+    if (container.proxy && profile.status === 'stopped') {
+      const hostPort = extractProxyHostPort(container.proxy.server);
+      const [host, port] = hostPort.split(':');
+      const updateOptions = {
+        proxy: {
+          type: container.proxy.server.startsWith('socks5') ? 'socks5' : 'http',
+          host,
+          port: parseInt(port) || 80,
+          username: container.proxy.username,
+          password: container.proxy.password
+        }
+      };
+      try {
         await KameleoApi.updateProfile(kameleoProfileId, updateOptions);
-    } catch (err) {
-        console.warn(`[main] [kameleo] Profile update failed (might be subscription limit), proceeding without update: ${err}`);
+      } catch (err) {
+        console.warn(`[main] [kameleo] Profile proxy update failed: ${err}`);
+      }
     }
 
-    console.log(`[main] [kameleo] Starting profile ${kameleoProfileId} for container ${container.id}`);
-    await KameleoApi.startProfile(kameleoProfileId);
+    if (profile.status === 'stopped') {
+      console.log(`[main] [kameleo] Starting profile ${kameleoProfileId} for container ${container.id}`);
+      await KameleoApi.startProfile(kameleoProfileId);
+      startedByThisProcess = true;
+    } else {
+      console.log(`[main] [kameleo] Profile ${kameleoProfileId} is already ${profile.status}, skipping start call`);
+    }
   } catch (e) {
     console.error(`[main] [kameleo] Failed to manage profile for container ${container.id}`, e);
     throw e;
@@ -1811,9 +1811,17 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     openedById.delete(container.id);
     try {
       await PlaywrightService.disconnect(kameleoProfileId);
-      await KameleoApi.stopProfile(kameleoProfileId);
+      
+      // Auto-stop policy: managed は常にストップ、attached はこのプロセスで開始した場合のみストップ
+      const shouldStop = container.profileMode === 'managed' || startedByThisProcess;
+      if (shouldStop) {
+        console.log(`[main] [kameleo] Auto-stopping profile ${kameleoProfileId} (Mode: ${container.profileMode}, Started: ${startedByThisProcess})`);
+        await KameleoApi.stopProfile(kameleoProfileId);
+      } else {
+        console.log(`[main] [kameleo] Keeping profile ${kameleoProfileId} running (Mode: ${container.profileMode}, Started: ${startedByThisProcess})`);
+      }
     } catch (e) {
-      console.error(`[main] [kameleo] Error stopping profile ${kameleoProfileId} on window close`, e);
+      console.error(`[main] [kameleo] Error during window close cleanup for profile ${kameleoProfileId}`, e);
     }
   });
 
@@ -1823,7 +1831,8 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     sessionId,
     win,
     kameleoProfileId,
-    playwrightPage
+    playwrightPage,
+    startedByThisProcess
   } as any);
 
   // Proxy Playwright events to Electron Shell
