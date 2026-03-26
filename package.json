@@ -1,7 +1,7 @@
 {
-  "name": "container-browser",
+  "name": "container-browser-for-kameleo",
   "version": "0.5.6",
-  "description": "Container Browser",
+  "description": "Container Browser for Kameleo",
   "author": "revivaleva",
   "private": true,
   "type": "module",
@@ -21,6 +21,7 @@
     "electron-updater": "^6.3.9",
     "file-uri-to-path": "^2.0.0",
     "keytar": "^7.9.0",
+    "playwright-core": "^1.42.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "set-cookie-parser": "^2.7.2",
@@ -38,8 +39,8 @@
     "vite": "^5.4.3"
   },
   "build": {
-    "appId": "com.example.container-browser",
-    "productName": "Container Browser",
+    "appId": "com.example.container-browser-for-kameleo",
+    "productName": "Container Browser for Kameleo",
     "directories": {
       "buildResources": "build-resources"
     },
@@ -60,7 +61,7 @@
     },
     "win": {
       "sign": null,
-      "artifactName": "Container-Browser-Web-Setup-${version}.${ext}",
+      "artifactName": "Container-Browser-For-Kameleo-Web-Setup-${version}.${ext}",
       "target": [
         "nsis-web",
         {

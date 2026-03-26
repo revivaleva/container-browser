@@ -1,10 +1,11 @@
-import type { BrowserWindow as BrowserWindowType, BrowserView as BrowserViewType } from 'electron';
+import type { BrowserWindow as BrowserWindowType } from 'electron';
 
 export type OpenedContainer = {
+    id: string;
     win: BrowserWindowType;
-    views: BrowserViewType[];
-    activeIndex: number;
-    sessionId: string
+    kameleoProfileId: string;
+    playwrightPage: any;
+    sessionId: string;
 };
 
 // Container window state

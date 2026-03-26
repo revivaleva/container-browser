@@ -5,10 +5,10 @@ import crypto from 'node:crypto';
 let keytar: any = null;
 try { keytar = require('keytar'); } catch(e) { keytar = null; }
 
-const SERVICE_NAME = 'container-browser-token';
+const SERVICE_NAME = 'container-browser-for-kameleo-token';
 const ACCOUNT_NAME = 'default';
 
-const fallbackFile = path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'container-browser', 'token.enc');
+const fallbackFile = path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'container-browser-for-kameleo', 'token.enc');
 
 function ensureDir(filePath: string) {
   const dir = path.dirname(filePath);
@@ -17,7 +17,7 @@ function ensureDir(filePath: string) {
 
 function getMasterKey() {
   // derive a local master key from machine id + app name; best-effort fallback
-  const seed = (process.env.COMPUTERNAME || os.hostname() || 'local') + '::container-browser';
+  const seed = (process.env.COMPUTERNAME || os.hostname() || 'local') + '::container-browser-for-kameleo';
   return crypto.createHash('sha256').update(seed).digest();
 }
 

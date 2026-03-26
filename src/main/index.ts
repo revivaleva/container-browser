@@ -187,7 +187,13 @@ async function createMainWindow() {
         for (const c of candidates) {
           if (await tryUrl(c).catch(() => false)) {
             if (mainWindow) {
-              try { await mainWindow.loadURL(c); loaded = true; break; } catch { }
+              try {
+                await mainWindow.loadURL(c);
+                mainWindow.show();
+                mainWindow.focus();
+                loaded = true;
+                break;
+              } catch { }
             }
           }
         }
@@ -602,6 +608,11 @@ app.whenReady().then(async () => {
   registerGeneralIpcHandlers();
   registerMainIpcHandlers();
 
+  // --- データベース初期化 ---
+  console.log('[DEBUG] Initializing database...');
+  initDB();
+  console.log('[DEBUG] Database initialized');
+
   // 起動時に不要なフォルダ（削除済みコンテナの残りカスや古いバックアップ）をクリーンアップ
   cleanupOrphans().catch(err => console.error('[main] cleanupOrphans failed', err));
 
@@ -615,11 +626,11 @@ app.whenReady().then(async () => {
   // Electron や container-browser 固有の文字列が含まれると bot 判定されるため除去
   if (app.userAgentFallback) {
     app.userAgentFallback = app.userAgentFallback
-      .replace(/container-browser\/[0-9\.]+ /g, '')
+      .replace(/container-browser(-for-kameleo)?\/[0-9\.]+ /g, '')
       .replace(/Electron\/[0-9\.]+ /g, '');
   } else {
     app.userAgentFallback = session.defaultSession.getUserAgent()
-      .replace(/container-browser\/[0-9\.]+ /g, '')
+      .replace(/container-browser(-for-kameleo)?\/[0-9\.]+ /g, '')
       .replace(/Electron\/[0-9\.]+ /g, '');
   }
 
@@ -641,7 +652,7 @@ app.whenReady().then(async () => {
         const featureStatus = app.getGPUFeatureStatus();
         console.log('[gpu] featureStatus', JSON.stringify(featureStatus, null, 2));
 
-        const gpuInfo = app.getGPUInfo('basic');
+        const gpuInfo: any = await app.getGPUInfo('basic');
         // 必要最小限の項目だけ抽出（大きなオブジェクトなので）
         const gpuInfoSummary = {
           vendorId: gpuInfo.auxAttributes?.vendorId,
@@ -660,9 +671,7 @@ app.whenReady().then(async () => {
       }
     }
 
-    console.log('[DEBUG] Initializing database...');
-    initDB();
-    console.log('[DEBUG] Database initialized');
+
 
     console.log('[DEBUG] Registering custom protocol...');
     registerCustomProtocol();
@@ -1204,22 +1213,8 @@ export function registerMainIpcHandlers() {
     return { ok: true };
   });
 
-  // --- Tab Actions ---
-  ipcMain.handle('tabs.navigate', async (_e, { containerId, url }) => {
-    try { const cm = await import('./containerManager'); return cm.createTab(containerId, url); } catch { return false; }
-  });
-  ipcMain.handle('tabs.create', async (_e, { containerId, url }) => {
-    try { const cm = await import('./containerManager'); return cm.createTab(containerId, url); } catch { return false; }
-  });
-  ipcMain.handle('tabs.switch', async (_e, { containerId, index }) => {
-    try { const cm = await import('./containerManager'); return cm.switchTab(containerId, index); } catch { return false; }
-  });
-  ipcMain.handle('tabs.close', async (_e, { containerId, index }) => {
-    try { const cm = await import('./containerManager'); return cm.closeTab(containerId, index); } catch { return false; }
-  });
-  ipcMain.handle('tabs.back', async (_e, { containerId }) => {
-    try { const cm = await import('./containerManager'); return cm.goBack(containerId); } catch { return false; }
-  });
+  // --- Tab Actions (Moved to containerManager.ts) ---
+
 
   // --- Export Server Actions ---
   ipcMain.handle('export.getSettings', () => {

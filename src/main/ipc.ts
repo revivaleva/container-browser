@@ -358,7 +358,7 @@ export function registerGeneralIpcHandlers() {
       const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
       const result = await dialog.showSaveDialog(mainWindow, {
         title: 'エクスポートファイルを保存',
-        defaultPath: `container-browser-export-${dateStr}.zip`,
+        defaultPath: `container-browser-for-kameleo-export-${dateStr}.zip`,
         filters: [
           { name: 'ZIP Files', extensions: ['zip'] },
           { name: 'All Files', extensions: ['*'] }

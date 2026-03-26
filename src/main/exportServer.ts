@@ -4,10 +4,11 @@ import { promises as fsp, existsSync, cpSync, rmSync, mkdirSync, statSync } from
 import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
-const { app, session } = createRequire(import.meta.url)('electron');
-import type { WebContents } from 'electron';
+import { Buffer } from 'node:buffer';
+import process from 'node:process';
+const { app } = createRequire(import.meta.url)('electron');
 import { DB } from './db';
-import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, getActiveWebContents } from './containerManager';
+import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed } from './containerManager';
 import { getToken, getOrCreateDeviceId } from './tokenStore';
 import { openedById } from './containerState';
 import { getAuthApiBase, getAuthTimeoutMs } from './settings';
@@ -40,6 +41,10 @@ function jsonResponse(res: http.ServerResponse, status: number, body: any) {
   res.end(s);
 }
 
+function healthResponse(res: http.ServerResponse) {
+  jsonResponse(res, 200, { ok: true, status: 'healthy', version: app.getVersion() });
+}
+
 function parseBody(req: http.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let acc = '';
@@ -62,43 +67,19 @@ function parseBodyRaw(req: http.IncomingMessage): Promise<{ raw: string; json: a
   });
 }
 
-type NavigationWebContents = WebContents & {
-  once(event: string, listener: (...args: unknown[]) => void): NavigationWebContents;
-  removeListener(event: string, listener: (...args: unknown[]) => void): NavigationWebContents;
-};
 
-function waitForNavigationComplete(wc: WebContents, timeoutMs: number): Promise<void> {
-  const raw = wc as NavigationWebContents;
-  return new Promise((resolve, reject) => {
-    let timeoutId: NodeJS.Timeout | null = null;
-    const onNavigate = () => {
-      cleanup();
-      resolve();
-    };
-    const onFail = (_event: unknown, errorCode: number, errorDescription: string, _validatedURL: string, isMainFrame: boolean) => {
-      if (!isMainFrame) return;
-      cleanup();
-      reject(new Error(errorDescription || `navigation failed (${errorCode})`));
-    };
-    const cleanup = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      raw.removeListener('did-navigate', onNavigate);
-      raw.removeListener('did-fail-load', onFail);
-    };
-    // did-navigateで通信成功を判定（早期レスポンス）
-    raw.once('did-navigate', onNavigate);
-    raw.once('did-fail-load', onFail);
-    const effectiveTimeout = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : 0;
-    if (effectiveTimeout > 0) {
-      timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error('navigation timeout'));
-      }, effectiveTimeout);
-    }
-  });
+async function waitForNavigationComplete(page: any, timeoutMs: number): Promise<void> {
+  try {
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: timeoutMs });
+  } catch (e) {
+    console.warn('[exportServer] navigation timeout or error', e);
+    // Continue anyway if timeout, as the page might have loaded partially
+  }
+}
+
+function getPlaywrightPage(containerId: string) {
+  const entry = openedById.get(containerId);
+  return entry ? entry.playwrightPage : null;
 }
 
 function generateBezierPath(start: { x: number; y: number }, end: { x: number; y: number }, steps: number) {
@@ -134,7 +115,7 @@ function determineProfilePath(container: any): string | null {
   if (container.userDataDir && existsSync(container.userDataDir)) return container.userDataDir;
   const m = String(container.partition || '').match(/^persist:(.+)$/);
   if (m) {
-    const p = path.join(appdata, 'container-browser', 'Partitions', m[1]);
+    const p = path.join(appdata, 'container-browser-for-kameleo', 'Partitions', m[1]);
     if (existsSync(p)) return p;
   }
   return null;
@@ -332,9 +313,10 @@ async function downloadAndSaveMedia(
 }
 
 export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_PORT) || 3001) {
-  const srv = http.createServer(async (req, res) => {
+  const srv = http.createServer(async (req: http.IncomingMessage, res: http.ServerResponse) => {
     try {
       const u = new URL(req.url || '', `http://${req.headers.host || '127.0.0.1'}`);
+      if (u.pathname === '/health') return healthResponse(res);
       if (req.method === 'POST' && u.pathname === '/internal/export-restored') {
         const body = await parseBody(req);
         const id = String(body && body.id || '');
@@ -349,9 +331,9 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         try {
           const c = DB.getContainer(id);
           if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-          // ensure opened and restored (open via API should be single-tab)
+          // ensure opened and restored
           if (!isContainerOpen(id)) {
-            await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+            await openContainerWindow(c, undefined, { singleTab: true });
           }
 
           // auth injection (optional - default true)
@@ -369,14 +351,14 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             const BASE_URL = getAuthApiBase();
             const url = (BASE_URL.replace(/\/$/, '')) + '/auth/validate';
             const ac = new AbortController();
-            const timeoutMs = Math.max(20000, getAuthTimeoutMs() * 2); // auth call timeout (part of overall 60s)
+            const timeoutMs = Math.max(20000, getAuthTimeoutMs() * 2); 
             const idt = setTimeout(() => ac.abort(), timeoutMs);
             let resp;
             try {
-              resp = await (global as any).fetch(url, {
+              resp = await fetch(url, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ device_id: `export-${Date.now()}`, device_info: { name: 'container-browser', hostname: require('os').hostname() } }),
+                body: JSON.stringify({ device_id: `export-${Date.now()}`, device_info: { name: 'container-browser-for-kameleo', hostname: os.hostname() } }),
                 signal: ac.signal
               });
             } finally { clearTimeout(idt); }
@@ -388,45 +370,31 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               const raw = (resp.headers as any).raw && (resp.headers as any).raw()['set-cookie'];
               if (raw && Array.isArray(raw)) rawCookies = raw;
               else {
-                const s = resp.headers.get && resp.headers.get('set-cookie');
+                const s = resp.headers.get('set-cookie');
                 if (s) rawCookies = [s];
               }
             } catch (e) { rawCookies = []; }
 
             const parsed = rawCookies.length ? setCookieParser.parse(rawCookies) : [];
-            if (parsed.length === 0) {
-              // no cookies; proceed but mark authInjected false
-            } else {
-              // get Electron session from partition and inject cookies
-              try {
-                const ses = session.fromPartition(c.partition);
-                for (const pc of parsed) {
-                  const domain = pc.domain ? pc.domain.replace(/^\./, '') : null;
-                  const cookieObj: any = {
-                    url: domain ? `https://${domain}` : `https://${pc.domain || 'localhost'}`,
-                    name: pc.name,
-                    value: pc.value,
-                    path: pc.path || '/',
-                    secure: !!pc.secure,
-                    httpOnly: !!pc.httpOnly,
-                    sameSite: (pc.sameSite === 'Strict' ? 'strict' : pc.sameSite === 'None' ? 'no_restriction' : 'lax')
-                  };
-                  // expires -> expirationDate (seconds)
-                  if (pc.expires) {
-                    const exp = new Date(pc.expires).getTime();
-                    if (!isNaN(exp)) cookieObj.expirationDate = Math.floor(exp / 1000);
-                  }
-                  // inject
-                  try { await ses.cookies.set(cookieObj); injectedCookieNames.push(pc.name); } catch (e) { console.error('[exportServer] cookie set error', e); throw e; }
-                }
-              } catch (e) { console.error('[exportServer] cookie injection error', e); throw e; }
+            if (parsed.length > 0) {
+              const page = getPlaywrightPage(id);
+              if (page) {
+                const cookiesToSet = parsed.map(pc => ({
+                  name: pc.name,
+                  value: pc.value,
+                  domain: pc.domain || 'localhost',
+                  path: pc.path || '/',
+                  expires: pc.expires ? new Date(pc.expires).getTime() / 1000 : undefined,
+                  secure: !!pc.secure,
+                  httpOnly: !!pc.httpOnly,
+                  sameSite: (pc.sameSite === 'Strict' ? 'Strict' : pc.sameSite === 'None' ? 'None' : 'Lax') as any
+                }));
+                await page.context().addCookies(cookiesToSet);
+                injectedCookieNames = parsed.map(p => p.name);
+              }
             }
           }
 
-          // NOTE: Profile copy/return has been disabled. The export API no longer returns
-          // a filesystem copy of the profile for external use. If you need an authenticated
-          // session to be available externally, use the remote exec API (/internal/exec)
-          // or the ensureAuth flow which injects cookies into the running session.
           return jsonResponse(res, 200, { ok: true, lastSessionId: c.lastSessionId ?? null, authInjected: ensureAuth, token: returnedToken ?? null, cookieNames: injectedCookieNames.length ? injectedCookieNames : null, message: 'profile copy disabled' });
         } catch (err: any) {
           const msg = String(err?.message || err);
@@ -460,122 +428,72 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
             // resolve container
             const c = DB.getContainer(contextId);
             if (!c) throw new Error('container not found');
-            // ensure container open (when opened via API prefer single-tab)
+            // ensure container open
             let navigationAlreadyDone = false;
             if (!isContainerOpen(contextId)) {
-              // navigate コマンドの場合は、指定URLで直接開く（シングルタブ＆3秒待機後にURL読み込み）
               if (command === 'navigate') {
                 const url = String(body.url || '');
                 if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
-                // ★ singleTab: true でシングルタブ、3秒待機が自動的に適用される
                 await openContainerWindow(c, url, { singleTab: true });
                 navigationAlreadyDone = true;
-                console.log('[exportServer] container opened with navigate URL (single tab, 3s delay applied)', { contextId, url });
               } else {
-                // 他のコマンドの場合は通常通り開く（シングルタブ＆復元モード）
-                await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+                await openContainerWindow(c, undefined, { singleTab: true });
               }
             }
-            // get active webContents
-            const wc = getActiveWebContents(contextId);
-            if (!wc) return jsonResponse(res, 404, { ok: false, error: 'no active webContents' });
+            // get playwright page
+            const page = getPlaywrightPage(contextId);
+            if (!page) return jsonResponse(res, 404, { ok: false, error: 'no active playwright page' });
 
-            // helper: wait for selector
+            // helper: wait for selector (Playwright style)
             const waitForSelector = async (selector: string, ms: number) => {
-              // support xpath: prefix
-              if (typeof selector === 'string' && selector.startsWith('xpath:')) {
-                const xp = selector.slice(6);
-                const poll = `(function(xp){return new Promise((resolve)=>{const t0=Date.now();(function p(){try{const n=document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(n) return resolve(true);}catch{}if(Date.now()-t0> ${ms}) return resolve(false);setTimeout(p,200);})();})})(${JSON.stringify(xp)});`;
-                try { const ok = await wc.executeJavaScript(poll, true); return !!ok; } catch { return false; }
+              try {
+                if (selector.startsWith('xpath:')) {
+                  await page.waitForSelector(`xpath=${selector.slice(6)}`, { timeout: ms });
+                } else {
+                  await page.waitForSelector(selector, { timeout: ms });
+                }
+                return true;
+              } catch {
+                return false;
               }
-              const poll = `(function(sel){return new Promise((resolve)=>{const t0=Date.now();(function p(){try{const el=document.querySelector(sel);if(el) return resolve(true);}catch{}if(Date.now()-t0> ${ms}) return resolve(false);setTimeout(p,200);})();})})(${JSON.stringify(selector)});`;
-              try { const ok = await wc.executeJavaScript(poll, true); return !!ok; } catch { return false; }
             };
 
             let navigationOccurred = false;
             let evalResult: any = undefined;
             if (command === 'save_media') {
-              const destinationFolder = String(options.destination_folder || '').trim();
-              const folderName = String(options.folder_name || '').trim();
-              const selectorsRaw = Array.isArray(options.selectors) ? options.selectors : [];
-              const selectorRules: MediaSelectorRule[] = selectorsRaw
-                .map((r: any) => {
-                  const selector = typeof r?.selector === 'string' ? r.selector : '';
-                  const type = r?.type === 'video' ? 'video' : r?.type === 'image' ? 'image' : '';
-                  if (!selector || !type) return null;
-                  return { selector, type };
-                })
-                .filter((v: any): v is MediaSelectorRule => !!v);
-              const mediaTimeoutMs = Number(options.timeoutMs || 60000);
-              if (!destinationFolder) return jsonResponse(res, 400, { ok: false, error: 'Invalid destination folder' });
-              if (!isValidFolderName(folderName)) return jsonResponse(res, 400, { ok: false, error: 'Invalid folder name' });
-              if (!selectorRules.length) return jsonResponse(res, 400, { ok: false, error: 'Invalid selectors' });
+              const selector = body.selector;
+              const mediaType = body.mediaType || 'image'; // 'image' or 'pdf'
+              const outputDir = path.join(process.cwd(), 'media');
+              if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
+              const fileName = `media-${contextId}-${Date.now()}.${mediaType === 'pdf' ? 'pdf' : 'png'}`;
+              const fp = path.join(outputDir, fileName);
 
-              logger.info('[container.save_media.start]', { contextId, folderName, selectorCount: selectorRules.length, timeoutMs: mediaTimeoutMs });
-
-              const extractScript = `(async (selectors)=>{const mediaUrls=[];const seen=new Set();for(const rule of selectors){try{const elements=document.querySelectorAll(rule.selector);for(const el of elements){let url=null;const tag=(el.tagName||'').toUpperCase();if(tag==='IMG'&&el.src){url=el.src;}else if(tag==='VIDEO'){if(el.poster){url=el.poster;}const source=el.querySelector('source[src]');if(source&&source.src){url=source.src;}if(!url&&el.src){url=el.src;}}else if(tag==='SOURCE'&&el.src){url=el.src;}if(url&&typeof url==='string'&&url.startsWith('http')){const key=rule.type+'|'+url;if(!seen.has(key)){seen.add(key);mediaUrls.push({url,type:rule.type,selector:rule.selector});}}}}catch(e){/* ignore selector errors */}}return{didAction:mediaUrls.length>0,urls:mediaUrls,count:mediaUrls.length};})(${JSON.stringify(selectorRules)});`;
-              let extracted: { didAction: boolean; urls: MediaUrlItem[]; count: number } | null = null;
               try {
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Operation timeout')), mediaTimeoutMs));
-                extracted = await Promise.race([wc.executeJavaScript(extractScript, true), timeoutPromise]) as { didAction: boolean; urls: MediaUrlItem[]; count: number };
-              } catch (e: any) {
-                logger.error('[container.save_media.error]', { contextId, error: e?.message || e });
-                const msg = String(e?.message || e);
-                if (msg.toLowerCase().includes('timeout')) {
-                  return jsonResponse(res, 504, { ok: false, error: 'Operation timeout' });
+                if (mediaType === 'pdf') {
+                  await page.pdf({ path: fp, format: 'A4' });
+                } else {
+                  if (selector) {
+                    const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                    const element = await page.$(pSelector);
+                    if (!element) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                    await element.screenshot({ path: fp });
+                  } else {
+                    await page.screenshot({ path: fp, fullPage: true });
+                  }
                 }
-                return jsonResponse(res, 500, { ok: false, error: 'Failed to extract media URLs' });
+                return jsonResponse(res, 200, { ok: true, path: fp, fileName });
+              } catch (e: any) {
+                return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
               }
-
-              if (!extracted) return jsonResponse(res, 500, { ok: false, error: 'Failed to extract media URLs' });
-
-              const urls = Array.isArray(extracted.urls) ? extracted.urls.filter((u) => isHttpUrl(u.url)).slice(0, MAX_MEDIA_FILES + 1) : [];
-              if (urls.length > MAX_MEDIA_FILES) {
-                return jsonResponse(res, 400, { ok: false, error: 'Too many media files' });
-              }
-
-              logger.debug('[container.save_media.urls_extracted]', { contextId, urlCount: urls.length });
-
-              if (urls.length === 0) {
-                const emptyPath = path.resolve(destinationFolder, folderName);
-                return jsonResponse(res, 200, {
-                  ok: true,
-                  folder_path: emptyPath,
-                  files: [],
-                  summary: { total: 0, succeeded: 0, failed: 0, paths_comma_separated: '', total_bytes: 0 },
-                });
-              }
-
-              const downloadResult = await downloadAndSaveMedia(urls, destinationFolder, folderName, mediaTimeoutMs);
-              if (!downloadResult.files.length && !downloadResult.ok) {
-                const message = downloadResult.error_detail?.message || 'Failed to create directory';
-                return jsonResponse(res, 500, { ok: false, error: message, errorDetail: downloadResult.error_detail });
-              }
-
-              const statusCode = downloadResult.ok ? 200 : 200;
-              logger.info('[container.save_media.download_complete]', {
-                contextId,
-                succeeded: downloadResult.summary.succeeded,
-                failed: downloadResult.summary.failed,
-                totalBytes: downloadResult.summary.total_bytes,
-                elapsedMs: Date.now() - tstart,
-              });
-
-              return jsonResponse(res, statusCode, downloadResult);
             } else if (command === 'navigate') {
               const url = String(body.url || '');
               if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
-              // If navigation already done during container open, skip
               if (navigationAlreadyDone) {
-                console.log('[exportServer] navigate already done during container open, skipping loadURL', { contextId, url });
                 navigationOccurred = true;
               } else {
                 try {
                   const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
-                  // 先にナビゲーション完了待機をセットしてから loadURL を呼ぶ（did-navigate を見逃さないため）
-                  const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
-                  await wc.loadURL(url);
-                  await navPromise;
+                  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
                   if (options.waitForSelector) {
                     const ok = await waitForSelector(options.waitForSelector, timeoutMs);
                     if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
@@ -591,31 +509,12 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
               }
               try {
-                // Step 1: Execute DOM click() to focus and trigger click event
-                let clickScript: string;
-                if (typeof selector === 'string' && selector.startsWith('xpath:')) {
-                  const xp = selector.slice(6);
-                  clickScript = `(function(){const node = document.evaluate(${JSON.stringify(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(!node) throw new Error('selector not found'); node.focus(); node.click(); return true;})();`;
-                } else {
-                  clickScript = `(function(sel){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.focus(); el.click(); return true;})(${JSON.stringify(selector)});`;
-                }
-                await wc.executeJavaScript(clickScript, true);
-
-                // Step 2: If clickAndType, send keyboard input via sendInputEvent() after a small delay
+                const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                await page.click(pSelector, { timeout: timeoutMs });
+                
                 if (command === 'clickAndType') {
-                  // Wait a bit to ensure focus is settled
-                  await new Promise(resolve => setTimeout(resolve, 50));
-
-                  // Generate random uppercase letter (A-Z)
-                  const randomChar = String.fromCharCode(65 + Math.floor(Math.random() * 26));
-
-                  // Send keyboard input via sendInputEvent: keyDown -> char -> keyUp
-                  // Use lowercase for char event to ensure input receives the character
-                  const charLower = randomChar.toLowerCase();
-
-                  wc.sendInputEvent({ type: 'keyDown', keyCode: randomChar });
-                  wc.sendInputEvent({ type: 'char', keyCode: charLower });
-                  wc.sendInputEvent({ type: 'keyUp', keyCode: randomChar });
+                   const text = String(body.text || '');
+                   await page.fill(pSelector, text, { timeout: timeoutMs });
                 }
               } catch (e: any) {
                 const msg = String(e?.message || e);
@@ -632,52 +531,23 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               try {
                 if (command === 'type') {
                   const text = String(body.text || '');
-                  let script: string;
-                  if (typeof selector === 'string' && selector.startsWith('xpath:')) {
-                    const xp = selector.slice(6);
-                    script = `(function(txt){const node = document.evaluate(${JSON.stringify(xp)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; if(!node) throw new Error('selector not found'); node.focus(); node.value = txt; node.dispatchEvent(new Event('input',{bubbles:true})); return true;})(${JSON.stringify(text)});`;
-                  } else {
-                    script = `(function(sel, txt){const el=document.querySelector(sel); if(!el) throw new Error('selector not found'); el.focus(); el.value = txt; el.dispatchEvent(new Event('input',{bubbles:true})); return true;})(${JSON.stringify(selector)}, ${JSON.stringify(text)});`;
-                  }
-                  await wc.executeJavaScript(script, true);
+                  const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                  await page.fill(pSelector, text, { timeout: timeoutMs });
                 } else if (command === 'eval') {
                   const rawEval = body.eval;
                   if (rawEval === undefined || rawEval === null) return jsonResponse(res, 400, { ok: false, error: 'missing eval' });
-                  // Support client sending JSON-stringified expr; try parse but fall back to raw string
                   let exprStr: string = rawEval as any;
                   if (typeof rawEval === 'string') {
                     try { const parsed = JSON.parse(rawEval); if (typeof parsed === 'string') exprStr = parsed; } catch { }
                   } else {
                     exprStr = String(rawEval);
                   }
-                  // Execute the expression directly (no template wrapping) and capture runtime/syntax errors with details
                   try {
-                    evalResult = await wc.executeJavaScript(exprStr, true);
+                    evalResult = await page.evaluate(exprStr);
                   } catch (e: any) {
                     const message = String(e?.message || e);
-                    const stack = String(e?.stack || '');
-                    const stackShort = stack.split('\\n').slice(0, 5).join('\\n');
-                    // try to extract line/column from stack (format: <anonymous>:line:column)
-                    let line: number | null = null;
-                    let column: number | null = null;
-                    const m = stack.match(/:(\\d+):(\\d+)/);
-                    if (m) { line = Number(m[1]); column = Number(m[2]); }
-                    // snippet: extract corresponding line from expr if available
-                    let snippet: string | null = null;
-                    try {
-                      if (line !== null) {
-                        const lines = exprStr.split(/\\r?\\n/);
-                        const idx = Math.max(0, line - 1);
-                        snippet = (lines[idx] || '').trim().slice(0, 200);
-                      } else {
-                        snippet = String(exprStr).slice(0, 200);
-                      }
-                    } catch { }
-                    const context = String(exprStr).slice(-80);
-                    const errorDetail: any = { message, stack: stackShort, line, column, snippet, context, exprId: body.exprId || null, sourceSnippet: body.sourceSnippet || null };
-                    return jsonResponse(res, 500, { ok: false, error: message, errorDetail });
+                    return jsonResponse(res, 500, { ok: false, error: message });
                   }
-                  // do not return here; allow post-collection collection (html/cookies/screenshot) to run and include evalResult
                 }
               } catch (e: any) {
                 const msg = String(e?.message || e);
@@ -685,337 +555,81 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 return jsonResponse(res, 500, { ok: false, error: msg });
               }
             } else if (command === 'setFileInput') {
-              // ファイル入力を設定するコマンド
               const selector = body.selector;
               const fileUrl = body.fileUrl;
               const fileName = body.fileName || 'file.jpg';
-              const fileType = body.fileType || 'image/jpeg';
-
-              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-              if (!fileUrl) return jsonResponse(res, 400, { ok: false, error: 'missing fileUrl' });
-
-              if (options.waitForSelector) {
-                const ok = await waitForSelector(options.waitForSelector, timeoutMs);
-                if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
-              }
-
+              if (!selector || !fileUrl) return jsonResponse(res, 400, { ok: false, error: 'missing selector or fileUrl' });
               try {
-                // 1. Google Drive URLを実際の画像URLに変換
-                let actualFileUrl = fileUrl;
-                if (fileUrl.includes('drive.google.com/file/d/')) {
-                  const match = fileUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-                  if (match && match[1]) {
-                    actualFileUrl = `https://drive.google.com/uc?export=view&id=${match[1]}`;
-                  }
-                }
-
-                // 2. URLからファイルを取得（Node.js側で実行）
-                let response: Response;
-                try {
-                  response = await (global as any).fetch(actualFileUrl);
-                } catch (fetchError: any) {
-                  return jsonResponse(res, 500, {
-                    ok: false,
-                    error: `Failed to fetch file: ${String(fetchError?.message || fetchError)}`
-                  });
-                }
-
-                if (!response.ok) {
-                  return jsonResponse(res, 500, {
-                    ok: false,
-                    error: `Failed to fetch file: HTTP ${response.status}`
-                  });
-                }
-
-                const arrayBuffer = await response.arrayBuffer();
-                const buffer = Buffer.from(arrayBuffer);
-                const base64Data = buffer.toString('base64');
-
-                // 3. ElectronのwebContentsでファイル入力を設定
-                const script = `
-                  (function(sel, base64Data, name, type) {
-                    try {
-                      const input = document.querySelector(sel);
-                      if (!input) throw new Error('selector not found');
-                      if (input.type !== 'file') throw new Error('element is not a file input');
-                      
-                      // Base64データをBlobに変換
-                      const byteCharacters = atob(base64Data);
-                      const byteNumbers = new Array(byteCharacters.length);
-                      for (let i = 0; i < byteCharacters.length; i++) {
-                        byteNumbers[i] = byteCharacters.charCodeAt(i);
-                      }
-                      const byteArray = new Uint8Array(byteNumbers);
-                      const blob = new Blob([byteArray], { type: type });
-                      const file = new File([blob], name, { type: type });
-                      
-                      // DataTransferを使用してファイルを設定
-                      try {
-                        const dataTransfer = new DataTransfer();
-                        dataTransfer.items.add(file);
-                        input.files = dataTransfer.files;
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                        return { success: true, selector: sel, fileName: name, fileType: type };
-                      } catch (dtError) {
-                        // DataTransferが失敗した場合、直接filesを設定する方法を試す
-                        // 注意: これはブラウザのセキュリティ制約により動作しない可能性が高い
-                        throw new Error('DataTransfer failed: ' + String(dtError?.message || dtError));
-                      }
-                    } catch (e) {
-                      throw new Error(String(e?.message || e));
-                    }
-                  })(${JSON.stringify(selector)}, ${JSON.stringify(base64Data)}, ${JSON.stringify(fileName)}, ${JSON.stringify(fileType)});
-                `;
-
-                try {
-                  const result = await wc.executeJavaScript(script, true);
-                  if (result && (result as any).success) {
-                    return jsonResponse(res, 200, {
-                      ok: true,
-                      result: {
-                        success: true,
-                        selector,
-                        fileName,
-                        fileType
-                      }
-                    });
-                  } else {
-                    return jsonResponse(res, 500, {
-                      ok: false,
-                      error: 'Failed to set file input: unexpected result'
-                    });
-                  }
-                } catch (jsError: any) {
-                  const msg = String(jsError?.message || jsError);
-                  if (msg.includes('selector not found')) {
-                    return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
-                  }
-                  if (msg.includes('not a file input')) {
-                    return jsonResponse(res, 400, { ok: false, error: 'element is not a file input' });
-                  }
-                  if (msg.includes('DataTransfer failed')) {
-                    // セキュリティ制約により失敗した場合の詳細なエラーメッセージ
-                    return jsonResponse(res, 500, {
-                      ok: false,
-                      error: 'Failed to set file input: browser security restrictions prevent programmatic file input setting. This is expected behavior in browsers.'
-                    });
-                  }
-                  return jsonResponse(res, 500, { ok: false, error: `Failed to set file input: ${msg}` });
-                }
-              } catch (e: any) {
-                const msg = String(e?.message || e);
-                if (msg.includes('Failed to fetch')) {
-                  return jsonResponse(res, 500, { ok: false, error: `Failed to fetch file: ${msg}` });
-                }
-                return jsonResponse(res, 500, { ok: false, error: msg });
-              }
+                const resp = await fetch(fileUrl);
+                const buffer = Buffer.from(await resp.arrayBuffer());
+                const filePath = path.join(os.tmpdir(), fileName);
+                await fsp.writeFile(filePath, buffer);
+                const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                await page.setInputFiles(pSelector, filePath);
+                return jsonResponse(res, 200, { ok: true });
+              } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
             } else if (command === 'getElementRect') {
               const selector = body.selector;
               if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-              const script = `(function(sel){
-                const el = document.querySelector(sel);
-                if(!el) return null;
-                const r = el.getBoundingClientRect();
-                return { x: r.left, y: r.top, width: r.width, height: r.height };
-              })(${JSON.stringify(selector)});`;
               try {
-                const rect = await wc.executeJavaScript(script, true);
+                const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                const rect = await page.evaluate((sel: string) => {
+                  const el = document.querySelector(sel);
+                  if (!el) return null;
+                  const r = el.getBoundingClientRect();
+                  return { x: r.left, y: r.top, width: r.width, height: r.height };
+                }, pSelector);
                 if (!rect) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
                 return jsonResponse(res, 200, { ok: true, rect });
-              } catch (e: any) {
-                return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-              }
+              } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
             } else if (command === 'mouseMove') {
-              const x = Number(body.x);
-              const y = Number(body.y);
-              const steps = Number(options.steps || 1);
+              const x = Number(body.x), y = Number(body.y);
               if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
-
-              // We don't have a reliable last position in a stateless API, 
-              // but we can try to get it if we want to glide. 
-              // for now, just glide from a near point or just jump if steps=1
-              if (steps > 1) {
-                // Dummy start for now (top left or somewhere random)
-                const startX = 0;
-                const startY = 0;
-                const path = generateBezierPath({ x: startX, y: startY }, { x, y }, steps);
-                for (const pt of path) {
-                  wc.sendInputEvent({ type: 'mouseMove', x: pt.x, y: pt.y });
-                  await new Promise(r => setTimeout(r, 5));
-                }
-              } else {
-                wc.sendInputEvent({ type: 'mouseMove', x, y });
-              }
+              await page.mouse.move(x, y, { steps: Number(options.steps || 1) });
               return jsonResponse(res, 200, { ok: true });
             } else if (command === 'mouseClick') {
-              const x = Number(body.x);
-              const y = Number(body.y);
+              const x = Number(body.x), y = Number(body.y);
               if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
-              const delay = Number(options.delayMs || 100);
-
-              wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-              await new Promise(r => setTimeout(r, delay));
-              wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
-
+              await page.mouse.click(x, y, { delay: Number(options.delayMs || 100) });
               return jsonResponse(res, 200, { ok: true });
             } else if (command === 'humanClick') {
               const selector = body.selector;
               if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-
-              // 1. Get Rect (Support searching inside iframes)
-              const getRectScript = `(function(sel){
-                function findInFrames(targetSel, root = document) {
-                  const items = root.querySelectorAll('iframe');
-                  for (let i = 0; i < items.length; i++) {
-                    try {
-                      const frame = items[i];
-                      const rect = frame.getBoundingClientRect();
-                      const innerDoc = frame.contentDocument || frame.contentWindow.document;
-                      const el = innerDoc.querySelector(targetSel);
-                      if (el) {
-                        const r = el.getBoundingClientRect();
-                        return { x: rect.left + r.left, y: rect.top + r.top, width: r.width, height: r.height };
-                      }
-                      const deep = findInFrames(targetSel, innerDoc);
-                      if (deep) {
-                        return { x: rect.left + deep.x, y: rect.top + deep.y, width: deep.width, height: deep.height };
-                      }
-                    } catch (e) { /* ignore cross-origin */ }
-                  }
-                  return null;
-                }
-                const topEl = document.querySelector(sel);
-                if(topEl) {
-                  const r = topEl.getBoundingClientRect();
-                  return { x: r.left, y: r.top, width: r.width, height: r.height };
-                }
-                return findInFrames(sel);
-              })(${JSON.stringify(selector)});`;
-
-              try {
-                const rect = await wc.executeJavaScript(getRectScript, true);
-                if (!rect) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
-
-                // 2. Target point with offset (prefer explicit offsetX/offsetY if provided)
-                const offsetX = typeof body.offsetX === 'number' ? body.offsetX : (rect.width / 2 + (Math.random() - 0.5) * (rect.width * 0.4));
-                const offsetY = typeof body.offsetY === 'number' ? body.offsetY : (rect.height / 2 + (Math.random() - 0.5) * (rect.height * 0.4));
-
-                const targetX = Math.round(rect.x + offsetX);
-                const targetY = Math.round(rect.y + offsetY);
-
-                // 3. Move
-                const startX = Math.round(Math.random() * 200);
-                const startY = Math.round(Math.random() * 200);
-                const path = generateBezierPath({ x: startX, y: startY }, { x: targetX, y: targetY }, 30);
-                for (const pt of path) {
-                  wc.sendInputEvent({ type: 'mouseMove', x: pt.x, y: pt.y });
-                  await new Promise(r => setTimeout(r, 8 + Math.random() * 5));
-                }
-
-                // 4. Click
-                wc.sendInputEvent({ type: 'mouseDown', x: targetX, y: targetY, button: 'left', clickCount: 1 });
-                await new Promise(r => setTimeout(r, 60 + Math.random() * 100));
-                wc.sendInputEvent({ type: 'mouseUp', x: targetX, y: targetY, button: 'left', clickCount: 1 });
-
-                return jsonResponse(res, 200, { ok: true, command: 'humanClick', target: { x: targetX, y: targetY } });
-              } catch (e: any) {
-                return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-              }
+              const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+              await page.click(pSelector, { timeout: timeoutMs });
+              return jsonResponse(res, 200, { ok: true });
             } else if (command === 'status' || command === 'refresh' || command === 'current_url') {
-              // No-op: proceed to post-collection which returns URL, Title, and optionally HTML/Screenshot
+              // No-op
             } else {
-
               return jsonResponse(res, 400, { ok: false, error: 'unsupported command' });
             }
 
             // post-collection
-            const urlNow = wc.getURL ? wc.getURL() : null;
-            let title = null;
-            try { title = wc.getTitle ? wc.getTitle() : null; } catch { }
+            const urlNow = page.url();
+            let title = '';
+            try { title = await page.title(); } catch { }
             let html: string | null = null;
             if (options.returnHtml && options.returnHtml !== 'none') {
               try {
-                // in-page sanitizer: clone DOM, remove styles/scripts/comments, strip inline styles and data: URLs
-                const isTrim = (options.returnHtml === 'trim');
-                const maxLen = isTrim ? (64 * 1024) : 0;
-
-                // HTML取得にタイムアウト機構を追加
-                const htmlTimeoutMs = 10000; // 10秒タイムアウト
-                const htmlPromise = wc.executeJavaScript(`(function(maxLen,isTrim){
-  try {
-    const doc = document.documentElement.cloneNode(true);
-    // remove style/link/script/noscript
-    doc.querySelectorAll('style, link[rel="stylesheet"], script, noscript').forEach(n => n.remove());
-    // remove comments
-    try {
-      const walker = document.createTreeWalker(doc, NodeFilter.SHOW_COMMENT, null, false);
-      const comments = [];
-      while (walker.nextNode()) comments.push(walker.currentNode);
-      comments.forEach(c => c.parentNode && c.parentNode.removeChild(c));
-    } catch(e) {}
-    // strip inline styles
-    doc.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'));
-    // remove data: URLs from src/href to avoid huge base64 blobs
-    doc.querySelectorAll('[src],[href]').forEach(el => {
-      try {
-        const a = el.getAttribute('src') || el.getAttribute('href');
-        if (typeof a === 'string' && a.startsWith('data:')) {
-          if (el.hasAttribute('src')) el.setAttribute('src','');
-          if (el.hasAttribute('href')) el.setAttribute('href','');
-        }
-      } catch(e) {}
-    });
-    // remove some meta selectors likely irrelevant
-    const removeSelectors = ['meta[http-equiv]','meta[name=\"google-site-verification\"]','meta[name=\"robots\"]'];
-    removeSelectors.forEach(s => { try { doc.querySelectorAll(s).forEach(n => n.remove()); } catch(e) {} });
-    // remove class attributes from all elements without deleting elements themselves
-    try { doc.querySelectorAll('[class]').forEach((el) => { try { el.removeAttribute('class'); } catch(e) {} }); } catch(e) {}
-    // If trim mode requested, return only body innerHTML (to focus on content)
-    let out = '';
-    try {
-      if (isTrim) {
-        const b = doc.querySelector('body');
-        out = b ? (b.innerHTML || '') : (doc.outerHTML || '');
-      } else {
-        out = doc.outerHTML || '';
-      }
-    } catch(e) { out = doc.outerHTML || ''; }
-    if (typeof maxLen === 'number' && maxLen > 0) out = out.slice(0, maxLen);
-    return out;
-  } catch(e) { return null; }
-})(${maxLen}, ${isTrim})`, true);
-
-                const timeoutPromise = new Promise((_, reject) => {
-                  setTimeout(() => reject(new Error('HTML fetch timeout')), htmlTimeoutMs);
-                });
-
-                const full = await Promise.race([htmlPromise, timeoutPromise]);
-                html = full ? String(full) : null;
-                const htmlLen = html ? html.length : 0;
-                console.log('[exportServer] html len', htmlLen, 'contextId=', contextId);
-              } catch (e: any) {
-                console.error('[exportServer] html fetch error', e?.message || e);
-                // HTML取得失敗時もレスポンスを継続
-              }
+                html = await page.content();
+                if (options.returnHtml === 'trim' && html) html = html.slice(0, 64 * 1024);
+              } catch { }
             }
             // cookies
             let cookies: any[] | null = null;
             if (options.returnCookies) {
-              try { const ses = session.fromPartition(c.partition); cookies = await ses.cookies.get({}); } catch { }
+              try { cookies = await page.context().cookies(); } catch { }
             }
             // screenshot
             let shotPath: string | null = null;
             if (options.screenshot) {
               try {
-                const img = await wc.capturePage();
-                const buf = img.toPNG();
                 const shotsDir = path.join(process.cwd(), 'shots');
                 if (!existsSync(shotsDir)) mkdirSync(shotsDir, { recursive: true });
-                const fname = `exec-${contextId}-${Date.now()}.png`;
-                const fp = path.join(shotsDir, fname);
-                await fsp.writeFile(fp, buf);
+                const fp = path.join(shotsDir, `exec-${contextId}-${Date.now()}.png`);
+                await page.screenshot({ path: fp });
                 shotPath = fp;
-              } catch (e) { console.error('[exportServer] screenshot error', e); }
+              } catch { }
             }
 
             const elapsed = Date.now() - tstart;
@@ -1090,7 +704,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               const ac = new AbortController();
               const idt = setTimeout(() => ac.abort(), timeoutMs);
               try {
-                const useResp = await (global as any).fetch(
+                const useResp = await (globalThis as any).fetch(
                   (BASE_URL.replace(/\/$/, '')) + '/auth/use',
                   {
                     method: 'POST',
