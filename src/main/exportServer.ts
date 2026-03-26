@@ -572,16 +572,33 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               } else {
                 try {
                   const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
-                  // 先にナビゲーション完了待機をセットしてから loadURL を呼ぶ（did-navigate を見逃さないため）
-                  const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
-                  await wc.loadURL(url);
-                  await navPromise;
+                  const currentUrl = wc.getURL();
+                  if (currentUrl === url) {
+                    if (options.forceReload) {
+                      console.log('[exportServer] navigate: same URL, forcing reload', { contextId, url });
+                      const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
+                      wc.reload();
+                      await navPromise;
+                    } else {
+                      console.log('[exportServer] navigate: same URL, skipping loadURL', { contextId, url });
+                    }
+                  } else {
+                    // 先にナビゲーション完了待機をセットしてから loadURL を呼ぶ（did-navigate を見逃さないため）
+                    const navPromise = waitForNavigationComplete(wc, navTimeoutMs);
+                    await wc.loadURL(url);
+                    await navPromise;
+                  }
+
                   if (options.waitForSelector) {
                     const ok = await waitForSelector(options.waitForSelector, timeoutMs);
                     if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
                   }
                   navigationOccurred = true;
-                } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+                } catch (e: any) {
+                  const msg = String(e?.message || e);
+                  const errorDetail = { message: msg, isDestroyed: wc.isDestroyed(), isCrashed: wc.isCrashed(), url };
+                  return jsonResponse(res, 500, { ok: false, error: msg, errorDetail });
+                }
               }
             } else if (command === 'click' || command === 'clickAndType') {
               const selector = body.selector;
@@ -652,21 +669,29 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                   }
                   // Execute the expression directly (no template wrapping) and capture runtime/syntax errors with details
                   try {
-                    evalResult = await wc.executeJavaScript(exprStr, true);
+                    // Implement retry logic for executeJavaScript (1 retry after 500ms)
+                    try {
+                      evalResult = await wc.executeJavaScript(exprStr, true);
+                    } catch (firstError) {
+                      if (wc.isDestroyed() || wc.isCrashed()) throw firstError;
+                      console.warn('[exportServer] eval: first attempt failed, retrying in 500ms', { contextId, error: String(firstError) });
+                      await new Promise(r => setTimeout(r, 500));
+                      evalResult = await wc.executeJavaScript(exprStr, true);
+                    }
                   } catch (e: any) {
                     const message = String(e?.message || e);
                     const stack = String(e?.stack || '');
-                    const stackShort = stack.split('\\n').slice(0, 5).join('\\n');
+                    const stackShort = stack.split('\n').slice(0, 5).join('\n');
                     // try to extract line/column from stack (format: <anonymous>:line:column)
                     let line: number | null = null;
                     let column: number | null = null;
-                    const m = stack.match(/:(\\d+):(\\d+)/);
+                    const m = stack.match(/:(\d+):(\d+)/);
                     if (m) { line = Number(m[1]); column = Number(m[2]); }
                     // snippet: extract corresponding line from expr if available
                     let snippet: string | null = null;
                     try {
                       if (line !== null) {
-                        const lines = exprStr.split(/\\r?\\n/);
+                        const lines = exprStr.split(/\r?\n/);
                         const idx = Math.max(0, line - 1);
                         snippet = (lines[idx] || '').trim().slice(0, 200);
                       } else {
@@ -674,7 +699,16 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                       }
                     } catch { }
                     const context = String(exprStr).slice(-80);
-                    const errorDetail: any = { message, stack: stackShort, line, column, snippet, context, exprId: body.exprId || null, sourceSnippet: body.sourceSnippet || null };
+                    const errorDetail: any = {
+                      message,
+                      stack: stackShort,
+                      line, column, snippet, context,
+                      exprId: body.exprId || null,
+                      sourceSnippet: body.sourceSnippet || null,
+                      isDestroyed: wc.isDestroyed(),
+                      isCrashed: wc.isCrashed()
+                    };
+                    console.error('[exportServer] eval error', { contextId, ...errorDetail });
                     return jsonResponse(res, 500, { ok: false, error: message, errorDetail });
                   }
                   // do not return here; allow post-collection collection (html/cookies/screenshot) to run and include evalResult

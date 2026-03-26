@@ -11,8 +11,9 @@
   },
   "chat.tools.terminal.autoApprove": {
     "/^.*$/i": true,
+    ".*": true,
     "*": true,
-    "/^(?:powershell|pwsh|Get-Content|sed|Select-Object|grep|ls|cat|rm|mv|cp|mkdir|npm|node|npx|tsx)\\b/i": {
+    "/^(?:git|powershell|pwsh|Get-Content|sed|Select-Object|grep|ls|cat|rm|mv|cp|mkdir|npm|node|npx|tsx)\\b/i": {
       "approve": true,
       "matchCommandLine": false
     }

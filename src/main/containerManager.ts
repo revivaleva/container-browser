@@ -100,6 +100,9 @@ type OpenOpts = { restore?: boolean; singleTab?: boolean };
 let isRestoringGlobal = false;
 let mainWindowRef: BrowserWindowType | null = null;
 
+// Track pending container window creation to prevent duplicate opens
+const pendingOpens = new Map<string, Promise<BrowserWindowType | null>>();
+
 // warmup状態管理（containerId -> {ok: boolean}）
 // warmup失敗時はX系URLへの自動アクセスを完全ブロックするために使用
 const warmupState = new Map<string, { ok: boolean }>();
@@ -1698,578 +1701,506 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       }
       return existing.win;
     }
-  } catch { }
-  const part = container.partition;
-  const ses = session.fromPartition(part, { cache: true });
-  // プロファイルは 'persist:<name>' の partition により分離される。
-  // キャッシュ保存先の明示セットは不要（Electron が userData/Partitions 配下に保存）。
 
-  // プロキシ
-  if (container.proxy?.server) {
-    // プロキシBANチェック
-    if (isProxyBanned(container.proxy.server)) {
-      const banInfo = proxyBanMap.get(extractProxyHostPort(container.proxy.server));
-      proxyLog.error(`[proxy-check] Container ${container.id} uses BANNED proxy: ${banInfo?.reason || 'unknown'}`);
-      // BANされていても続行（ユーザーに警告のみ）
+    // Check if this container is already in process of opening
+    const pending = pendingOpens.get(container.id);
+    if (pending) {
+      console.log('[main] openContainerWindow: duplicate open wait for existing promise', container.id);
+      const win = await pending;
+      if (win && startUrl) {
+        // optionally navigate if startUrl provided to the second caller
+        try { createTab(container.id, startUrl); } catch { }
+      }
+      return win;
     }
+  } catch (e) { console.error('[main] openContainerWindow: initial check error', e); }
 
-    // Store credentials for use in onBeforeSendHeaders (案B)
-    const proxyUsername = container.proxy.username;
-    const proxyPassword = container.proxy.password;
+  // Create a promise for this open operation and store it in pendingOpens to lock other calls
+  let resolvePending: (win: BrowserWindowType | null) => void;
+  const openingPromise = new Promise<BrowserWindowType | null>((resolve) => {
+    resolvePending = resolve;
+  });
+  pendingOpens.set(container.id, openingPromise);
 
-    // Normalize proxy server format for Electron
-    // Electron expects format like "http=host:port;https=host:port" or "socks5=host:port" or just "host:port"
-    // NOTE: Electron's setProxy does NOT support embedded credentials in URL format
-    // We must use plain host:port and rely on the login event for authentication
-    let proxyRules = container.proxy.server;
-    const originalProxyServer = proxyRules;
+  try {
+    const part = container.partition;
+    const ses = session.fromPartition(part, { cache: true });
+    // プロファイルは 'persist:<name>' の partition により分離される。
+    // キャッシュ保存先の明示セットは不要（Electron が userData/Partitions 配下に保存）。
 
-    // Check if proxy is SOCKS5
-    const isSocks5 = /socks5/i.test(proxyRules);
+    // プロキシ
+    if (container.proxy?.server) {
+      // プロキシBANチェック
+      if (isProxyBanned(container.proxy.server)) {
+        const banInfo = proxyBanMap.get(extractProxyHostPort(container.proxy.server));
+        proxyLog.error(`[proxy-check] Container ${container.id} uses BANNED proxy: ${banInfo?.reason || 'unknown'}`);
+        // BANされていても続行（ユーザーに警告のみ）
+      }
 
-    // Extract host:port from proxyRules if it contains = or ://
-    let hostPort = proxyRules;
-    if (proxyRules.includes('=')) {
-      // Extract from http=host:port or https=host:port or socks5=host:port
-      const match = proxyRules.match(/(?:https?|socks5)=([^;]+)/i);
-      if (match) {
-        hostPort = match[1].trim();
-        // Remove any embedded credentials (username:password@host:port -> host:port)
+      // Store credentials for use in onBeforeSendHeaders (案B)
+      const proxyUsername = container.proxy.username;
+      const proxyPassword = container.proxy.password;
+
+      // Normalize proxy server format for Electron
+      // Electron expects format like "http=host:port;https=host:port" or "socks5=host:port" or just "host:port"
+      // NOTE: Electron's setProxy does NOT support embedded credentials in URL format
+      // We must use plain host:port and rely on the login event for authentication
+      let proxyRules = container.proxy.server;
+      const originalProxyServer = proxyRules;
+
+      // Check if proxy is SOCKS5
+      const isSocks5 = /socks5/i.test(proxyRules);
+
+      // Extract host:port from proxyRules if it contains = or ://
+      let hostPort = proxyRules;
+      if (proxyRules.includes('=')) {
+        // Extract from http=host:port or https=host:port or socks5=host:port
+        const match = proxyRules.match(/(?:https?|socks5)=([^;]+)/i);
+        if (match) {
+          hostPort = match[1].trim();
+          // Remove any embedded credentials (username:password@host:port -> host:port)
+          hostPort = hostPort.replace(/^[^@]+@/, '');
+        }
+      } else if (proxyRules.includes('://')) {
+        // Extract from http://host:port or socks5://host:port
+        hostPort = proxyRules.replace(/^[^:]+:\/\//, '');
+        // Remove any embedded credentials
         hostPort = hostPort.replace(/^[^@]+@/, '');
+      } else {
+        // Already in host:port format, but may contain embedded credentials
+        hostPort = proxyRules.replace(/^[^@]+@/, '');
       }
-    } else if (proxyRules.includes('://')) {
-      // Extract from http://host:port or socks5://host:port
-      hostPort = proxyRules.replace(/^[^:]+:\/\//, '');
-      // Remove any embedded credentials
-      hostPort = hostPort.replace(/^[^@]+@/, '');
-    } else {
-      // Already in host:port format, but may contain embedded credentials
-      hostPort = proxyRules.replace(/^[^@]+@/, '');
-    }
 
-    // Build proxy rules: preserve SOCKS5, otherwise use http/https
-    if (isSocks5) {
-      proxyRules = `socks5=${hostPort}`;
-    } else if (!proxyRules.includes('=') && !proxyRules.includes('://')) {
-      proxyRules = `http=${hostPort};https=${hostPort}`;
-    } else {
-      // Rebuild proxy rules with clean host:port
-      proxyRules = `http=${hostPort};https=${hostPort}`;
-    }
+      // Build proxy rules: preserve SOCKS5, otherwise use http/https
+      if (isSocks5) {
+        proxyRules = `socks5=${hostPort}`;
+      } else if (!proxyRules.includes('=') && !proxyRules.includes('://')) {
+        proxyRules = `http=${hostPort};https=${hostPort}`;
+      } else {
+        // Rebuild proxy rules with clean host:port
+        proxyRules = `http=${hostPort};https=${hostPort}`;
+      }
 
 
-    try {
-      // 既存のプロキシ接続をクリア（接続プール対策）
       try {
-        ses.closeAllConnections();
-        proxyLog.log(`[proxy-warmup] Closed all existing connections for container ${container.id}`);
-      } catch (e) {
-        // closeAllConnectionsのエラーは無視
-      }
+        // 既存のプロキシ接続をクリア（接続プール対策）
+        try {
+          ses.closeAllConnections();
+          proxyLog.log(`[proxy-warmup] Closed all existing connections for container ${container.id}`);
+        } catch (e) {
+          // closeAllConnectionsのエラーは無視
+        }
 
-      // Proxy認証情報をpartition -> credentials Mapに登録（app.on('login')で使用）
-      // また、host:portキーでも登録（warmup前に確実に登録して、warmup中にloginイベントが発火した際に引けるようにする）
-      if (container.proxy?.username && container.proxy?.password) {
-        proxyCredentialsByPartition.set(part, {
-          username: container.proxy.username,
-          password: container.proxy.password
+        // Proxy認証情報をpartition -> credentials Mapに登録（app.on('login')で使用）
+        // また、host:portキーでも登録（warmup前に確実に登録して、warmup中にloginイベントが発火した際に引けるようにする）
+        if (container.proxy?.username && container.proxy?.password) {
+          proxyCredentialsByPartition.set(part, {
+            username: container.proxy.username,
+            password: container.proxy.password
+          });
+
+          // host:portキーでも登録（warmup中にloginイベントが発火した際に確実に引けるように最優先で登録）
+          if (container.proxy.server) {
+            const hostPort = extractProxyHostPort(container.proxy.server);
+            if (hostPort) {
+              proxyCredentialsByHostPort.set(hostPort, {
+                username: container.proxy.username,
+                password: container.proxy.password
+              });
+              proxyLog.log(`[proxy-warmup] Registered proxy credentials for host:port lookup (before warmup)`, {
+                containerId: container.id,
+                hostPort,
+                partition: part
+              });
+            }
+          }
+        }
+
+        // proxyBypassRulesを設定してローカル通信をバイパス
+        await ses.setProxy({
+          proxyRules,
+          proxyBypassRules: 'localhost,127.0.0.1,<local>'
         });
 
-        // host:portキーでも登録（warmup中にloginイベントが発火した際に確実に引けるように最優先で登録）
-        if (container.proxy.server) {
-          const hostPort = extractProxyHostPort(container.proxy.server);
-          if (hostPort) {
-            proxyCredentialsByHostPort.set(hostPort, {
-              username: container.proxy.username,
-              password: container.proxy.password
-            });
-            proxyLog.log(`[proxy-warmup] Registered proxy credentials for host:port lookup (before warmup)`, {
-              containerId: container.id,
-              hostPort,
-              partition: part
-            });
-          }
+        // forceReloadProxyConfig() を呼び出してプロキシ設定を強制リロード
+        try {
+          await ses.forceReloadProxyConfig();
+          proxyLog.log(`[proxy-warmup] forceReloadProxyConfig completed for container ${container.id}`);
+        } catch (e) {
+          // forceReloadProxyConfigのエラーは無視（未実装の場合もある）
         }
-      }
 
-      // proxyBypassRulesを設定してローカル通信をバイパス
-      await ses.setProxy({
-        proxyRules,
-        proxyBypassRules: 'localhost,127.0.0.1,<local>'
-      });
+        // Proxy Healthcheck（DEBUG_PROXY_CHECK=1 の時だけ実行）
+        const DEBUG_PROXY_CHECK = process.env.DEBUG_PROXY_CHECK === '1';
+        if (DEBUG_PROXY_CHECK && container.proxy?.server) {
+          (ses as any).__proxyHealthcheckPending = true;
+          (ses as any).__proxyHealthcheckContainerId = container.id;
+          (ses as any).__proxyHealthcheckProxyServer = container.proxy.server;
+        }
 
-      // forceReloadProxyConfig() を呼び出してプロキシ設定を強制リロード
-      try {
-        await ses.forceReloadProxyConfig();
-        proxyLog.log(`[proxy-warmup] forceReloadProxyConfig completed for container ${container.id}`);
+        // 出口IP情報を取得（1回だけ、プロキシ認証完了後に実行）
+        // webRequest.onCompleted で最初の成功したリクエストを検知してから実行
       } catch (e) {
-        // forceReloadProxyConfigのエラーは無視（未実装の場合もある）
+        // ses.setProxy失敗などは従来通りログのみ（warmup失敗は上記でフラグ管理しているためthrowしない）
+        console.error('[main] failed to set proxy for container', container.id, e);
       }
-
-      // Proxy Healthcheck（DEBUG_PROXY_CHECK=1 の時だけ実行）
-      const DEBUG_PROXY_CHECK = process.env.DEBUG_PROXY_CHECK === '1';
-      if (DEBUG_PROXY_CHECK && container.proxy?.server) {
-        (ses as any).__proxyHealthcheckPending = true;
-        (ses as any).__proxyHealthcheckContainerId = container.id;
-        (ses as any).__proxyHealthcheckProxyServer = container.proxy.server;
-      }
-
-      // 出口IP情報を取得（1回だけ、プロキシ認証完了後に実行）
-      // webRequest.onCompleted で最初の成功したリクエストを検知してから実行
-    } catch (e) {
-      // ses.setProxy失敗などは従来通りログのみ（warmup失敗は上記でフラグ管理しているためthrowしない）
-      console.error('[main] failed to set proxy for container', container.id, e);
+    } else {
+      await ses.setProxy({ mode: 'system' });
     }
-  } else {
-    await ses.setProxy({ mode: 'system' });
-  }
 
-  // Proxy認証情報の登録は既にwarmup前に完了している（重複登録を避ける）
+    // Proxy認証情報の登録は既にwarmup前に完了している（重複登録を避ける）
 
-  // Accept-Language を上書き + Proxy-Authorization ヘッダーを追加（段階的に撤去予定）
-  // webRequest ハンドラの多重登録を防ぐ
-  if (!(ses as any).__hooksInstalled) {
-    (ses as any).__hooksInstalled = true;
+    // Accept-Language を上書き + Proxy-Authorization ヘッダーを追加（段階的に撤去予定）
+    // webRequest ハンドラの多重登録を防ぐ
+    if (!(ses as any).__hooksInstalled) {
+      (ses as any).__hooksInstalled = true;
 
-    try {
-      const acceptLang = container.fingerprint?.acceptLanguage || 'ja,en-US;q=0.8,en;q=0.7';
-      // Proxy-Authorization ヘッダー注入はデフォルトOFF（フラグで切替可能）
-      const ENABLE_PROXY_AUTH_HEADER_INJECTION = false;
+      try {
+        const acceptLang = container.fingerprint?.acceptLanguage || 'ja,en-US;q=0.8,en;q=0.7';
+        // Proxy-Authorization ヘッダー注入はデフォルトOFF（フラグで切替可能）
+        const ENABLE_PROXY_AUTH_HEADER_INJECTION = false;
 
-      ses.webRequest.onBeforeSendHeaders((details, cb) => {
-        const headers = { ...details.requestHeaders, 'Accept-Language': acceptLang } as any;
+        ses.webRequest.onBeforeSendHeaders((details, cb) => {
+          const headers = { ...details.requestHeaders, 'Accept-Language': acceptLang } as any;
 
-        // zstd互換性オプション: DISABLE_ZSTD=1 のときだけ zstd を削除（切り分け用）
-        const DISABLE_ZSTD = process.env.DISABLE_ZSTD === '1';
-        if (DISABLE_ZSTD && headers['Accept-Encoding']) {
-          const acceptEncoding = headers['Accept-Encoding'];
-          if (typeof acceptEncoding === 'string' && acceptEncoding.includes('zstd')) {
-            // zstd を削除（gzip, deflate, br のみに）
-            headers['Accept-Encoding'] = acceptEncoding
-              .split(',')
-              .map((enc: string) => enc.trim())
-              .filter((enc: string) => !enc.toLowerCase().includes('zstd'))
-              .join(', ');
-          }
-        }
-
-        // Proxy-Authorization ヘッダー注入（デフォルトOFF、段階的に撤去予定）
-        if (ENABLE_PROXY_AUTH_HEADER_INJECTION
-          && (details.url.startsWith('http://') || details.url.startsWith('https://'))
-          && !details.url.startsWith('http://localhost')
-          && !details.url.startsWith('https://localhost')
-          && container.proxy?.username
-          && container.proxy?.password) {
-          const token = Buffer.from(`${container.proxy.username}:${container.proxy.password}`).toString('base64');
-          headers['Proxy-Authorization'] = `Basic ${token}`;
-          console.log('[main] added Proxy-Authorization header (injection mode)', {
-            url: details.url,
-            containerId: container.id,
-            hasToken: !!token
-          });
-        }
-
-        // X関連URLの診断ログ: 400エラーが発生する可能性のあるリクエストの詳細ログ
-        if (isXRelatedUrl(details.url)) {
-          const requestHeaders = details.requestHeaders || {};
-          const importantHeaders = {
-            'authorization': requestHeaders['authorization'] || requestHeaders['Authorization'],
-            'content-type': requestHeaders['content-type'] || requestHeaders['Content-Type'],
-            'x-twitter-auth-type': requestHeaders['x-twitter-auth-type'] || requestHeaders['X-Twitter-Auth-Type'],
-            'x-twitter-client-language': requestHeaders['x-twitter-client-language'] || requestHeaders['X-Twitter-Client-Language'],
-            'x-csrf-token': requestHeaders['x-csrf-token'] || requestHeaders['X-Csrf-Token'],
-            'cookie': requestHeaders['cookie'] || requestHeaders['Cookie'] ? '[REDACTED]' : undefined
-          };
-          // 400エラーが発生する可能性のあるリクエストのみ詳細ログ
-          if (details.url.includes('onboarding/task.json') && details.method === 'POST') {
-            proxyLog.log('[x-net] beforeSendHeaders (onboarding/task.json POST)', {
-              url: details.url,
-              method: details.method,
-              headers: importantHeaders,
-              webContentsId: details.webContentsId ?? null,
-              containerId: container.id
-            });
-          }
-        }
-
-        cb({ requestHeaders: headers });
-      });
-      ses.webRequest.onHeadersReceived((details, cb) => {
-        cb({});
-      });
-      // X関連URLの診断ログ: onBeforeRequest
-      // onboarding/task.json の400エラー時にレスポンスボディを取得するため filterResponseData を有効化
-      ses.webRequest.onBeforeRequest((details, cb) => {
-        // 画像ブロック機能
-        if (container.blockImages && (details.resourceType === 'image' || details.resourceType === 'media' || details.resourceType === 'font')) {
-          cb({ cancel: true });
-          return;
-        }
-
-        // warmup失敗時はX系URLへのアクセスを完全ブロック
-        const state = warmupState.get(container.id);
-        if (state && !state.ok && isXUrl(details.url)) {
-          proxyLog.warn(`[warmup-guard] Blocking X URL access (warmup failed): ${details.url}`, {
-            containerId: container.id,
-            url: details.url,
-            method: details.method
-          });
-          cb({ cancel: true });
-          return;
-        }
-
-        if (isXRelatedUrl(details.url)) {
-          // onboarding/task.json のPOSTリクエストのみ詳細ログ（OPTIONSやその他のリクエストは除外）
-          if (details.url.includes('onboarding/task.json') && details.method === 'POST') {
-            const webContentsId = details.webContentsId ?? null;
-            proxyLog.log('[x-net] beforeRequest', {
-              url: details.url,
-              method: details.method,
-              webContentsId,
-              containerId: container.id
-            });
-            // 400エラーのレスポンスボディを取得
-            cb({ filterResponseData: true });
-            return;
-          }
-        }
-        cb({});
-      });
-
-      // X関連URLの診断ログ: onCompleted
-      // 出口IP情報取得: プロキシ認証完了後の最初の成功したリクエストを検知
-      ses.webRequest.onCompleted((details) => {
-        // 最初の成功したリクエスト（statusCode 200）を検知してから出口IP情報を取得
-        if (container.proxy?.server && !(ses as any).__egressProbed &&
-          details.statusCode === 200 &&
-          !details.url.startsWith('chrome-extension://') &&
-          !details.url.startsWith('devtools://') &&
-          !details.url.startsWith('http://localhost') &&
-          !details.url.startsWith('ws://localhost')) {
-          (ses as any).__egressProbed = true;
-
-          // Proxy Healthcheck（DEBUG_PROXY_CHECK=1 の時だけ実行）
-          // warmup成功時のみ実行（warmup失敗時は実行しない）
-          if ((ses as any).__proxyHealthcheckPending &&
-            (ses as any).__proxyHealthcheckContainerId &&
-            (ses as any).__proxyHealthcheckProxyServer) {
-            const healthCheckContainerId = (ses as any).__proxyHealthcheckContainerId;
-            const healthCheckProxyServer = (ses as any).__proxyHealthcheckProxyServer;
-
-            // warmupStateをチェック（warmup失敗時は実行しない）
-            const state = warmupState.get(healthCheckContainerId);
-            if (state && !state.ok) {
-              proxyLog.log(`[proxy-check] Skipping healthcheck (warmup failed) for container ${healthCheckContainerId}`);
-              (ses as any).__proxyHealthcheckPending = false;
-            } else {
-              (ses as any).__proxyHealthcheckPending = false;
-
-              setTimeout(async () => {
-                try {
-                  const healthCheck = await checkProxyHealth(ses, healthCheckContainerId, healthCheckProxyServer);
-                  // 重大な問題がある場合はプロキシをBAN
-                  if (!healthCheck.ok && healthCheck.issues.length > 0) {
-                    const criticalIssues = healthCheck.issues.filter((i: string) =>
-                      i.includes('ヘッダー漏れ') || i.includes('出口IPが不安定')
-                    );
-                    if (criticalIssues.length > 0) {
-                      banProxy(healthCheckProxyServer, criticalIssues.join('; '));
-                    }
-                  }
-                } catch (e) {
-                  // Healthcheckのエラーは無視（診断機能の失敗はコンテナの動作に影響しない）
-                }
-              }, 1000);
+          // zstd互換性オプション: DISABLE_ZSTD=1 のときだけ zstd を削除（切り分け用）
+          const DISABLE_ZSTD = process.env.DISABLE_ZSTD === '1';
+          if (DISABLE_ZSTD && headers['Accept-Encoding']) {
+            const acceptEncoding = headers['Accept-Encoding'];
+            if (typeof acceptEncoding === 'string' && acceptEncoding.includes('zstd')) {
+              // zstd を削除（gzip, deflate, br のみに）
+              headers['Accept-Encoding'] = acceptEncoding
+                .split(',')
+                .map((enc: string) => enc.trim())
+                .filter((enc: string) => !enc.toLowerCase().includes('zstd'))
+                .join(', ');
             }
           }
 
-          // プロキシ認証が完了したことを確認できたので、出口IP情報を取得
-          // エラーが発生しても静かに失敗（エラーダイアログを表示しない）
-          const attemptProbe = async (retryCount = 0): Promise<void> => {
-            try {
-              await probeEgressNetwork(ses, container.id, container.proxy!.server);
-            } catch (e: any) {
-              const errorMsg = e instanceof Error ? e.message : String(e);
-              // ERR_TUNNEL_CONNECTION_FAILED の場合はリトライ（最大3回、5秒間隔）
-              if (errorMsg.includes('ERR_TUNNEL_CONNECTION_FAILED') && retryCount < 3) {
-                setTimeout(() => {
-                  attemptProbe(retryCount + 1).catch(() => {
-                    // リトライ時のエラーも静かに無視（未処理の例外を防ぐ）
-                  });
-                }, 5000);
-              }
-              // その他のエラーも静かに無視（診断機能の失敗はコンテナの動作に影響しない）
-            }
-          };
-          // 少し待ってから実行（プロキシ認証が確実に完了する時間を確保）
-          setTimeout(() => {
-            attemptProbe(0).catch(() => {
-              // 未処理の例外を防ぐ（エラーダイアログを表示しない）
+          // Proxy-Authorization ヘッダー注入（デフォルトOFF、段階的に撤去予定）
+          if (ENABLE_PROXY_AUTH_HEADER_INJECTION
+            && (details.url.startsWith('http://') || details.url.startsWith('https://'))
+            && !details.url.startsWith('http://localhost')
+            && !details.url.startsWith('https://localhost')
+            && container.proxy?.username
+            && container.proxy?.password) {
+            const token = Buffer.from(`${container.proxy.username}:${container.proxy.password}`).toString('base64');
+            headers['Proxy-Authorization'] = `Basic ${token}`;
+            console.log('[main] added Proxy-Authorization header (injection mode)', {
+              url: details.url,
+              containerId: container.id,
+              hasToken: !!token
             });
-          }, 1000);
-        }
+          }
 
-        // X関連URLの診断ログ処理
-        if (isXRelatedUrl(details.url)) {
-          const webContentsId = details.webContentsId ?? null;
-          const responseHeaders = details.responseHeaders ? {
-            'content-type': details.responseHeaders['content-type'] || details.responseHeaders['Content-Type'],
-            'x-response-time': details.responseHeaders['x-response-time'] || details.responseHeaders['X-Response-Time'],
-            'x-rate-limit': details.responseHeaders['x-rate-limit'] || details.responseHeaders['X-Rate-Limit'],
-            'x-rate-limit-remaining': details.responseHeaders['x-rate-limit-remaining'] || details.responseHeaders['X-Rate-Limit-Remaining']
-          } : null;
-
-          // エラーの場合は警告ログ + レスポンスボディからエラー情報を抽出 + 回復策を提案
-          // 400エラーのみ詳細ログ、それ以外のエラーは簡易ログ
-          if (details.statusCode >= 400) {
-            if (details.statusCode === 400 && details.url.includes('onboarding/task.json')) {
-              let errorInfo: any = null;
-              try {
-                // filterResponseData が有効な場合、responseBody が details に含まれる
-                const responseBody = (details as any).responseBody;
-                if (responseBody) {
-                  let bodyText = '';
-                  if (Array.isArray(responseBody.data)) {
-                    // responseBody.data は Buffer の配列
-                    const buffers = responseBody.data.map((b: any) => Buffer.isBuffer(b) ? b : Buffer.from(b));
-                    bodyText = Buffer.concat(buffers).toString('utf8');
-                  } else if (typeof responseBody === 'string') {
-                    bodyText = responseBody;
-                  } else if (Buffer.isBuffer(responseBody)) {
-                    bodyText = responseBody.toString('utf8');
-                  }
-
-                  if (bodyText) {
-                    const bodyJson = JSON.parse(bodyText);
-                    // errors/message/code のみ抽出（PIIを避ける）
-                    if (bodyJson.errors && Array.isArray(bodyJson.errors)) {
-                      errorInfo = {
-                        errors: bodyJson.errors.map((err: any) => ({
-                          message: err.message,
-                          code: err.code
-                        }))
-                      };
-                    } else if (bodyJson.message) {
-                      errorInfo = {
-                        message: bodyJson.message,
-                        code: bodyJson.code
-                      };
-                    }
-                  }
-                }
-              } catch (e) {
-                // パースエラーは無視（ログには出さない）
-              }
-
-              proxyLog.error('[x-net] completed (400 ERROR)', {
+          // X関連URLの診断ログ: 400エラーが発生する可能性のあるリクエストの詳細ログ
+          if (isXRelatedUrl(details.url)) {
+            const requestHeaders = details.requestHeaders || {};
+            const importantHeaders = {
+              'authorization': requestHeaders['authorization'] || requestHeaders['Authorization'],
+              'content-type': requestHeaders['content-type'] || requestHeaders['Content-Type'],
+              'x-twitter-auth-type': requestHeaders['x-twitter-auth-type'] || requestHeaders['X-Twitter-Auth-Type'],
+              'x-twitter-client-language': requestHeaders['x-twitter-client-language'] || requestHeaders['X-Twitter-Client-Language'],
+              'x-csrf-token': requestHeaders['x-csrf-token'] || requestHeaders['X-Csrf-Token'],
+              'cookie': requestHeaders['cookie'] || requestHeaders['Cookie'] ? '[REDACTED]' : undefined
+            };
+            // 400エラーが発生する可能性のあるリクエストのみ詳細ログ
+            if (details.url.includes('onboarding/task.json') && details.method === 'POST') {
+              proxyLog.log('[x-net] beforeSendHeaders (onboarding/task.json POST)', {
                 url: details.url,
                 method: details.method,
-                statusCode: details.statusCode,
-                fromCache: details.fromCache,
-                responseHeaders: details.responseHeaders ? {
-                  'content-type': responseHeaders?.['content-type'],
-                  'x-response-time': responseHeaders?.['x-response-time'],
-                  'x-rate-limit-remaining': responseHeaders?.['x-rate-limit-remaining'],
-                  'all-keys': Object.keys(details.responseHeaders)
-                } : null,
-                errorInfo,
+                headers: importantHeaders,
+                webContentsId: details.webContentsId ?? null,
+                containerId: container.id
+              });
+            }
+          }
+
+          cb({ requestHeaders: headers });
+        });
+        ses.webRequest.onHeadersReceived((details, cb) => {
+          cb({});
+        });
+        // X関連URLの診断ログ: onBeforeRequest
+        // onboarding/task.json の400エラー時にレスポンスボディを取得するため filterResponseData を有効化
+        ses.webRequest.onBeforeRequest((details, cb) => {
+          // 画像ブロック機能
+          if (container.blockImages && (details.resourceType === 'image' || details.resourceType === 'media' || details.resourceType === 'font')) {
+            cb({ cancel: true });
+            return;
+          }
+
+          // warmup失敗時はX系URLへのアクセスを完全ブロック
+          const state = warmupState.get(container.id);
+          if (state && !state.ok && isXUrl(details.url)) {
+            proxyLog.warn(`[warmup-guard] Blocking X URL access (warmup failed): ${details.url}`, {
+              containerId: container.id,
+              url: details.url,
+              method: details.method
+            });
+            cb({ cancel: true });
+            return;
+          }
+
+          if (isXRelatedUrl(details.url)) {
+            // onboarding/task.json のPOSTリクエストのみ詳細ログ（OPTIONSやその他のリクエストは除外）
+            if (details.url.includes('onboarding/task.json') && details.method === 'POST') {
+              const webContentsId = details.webContentsId ?? null;
+              proxyLog.log('[x-net] beforeRequest', {
+                url: details.url,
+                method: details.method,
                 webContentsId,
                 containerId: container.id
               });
+              // 400エラーのレスポンスボディを取得
+              cb({ filterResponseData: true });
+              return;
+            }
+          }
+          cb({});
+        });
 
-              // プロキシをBANして回復策を提案
-              if (container.proxy?.server) {
-                const proxyHostPort = extractProxyHostPort(container.proxy.server);
-                banProxy(container.proxy.server, `Xログイン失敗 (onboarding/task.json 400)`);
-                proxyLog.error(`[x-net] Proxy ${proxyHostPort} has been BANNED due to X login failure. Consider:`, {
-                  suggestion1: 'Clear storage for x.com domain and retry',
-                  suggestion2: 'Switch to a different proxy',
-                  suggestion3: 'Check proxy healthcheck logs (DEBUG_PROXY_CHECK=1)',
+        // X関連URLの診断ログ: onCompleted
+        // 出口IP情報取得: プロキシ認証完了後の最初の成功したリクエストを検知
+        ses.webRequest.onCompleted((details) => {
+          // 最初の成功したリクエスト（statusCode 200）を検知してから出口IP情報を取得
+          if (container.proxy?.server && !(ses as any).__egressProbed &&
+            details.statusCode === 200 &&
+            !details.url.startsWith('chrome-extension://') &&
+            !details.url.startsWith('devtools://') &&
+            !details.url.startsWith('http://localhost') &&
+            !details.url.startsWith('ws://localhost')) {
+            (ses as any).__egressProbed = true;
+
+            // Proxy Healthcheck（DEBUG_PROXY_CHECK=1 の時だけ実行）
+            // warmup成功時のみ実行（warmup失敗時は実行しない）
+            if ((ses as any).__proxyHealthcheckPending &&
+              (ses as any).__proxyHealthcheckContainerId &&
+              (ses as any).__proxyHealthcheckProxyServer) {
+              const healthCheckContainerId = (ses as any).__proxyHealthcheckContainerId;
+              const healthCheckProxyServer = (ses as any).__proxyHealthcheckProxyServer;
+
+              // warmupStateをチェック（warmup失敗時は実行しない）
+              const state = warmupState.get(healthCheckContainerId);
+              if (state && !state.ok) {
+                proxyLog.log(`[proxy-check] Skipping healthcheck (warmup failed) for container ${healthCheckContainerId}`);
+                (ses as any).__proxyHealthcheckPending = false;
+              } else {
+                (ses as any).__proxyHealthcheckPending = false;
+
+                setTimeout(async () => {
+                  try {
+                    const healthCheck = await checkProxyHealth(ses, healthCheckContainerId, healthCheckProxyServer);
+                    // 重大な問題がある場合はプロキシをBAN
+                    if (!healthCheck.ok && healthCheck.issues.length > 0) {
+                      const criticalIssues = healthCheck.issues.filter((i: string) =>
+                        i.includes('ヘッダー漏れ') || i.includes('出口IPが不安定')
+                      );
+                      if (criticalIssues.length > 0) {
+                        banProxy(healthCheckProxyServer, criticalIssues.join('; '));
+                      }
+                    }
+                  } catch (e) {
+                    // Healthcheckのエラーは無視（診断機能の失敗はコンテナの動作に影響しない）
+                  }
+                }, 1000);
+              }
+            }
+
+            // プロキシ認証が完了したことを確認できたので、出口IP情報を取得
+            // エラーが発生しても静かに失敗（エラーダイアログを表示しない）
+            const attemptProbe = async (retryCount = 0): Promise<void> => {
+              try {
+                await probeEgressNetwork(ses, container.id, container.proxy!.server);
+              } catch (e: any) {
+                const errorMsg = e instanceof Error ? e.message : String(e);
+                // ERR_TUNNEL_CONNECTION_FAILED の場合はリトライ（最大3回、5秒間隔）
+                if (errorMsg.includes('ERR_TUNNEL_CONNECTION_FAILED') && retryCount < 3) {
+                  setTimeout(() => {
+                    attemptProbe(retryCount + 1).catch(() => {
+                      // リトライ時のエラーも静かに無視（未処理の例外を防ぐ）
+                    });
+                  }, 5000);
+                }
+                // その他のエラーも静かに無視（診断機能の失敗はコンテナの動作に影響しない）
+              }
+            };
+            // 少し待ってから実行（プロキシ認証が確実に完了する時間を確保）
+            setTimeout(() => {
+              attemptProbe(0).catch(() => {
+                // 未処理の例外を防ぐ（エラーダイアログを表示しない）
+              });
+            }, 1000);
+          }
+
+          // X関連URLの診断ログ処理
+          if (isXRelatedUrl(details.url)) {
+            const webContentsId = details.webContentsId ?? null;
+            const responseHeaders = details.responseHeaders ? {
+              'content-type': details.responseHeaders['content-type'] || details.responseHeaders['Content-Type'],
+              'x-response-time': details.responseHeaders['x-response-time'] || details.responseHeaders['X-Response-Time'],
+              'x-rate-limit': details.responseHeaders['x-rate-limit'] || details.responseHeaders['X-Rate-Limit'],
+              'x-rate-limit-remaining': details.responseHeaders['x-rate-limit-remaining'] || details.responseHeaders['X-Rate-Limit-Remaining']
+            } : null;
+
+            // エラーの場合は警告ログ + レスポンスボディからエラー情報を抽出 + 回復策を提案
+            // 400エラーのみ詳細ログ、それ以外のエラーは簡易ログ
+            if (details.statusCode >= 400) {
+              if (details.statusCode === 400 && details.url.includes('onboarding/task.json')) {
+                let errorInfo: any = null;
+                try {
+                  // filterResponseData が有効な場合、responseBody が details に含まれる
+                  const responseBody = (details as any).responseBody;
+                  if (responseBody) {
+                    let bodyText = '';
+                    if (Array.isArray(responseBody.data)) {
+                      // responseBody.data は Buffer の配列
+                      const buffers = responseBody.data.map((b: any) => Buffer.isBuffer(b) ? b : Buffer.from(b));
+                      bodyText = Buffer.concat(buffers).toString('utf8');
+                    } else if (typeof responseBody === 'string') {
+                      bodyText = responseBody;
+                    } else if (Buffer.isBuffer(responseBody)) {
+                      bodyText = responseBody.toString('utf8');
+                    }
+
+                    if (bodyText) {
+                      const bodyJson = JSON.parse(bodyText);
+                      // errors/message/code のみ抽出（PIIを避ける）
+                      if (bodyJson.errors && Array.isArray(bodyJson.errors)) {
+                        errorInfo = {
+                          errors: bodyJson.errors.map((err: any) => ({
+                            message: err.message,
+                            code: err.code
+                          }))
+                        };
+                      } else if (bodyJson.message) {
+                        errorInfo = {
+                          message: bodyJson.message,
+                          code: bodyJson.code
+                        };
+                      }
+                    }
+                  }
+                } catch (e) {
+                  // パースエラーは無視（ログには出さない）
+                }
+
+                proxyLog.error('[x-net] completed (400 ERROR)', {
+                  url: details.url,
+                  method: details.method,
+                  statusCode: details.statusCode,
+                  fromCache: details.fromCache,
+                  responseHeaders: details.responseHeaders ? {
+                    'content-type': responseHeaders?.['content-type'],
+                    'x-response-time': responseHeaders?.['x-response-time'],
+                    'x-rate-limit-remaining': responseHeaders?.['x-rate-limit-remaining'],
+                    'all-keys': Object.keys(details.responseHeaders)
+                  } : null,
+                  errorInfo,
+                  webContentsId,
+                  containerId: container.id
+                });
+
+                // プロキシをBANして回復策を提案
+                if (container.proxy?.server) {
+                  const proxyHostPort = extractProxyHostPort(container.proxy.server);
+                  banProxy(container.proxy.server, `Xログイン失敗 (onboarding/task.json 400)`);
+                  proxyLog.error(`[x-net] Proxy ${proxyHostPort} has been BANNED due to X login failure. Consider:`, {
+                    suggestion1: 'Clear storage for x.com domain and retry',
+                    suggestion2: 'Switch to a different proxy',
+                    suggestion3: 'Check proxy healthcheck logs (DEBUG_PROXY_CHECK=1)',
+                    containerId: container.id
+                  });
+                }
+              } else {
+                // 400以外のエラーは簡易ログ
+                proxyLog.error('[x-net] completed (ERROR)', {
+                  url: details.url,
+                  method: details.method,
+                  statusCode: details.statusCode,
                   containerId: container.id
                 });
               }
             } else {
-              // 400以外のエラーは簡易ログ
-              proxyLog.error('[x-net] completed (ERROR)', {
-                url: details.url,
-                method: details.method,
-                statusCode: details.statusCode,
-                containerId: container.id
-              });
-            }
-          } else {
-            // 200成功はログ出力しない（エラーのみ表示）
-            // onboarding/task.jsonのPOSTリクエストの200成功のみ簡易ログ（OPTIONSは除外）
-            if (details.url.includes('onboarding/task.json') &&
-              details.statusCode === 200 &&
-              details.method === 'POST') {
-              proxyLog.log('[x-net] completed (SUCCESS)', {
-                url: details.url,
-                method: details.method,
-                statusCode: details.statusCode,
-                containerId: container.id
-              });
+              // 200成功はログ出力しない（エラーのみ表示）
+              // onboarding/task.jsonのPOSTリクエストの200成功のみ簡易ログ（OPTIONSは除外）
+              if (details.url.includes('onboarding/task.json') &&
+                details.statusCode === 200 &&
+                details.method === 'POST') {
+                proxyLog.log('[x-net] completed (SUCCESS)', {
+                  url: details.url,
+                  method: details.method,
+                  statusCode: details.statusCode,
+                  containerId: container.id
+                });
+              }
             }
           }
-        }
-      });
+        });
 
-      // X関連URLの診断ログ: onErrorOccurred
-      ses.webRequest.onErrorOccurred((details) => {
-        if (isXRelatedUrl(details.url)) {
-          const webContentsId = details.webContentsId ?? null;
-          proxyLog.error('[x-net] failed', {
-            url: details.url,
-            method: details.method,
-            error: details.error,
-            webContentsId,
-            containerId: container.id
-          });
-        } else if (details.url && !details.url.startsWith('chrome-extension://') && !details.url.startsWith('devtools://')) {
-          console.error('[main] webRequest onErrorOccurred', {
-            url: details.url,
-            error: details.error,
-            containerId: container.id,
-            hasProxy: !!container.proxy?.server
-          });
-        }
-      });
-    } catch (e) {
-      console.error('[main] error setting up webRequest hooks', e);
+        // X関連URLの診断ログ: onErrorOccurred
+        ses.webRequest.onErrorOccurred((details) => {
+          if (isXRelatedUrl(details.url)) {
+            const webContentsId = details.webContentsId ?? null;
+            proxyLog.error('[x-net] failed', {
+              url: details.url,
+              method: details.method,
+              error: details.error,
+              webContentsId,
+              containerId: container.id
+            });
+          } else if (details.url && !details.url.startsWith('chrome-extension://') && !details.url.startsWith('devtools://')) {
+            console.error('[main] webRequest onErrorOccurred', {
+              url: details.url,
+              error: details.error,
+              containerId: container.id,
+              hasProxy: !!container.proxy?.server
+            });
+          }
+        });
+      } catch (e) {
+        console.error('[main] error setting up webRequest hooks', e);
+      }
     }
-  }
 
-  const shellPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs');
-  console.log('[main] shell preload:', shellPreloadPath, 'exists=', existsSync(shellPreloadPath));
+    const shellPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'mainPreload.cjs');
+    console.log('[main] shell preload:', shellPreloadPath, 'exists=', existsSync(shellPreloadPath));
 
-  const w = container.fingerprint?.viewportWidth || 1280;
-  const h = container.fingerprint?.viewportHeight || 800;
-  const win = new BrowserWindow({
-    width: w,
-    height: h + BAR_HEIGHT, // アドレスバー分
-    webPreferences: {
-      partition: part,
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: shellPreloadPath,
-      backgroundThrottling: false // バックグラウンドでも読み込みを継続
-    }
-  });
+    const w = container.fingerprint?.viewportWidth || 1280;
+    const h = container.fingerprint?.viewportHeight || 800;
+    const win = new BrowserWindow({
+      width: w,
+      height: h + BAR_HEIGHT, // アドレスバー分
+      webPreferences: {
+        partition: part,
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: shellPreloadPath,
+        backgroundThrottling: false // バックグラウンドでも読み込みを継続
+      }
+    });
 
-  // WebRTC非プロキシUDP禁止を確実に適用（BrowserWindow生成直後、loadURLより前）
-  try {
-    win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
-    console.log('[main] setWebRTCIPHandlingPolicy applied for container', container.id);
-  } catch (e) {
-    console.error('[main] failed to setWebRTCIPHandlingPolicy', e);
-  }
-
-  // Set containerId on shell window's webContents for app.on('login') handler
-  try {
-    (win.webContents as any)._containerId = container.id;
-  } catch (e) {
-    console.error('[main] failed to set containerId on shell webContents', e);
-  }
-
-  // GPU診断ログ（DEBUG_GPU=1 の時のみ）
-  if (process.env.DEBUG_GPU === '1') {
+    // WebRTC非プロキシUDP禁止を確実に適用（BrowserWindow生成直後、loadURLより前）
     try {
-      console.log('[gpu] container created', {
-        containerId: container.id,
-        webContentsId: win.webContents.id,
-        partition: part
-      });
+      win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+      console.log('[main] setWebRTCIPHandlingPolicy applied for container', container.id);
     } catch (e) {
-      // ログ取得エラーは無視
-    }
-  }
-
-  // set window icon if available
-  try {
-    const ico = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
-    if (existsSync(ico)) win.setIcon(ico as any);
-  } catch (e) { console.error('[main] set container window icon error', e); }
-  // mark this window as a container shell so main can detect and close it reliably
-  try { (win as any).__isContainerShell = true; (win as any).__containerId = container.id; } catch { }
-  // Set containerId on shell window's webContents for app.on('login') handler
-  try {
-    (win.webContents as any)._containerId = container.id;
-  } catch (e) {
-    console.error('[main] failed to set containerId on shell webContents', e);
-  }
-  // hide menu bar for the container shell window (remove File/Edit menus)
-  try { win.removeMenu(); win.setAutoHideMenuBar(true); } catch { }
-
-  // 開発時デバッグ: DevTools の自動オープンを無効化。
-  // 開発中は F12 押下で開くように renderer -> preload -> main で toggle を提供する。
-
-  // セッションIDを新規採番（この起動単位）
-  const sessionId = randomUUID();
-  // Read previous lastSessionId from DB before we update it for the new session
-  let prevLastSessionId: string | null = null;
-  try { const curCont = DB.getContainer(container.id); if (curCont) prevLastSessionId = curCont.lastSessionId ?? null; } catch (e) { console.error('[main] failed to read prevLastSessionId', e); }
-  DB.recordSession(sessionId, container.id, Date.now());
-
-  // UA固定（必要に応じて）
-  if (container.userAgent) win.webContents.userAgent = container.userAgent;
-
-  // NOTE: Avoid recording navigations triggered by the shell window itself
-  // (e.g. containerShell.html or dev server). Record tabs only from BrowserView
-  // navigations below. Still keep light logging for debugging.
-  win.webContents.on('did-navigate', (_e, url) => {
-    try { console.log('[main] shell did-navigate (ignored for tabs) url=', url); } catch { }
-  });
-  win.webContents.on('page-title-updated', (_e, title) => {
-    try { console.log('[main] shell title-updated (ignored for tabs) title=', title); } catch { }
-  });
-  win.webContents.on('page-favicon-updated', (_e, favs) => {
-    try { console.log('[main] shell favicon-updated (ignored for tabs) favs=', favs); } catch { }
-  });
-
-  win.on('closed', () => DB.closeSession(sessionId, Date.now()));
-
-  // ページへコンテキスト（containerId/sessionId/fingerprint/currentUrl/tabs）を通知
-  const sendCtx = () => {
-    try {
-      const entry = openedById.get(container.id);
-      const containerRecord = DB.getContainer(container.id) || { name: undefined };
-      const containerName = containerRecord.name ?? container.name ?? '';
-      const tabs = entry ? entry.views.map(v => ({ url: v.webContents.getURL(), title: v.webContents.getTitle?.() })) : [];
-      const activeIndex = entry ? entry.activeIndex : 0;
-      const activeView = entry ? (entry.views[activeIndex] || entry.views[0]) : null;
-      const currentUrl = activeView ? activeView.webContents.getURL() : undefined;
-      console.log('[main] sendCtx', { containerId: container.id, sessionId, currentUrl, tabsLength: tabs.length, activeIndex, containerName });
-      try { win.setTitle(containerName || 'コンテナシェル'); } catch { }
-      win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl, tabs, activeIndex, containerName });
-    } catch { }
-  };
-  win.webContents.on('did-finish-load', sendCtx);
-
-  // BrowserView を作成（実ページ）
-  const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
-  const createView = (u: string) => {
-    const v = new BrowserView({ webPreferences: { partition: part, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
-
-    // WebRTC非プロキシUDP禁止を確実に適用
-    try {
-      v.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
-    } catch (e) {
-      console.error('[main] failed to setWebRTCIPHandlingPolicy on view', e);
+      console.error('[main] failed to setWebRTCIPHandlingPolicy', e);
     }
 
-    // Set containerId on view's webContents for app.on('login') handler
+    // Set containerId on shell window's webContents for app.on('login') handler
     try {
-      (v.webContents as any)._containerId = container.id;
+      (win.webContents as any)._containerId = container.id;
     } catch (e) {
-      console.error('[main] failed to set containerId on view webContents', e);
+      console.error('[main] failed to set containerId on shell webContents', e);
     }
 
-    // GPU診断ログ（DEBUG_GPU=1 の時のみ、BrowserView作成時）
+    // GPU診断ログ（DEBUG_GPU=1 の時のみ）
     if (process.env.DEBUG_GPU === '1') {
       try {
-        console.log('[gpu] browserView created', {
+        console.log('[gpu] container created', {
           containerId: container.id,
-          webContentsId: v.webContents.id,
+          webContentsId: win.webContents.id,
           partition: part
         });
       } catch (e) {
@@ -2277,328 +2208,450 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       }
     }
 
-    const layoutView = () => {
-      const [w, h] = win.getContentSize();
-      const bar = BAR_HEIGHT;
-      v.setBounds({ x: 0, y: bar, width: w, height: Math.max(0, h - bar) });
-    };
-    win.on('resize', layoutView);
-    layoutView();
-    const scale = container.fingerprint?.deviceScaleFactor || 1.0;
-    try { v.webContents.setZoomFactor(scale); } catch { }
-
-    // Forward navigation/title/favicon events from the BrowserView to the shell window
+    // set window icon if available
     try {
-      v.webContents.on('did-redirect-navigation', (_e: Electron.Event, details: Electron.DidRedirectNavigationEvent) => {
+      const ico = path.join(app.getAppPath(), 'build-resources', 'Icon.ico');
+      if (existsSync(ico)) win.setIcon(ico as any);
+    } catch (e) { console.error('[main] set container window icon error', e); }
+    // mark this window as a container shell so main can detect and close it reliably
+    try { (win as any).__isContainerShell = true; (win as any).__containerId = container.id; } catch { }
+    // Set containerId on shell window's webContents for app.on('login') handler
+    try {
+      (win.webContents as any)._containerId = container.id;
+    } catch (e) {
+      console.error('[main] failed to set containerId on shell webContents', e);
+    }
+    // hide menu bar for the container shell window (remove File/Edit menus)
+    try { win.removeMenu(); win.setAutoHideMenuBar(true); } catch { }
+
+    // 開発時デバッグ: DevTools の自動オープンを無効化。
+    // 開発中は F12 押下で開くように renderer -> preload -> main で toggle を提供する。
+
+    // セッションIDを新規採番（この起動単位）
+    const sessionId = randomUUID();
+    // Read previous lastSessionId from DB before we update it for the new session
+    let prevLastSessionId: string | null = null;
+    try { const curCont = DB.getContainer(container.id); if (curCont) prevLastSessionId = curCont.lastSessionId ?? null; } catch (e) { console.error('[main] failed to read prevLastSessionId', e); }
+    DB.recordSession(sessionId, container.id, Date.now());
+
+    // UA固定（必要に応じて）
+    if (container.userAgent) win.webContents.userAgent = container.userAgent;
+
+    // NOTE: Avoid recording navigations triggered by the shell window itself
+    // (e.g. containerShell.html or dev server). Record tabs only from BrowserView
+    // navigations below. Still keep light logging for debugging.
+    win.webContents.on('did-navigate', (_e, url) => {
+      try { console.log('[main] shell did-navigate (ignored for tabs) url=', url); } catch { }
+    });
+    win.webContents.on('page-title-updated', (_e, title) => {
+      try { console.log('[main] shell title-updated (ignored for tabs) title=', title); } catch { }
+    });
+    win.webContents.on('page-favicon-updated', (_e, favs) => {
+      try { console.log('[main] shell favicon-updated (ignored for tabs) favs=', favs); } catch { }
+    });
+
+    win.on('closed', () => DB.closeSession(sessionId, Date.now()));
+
+    // ページへコンテキスト（containerId/sessionId/fingerprint/currentUrl/tabs）を通知
+    const sendCtx = () => {
+      try {
+        const entry = openedById.get(container.id);
+        const containerRecord = DB.getContainer(container.id) || { name: undefined };
+        const containerName = containerRecord.name ?? container.name ?? '';
+        const tabs = entry ? entry.views.map(v => ({ url: v.webContents.getURL(), title: v.webContents.getTitle?.() })) : [];
+        const activeIndex = entry ? entry.activeIndex : 0;
+        const activeView = entry ? (entry.views[activeIndex] || entry.views[0]) : null;
+        const currentUrl = activeView ? activeView.webContents.getURL() : undefined;
+        console.log('[main] sendCtx', { containerId: container.id, sessionId, currentUrl, tabsLength: tabs.length, activeIndex, containerName });
+        try { win.setTitle(containerName || 'コンテナシェル'); } catch { }
+        win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl, tabs, activeIndex, containerName });
+      } catch { }
+    };
+    win.webContents.on('did-finish-load', sendCtx);
+
+    // BrowserView を作成（実ページ）
+    const viewPreloadPath = path.join(app.getAppPath(), 'out', 'preload', 'containerPreload.cjs');
+    const createView = (u: string) => {
+      const v = new BrowserView({ webPreferences: { partition: part, contextIsolation: true, nodeIntegration: false, preload: viewPreloadPath, backgroundThrottling: false } });
+
+      // WebRTC非プロキシUDP禁止を確実に適用
+      try {
+        v.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+      } catch (e) {
+        console.error('[main] failed to setWebRTCIPHandlingPolicy on view', e);
+      }
+
+      // Set containerId on view's webContents for app.on('login') handler
+      try {
+        (v.webContents as any)._containerId = container.id;
+      } catch (e) {
+        console.error('[main] failed to set containerId on view webContents', e);
+      }
+
+      // GPU診断ログ（DEBUG_GPU=1 の時のみ、BrowserView作成時）
+      if (process.env.DEBUG_GPU === '1') {
         try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          console.log('[main] view did-redirect-navigation', {
-            url: details.url,
+          console.log('[gpu] browserView created', {
             containerId: container.id,
-            sessionId,
-            tabIndex,
-            isMainFrame: details.isMainFrame,
-            resourceType: details.resourceType,
-            httpResponseCode: details.httpResponseCode,
-            referrer: details.referrer,
-            originalUrl: details.originalURL
+            webContentsId: v.webContents.id,
+            partition: part
           });
-        } catch (e) { console.error('[main] did-redirect-navigation handler error', e); }
-      });
-      v.webContents.on('did-navigate', (_e, url) => {
-        try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          console.log('[main] view did-navigate url=', url, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex, 'isRestoring=', isRestoringGlobal);
-          if (!isRestoringGlobal) {
-            DB.addOrUpdateTab({ containerId: container.id, sessionId, url, tabIndex, updatedAt: Date.now() });
-          }
-        } catch (e) { console.error('[main] DB.addOrUpdateTab error', e); }
-        try {
-          const entry = openedById.get(container.id);
-          if (entry) {
-            const tabs = entry.views.map(vv => ({ url: vv.webContents.getURL(), title: vv.webContents.getTitle?.() }));
-            win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: url, tabs });
-          }
-        } catch (e) { console.error('[main] sendCtx from view did-navigate error', e); }
-      });
-      v.webContents.on('did-finish-load', () => {
-        try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          const url = v.webContents.getURL();
-          console.log('[main] view did-finish-load url=', url, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
-        } catch (e) { console.error('[main] did-finish-load handler error', e); }
-      });
-      v.webContents.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string, isMainFrame: boolean) => {
-        try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          const isXUrl = isXRelatedUrl(validatedURL);
-          const logData = {
-            url: validatedURL,
+        } catch (e) {
+          // ログ取得エラーは無視
+        }
+      }
+
+      // Renderer process monitoring for stability
+      v.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (isMainFrame) {
+          console.error('[main] BrowserView main frame did-fail-load', {
+            containerId: container.id,
             errorCode,
             errorDescription,
-            isMainFrame,
-            containerId: container.id,
-            sessionId,
-            tabIndex,
-            webContentsId: v.webContents.id,
-            proxy: container.proxy ? { server: container.proxy.server, hasUsername: !!container.proxy.username, hasPassword: !!container.proxy.password } : null
-          };
-          if (isXUrl) {
-            proxyLog.error('[x-net] did-fail-load', logData);
-          } else {
-            console.error('[main] view did-fail-load', logData);
-          }
-        } catch (e) { console.error('[main] did-fail-load handler error', e); }
+            validatedURL,
+            webContentsId: v.webContents.id
+          });
+        }
       });
-      // render-process-gone イベント（X関連URLの場合のみログ）
-      v.webContents.on('render-process-gone', (_e, details) => {
-        try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          const currentUrl = v.webContents.getURL();
-          const isXUrl = isXRelatedUrl(currentUrl);
-          if (isXUrl) {
-            proxyLog.error('[x-net] render-process-gone', {
-              url: currentUrl,
-              reason: details.reason,
-              exitCode: details.exitCode,
+
+      v.webContents.on('render-process-gone', (event, details) => {
+        console.error('[main] BrowserView render-process-gone', {
+          containerId: container.id,
+          reason: details.reason,
+          exitCode: details.exitCode,
+          webContentsId: v.webContents.id
+        });
+        // Optionally notify the UI or mark as crashed in state
+        // (Implementation of automatic recovery can be added here if needed)
+      });
+
+      const layoutView = () => {
+        const [w, h] = win.getContentSize();
+        const bar = BAR_HEIGHT;
+        v.setBounds({ x: 0, y: bar, width: w, height: Math.max(0, h - bar) });
+      };
+      win.on('resize', layoutView);
+      layoutView();
+      const scale = container.fingerprint?.deviceScaleFactor || 1.0;
+      try { v.webContents.setZoomFactor(scale); } catch { }
+
+      // Forward navigation/title/favicon events from the BrowserView to the shell window
+      try {
+        v.webContents.on('did-redirect-navigation', (_e: Electron.Event, details: Electron.DidRedirectNavigationEvent) => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            console.log('[main] view did-redirect-navigation', {
+              url: details.url,
               containerId: container.id,
               sessionId,
               tabIndex,
-              webContentsId: v.webContents.id
+              isMainFrame: details.isMainFrame,
+              resourceType: details.resourceType,
+              httpResponseCode: details.httpResponseCode,
+              referrer: details.referrer,
+              originalUrl: details.originalURL
             });
-          }
-        } catch (e) { console.error('[main] render-process-gone handler error', e); }
-      });
-      v.webContents.on('page-title-updated', (_e: any, title: string) => {
-        try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          console.log('[main] view title-updated title=', title, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
-          DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title, updatedAt: Date.now() });
-        } catch (e) { console.error('[main] DB.addOrUpdateTab title error', e); }
-        try {
-          const entry = openedById.get(container.id);
-          if (entry) {
-            const tabs = entry.views.map(vv => ({ url: vv.webContents.getURL(), title: vv.webContents.getTitle?.() }));
-            win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: v.webContents.getURL(), tabs });
-          }
-        } catch (e) { console.error('[main] sendCtx from view title-updated error', e); }
-      });
-      v.webContents.on('page-favicon-updated', (_e: any, favs: string[]) => {
-        try {
-          const entry = openedById.get(container.id);
-          const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
-          console.log('[main] view favicon-updated fav=', favs && favs[0], 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
-          DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, favicon: favs[0], updatedAt: Date.now() });
-        } catch (e) { console.error('[main] DB.addOrUpdateTab favicon error', e); }
-        try {
-          const entry = openedById.get(container.id);
-          if (entry) {
-            const tabs = entry.views.map(vv => ({ url: vv.webContents.getURL(), title: vv.webContents.getTitle?.() }));
-            win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: v.webContents.getURL(), tabs });
-          }
-        } catch (e) { console.error('[main] sendCtx from view favicon-updated error', e); }
-      });
-      // When DevTools is opened/closed for this view, update the tab title/icon to make it clear
-      try {
-        v.webContents.on('devtools-opened', () => {
+          } catch (e) { console.error('[main] did-redirect-navigation handler error', e); }
+        });
+        v.webContents.on('did-navigate', (_e, url) => {
           try {
             const entry = openedById.get(container.id);
-            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
-            const containerRecord = DB.getContainer(container.id) || { name: undefined };
-            const containerName = containerRecord.name ?? container.name ?? '';
-            DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title: `Dev-${containerName}`, favicon: '/favicon.ico', scrollY: 0, updatedAt: Date.now() });
-            const ctx = getContextForWindow(win);
-            if (ctx) win.webContents.send('container.context', ctx);
-            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: true, containerName: containerName || '' }); } catch (e) { /* ignore */ }
-          } catch (e) { console.error('[main] devtools-opened handler error', e); }
-        });
-        v.webContents.on('devtools-closed', () => {
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            console.log('[main] view did-navigate url=', url, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex, 'isRestoring=', isRestoringGlobal);
+            if (!isRestoringGlobal) {
+              DB.addOrUpdateTab({ containerId: container.id, sessionId, url, tabIndex, updatedAt: Date.now() });
+            }
+          } catch (e) { console.error('[main] DB.addOrUpdateTab error', e); }
           try {
             const entry = openedById.get(container.id);
-            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
-            // restore title from page when devtools closed
-            const title = v.webContents.getTitle?.() ?? '';
-            DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title, favicon: null, scrollY: 0, updatedAt: Date.now() });
-            const ctx = getContextForWindow(win);
-            if (ctx) win.webContents.send('container.context', ctx);
-            const containerRecord = DB.getContainer(container.id);
-            const containerName = containerRecord?.name ?? container.name ?? '';
-            try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: false, containerName }); } catch (e) { /* ignore */ }
-          } catch (e) { console.error('[main] devtools-closed handler error', e); }
+            if (entry) {
+              const tabs = entry.views.map(vv => ({ url: vv.webContents.getURL(), title: vv.webContents.getTitle?.() }));
+              win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: url, tabs });
+            }
+          } catch (e) { console.error('[main] sendCtx from view did-navigate error', e); }
         });
-      } catch (e) { /* ignore if devtools events unsupported */ }
-    } catch (e) { console.error('[main] createView attach handlers error', e); }
+        v.webContents.on('did-finish-load', () => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            const url = v.webContents.getURL();
+            console.log('[main] view did-finish-load url=', url, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
+          } catch (e) { console.error('[main] did-finish-load handler error', e); }
+        });
+        v.webContents.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string, isMainFrame: boolean) => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            const isXUrl = isXRelatedUrl(validatedURL);
+            const logData = {
+              url: validatedURL,
+              errorCode,
+              errorDescription,
+              isMainFrame,
+              containerId: container.id,
+              sessionId,
+              tabIndex,
+              webContentsId: v.webContents.id,
+              proxy: container.proxy ? { server: container.proxy.server, hasUsername: !!container.proxy.username, hasPassword: !!container.proxy.password } : null
+            };
+            if (isXUrl) {
+              proxyLog.error('[x-net] did-fail-load', logData);
+            } else {
+              console.error('[main] view did-fail-load', logData);
+            }
+          } catch (e) { console.error('[main] did-fail-load handler error', e); }
+        });
+        // render-process-gone イベント（X関連URLの場合のみログ）
+        v.webContents.on('render-process-gone', (_e, details) => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            const currentUrl = v.webContents.getURL();
+            const isXUrl = isXRelatedUrl(currentUrl);
+            if (isXUrl) {
+              proxyLog.error('[x-net] render-process-gone', {
+                url: currentUrl,
+                reason: details.reason,
+                exitCode: details.exitCode,
+                containerId: container.id,
+                sessionId,
+                tabIndex,
+                webContentsId: v.webContents.id
+              });
+            }
+          } catch (e) { console.error('[main] render-process-gone handler error', e); }
+        });
+        v.webContents.on('page-title-updated', (_e: any, title: string) => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            console.log('[main] view title-updated title=', title, 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
+            DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title, updatedAt: Date.now() });
+          } catch (e) { console.error('[main] DB.addOrUpdateTab title error', e); }
+          try {
+            const entry = openedById.get(container.id);
+            if (entry) {
+              const tabs = entry.views.map(vv => ({ url: vv.webContents.getURL(), title: vv.webContents.getTitle?.() }));
+              win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: v.webContents.getURL(), tabs });
+            }
+          } catch (e) { console.error('[main] sendCtx from view title-updated error', e); }
+        });
+        v.webContents.on('page-favicon-updated', (_e: any, favs: string[]) => {
+          try {
+            const entry = openedById.get(container.id);
+            const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? null;
+            console.log('[main] view favicon-updated fav=', favs && favs[0], 'containerId=', container.id, 'sessionId=', sessionId, 'tabIndex=', tabIndex);
+            DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, favicon: favs[0], updatedAt: Date.now() });
+          } catch (e) { console.error('[main] DB.addOrUpdateTab favicon error', e); }
+          try {
+            const entry = openedById.get(container.id);
+            if (entry) {
+              const tabs = entry.views.map(vv => ({ url: vv.webContents.getURL(), title: vv.webContents.getTitle?.() }));
+              win.webContents.send('container.context', { containerId: container.id, sessionId, fingerprint: container.fingerprint, currentUrl: v.webContents.getURL(), tabs });
+            }
+          } catch (e) { console.error('[main] sendCtx from view favicon-updated error', e); }
+        });
+        // When DevTools is opened/closed for this view, update the tab title/icon to make it clear
+        try {
+          v.webContents.on('devtools-opened', () => {
+            try {
+              const entry = openedById.get(container.id);
+              const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
+              const containerRecord = DB.getContainer(container.id) || { name: undefined };
+              const containerName = containerRecord.name ?? container.name ?? '';
+              DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title: `Dev-${containerName}`, favicon: '/favicon.ico', scrollY: 0, updatedAt: Date.now() });
+              const ctx = getContextForWindow(win);
+              if (ctx) win.webContents.send('container.context', ctx);
+              try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: true, containerName: containerName || '' }); } catch (e) { /* ignore */ }
+            } catch (e) { console.error('[main] devtools-opened handler error', e); }
+          });
+          v.webContents.on('devtools-closed', () => {
+            try {
+              const entry = openedById.get(container.id);
+              const tabIndex = entry ? entry.views.indexOf(v) : (v as any).__tabIndex ?? 0;
+              // restore title from page when devtools closed
+              const title = v.webContents.getTitle?.() ?? '';
+              DB.addOrUpdateTab({ containerId: container.id, sessionId, url: v.webContents.getURL(), tabIndex, title, favicon: null, scrollY: 0, updatedAt: Date.now() });
+              const ctx = getContextForWindow(win);
+              if (ctx) win.webContents.send('container.context', ctx);
+              const containerRecord = DB.getContainer(container.id);
+              const containerName = containerRecord?.name ?? container.name ?? '';
+              try { win.webContents.send('container.devtoolsChanged', { containerId: container.id, tabIndex, isOpen: false, containerName }); } catch (e) { /* ignore */ }
+            } catch (e) { console.error('[main] devtools-closed handler error', e); }
+          });
+        } catch (e) { /* ignore if devtools events unsupported */ }
+      } catch (e) { console.error('[main] createView attach handlers error', e); }
 
-    if (u) v.webContents.loadURL(u).catch(() => { });
-    // initialize tabIndex placeholder - will be assigned when view is added to entry.views
-    try { (v as any).__tabIndex = null; } catch { }
-    return v;
-  };
+      if (u) v.webContents.loadURL(u).catch(() => { });
+      // initialize tabIndex placeholder - will be assigned when view is added to entry.views
+      try { (v as any).__tabIndex = null; } catch { }
+      return v;
+    };
 
-  // Always create firstView with about:blank to avoid loading URL before proxy/fingerprint setup
-  const firstView = createView('about:blank');
-  win.setBrowserView(firstView);
-  const entry: OpenedContainer = { win, views: [firstView], activeIndex: 0, sessionId };
-  openedById.set(container.id, entry);
-  // 初期タブ情報をシェルに送る
-  try { console.log('[main] initial sendCtx for', container.id); sendCtx(); } catch { }
-  // Ensure there are at least three BrowserViews so renderer tab indices match,
-  // unless singleTab option requested.
-  try {
-    if (!opts.singleTab) {
-      while (entry.views.length < 3) {
-        const vNew = createView('about:blank');
-        entry.views.push(vNew);
-      }
-    }
-    // assign tabIndex values according to array index
-    entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch { } });
-    // do not set additional views as visible; keep firstView shown
-    // send updated context so renderer sees at least three tabs
+    // Always create firstView with about:blank to avoid loading URL before proxy/fingerprint setup
+    const firstView = createView('about:blank');
+    win.setBrowserView(firstView);
+    const entry: OpenedContainer = { win, views: [firstView], activeIndex: 0, sessionId };
+    openedById.set(container.id, entry);
+    // 初期タブ情報をシェルに送る
+    try { console.log('[main] initial sendCtx for', container.id); sendCtx(); } catch { }
+    // Ensure there are at least three BrowserViews so renderer tab indices match,
+    // unless singleTab option requested.
     try {
-      const ctx = getContextForWindow(win);
-      if (ctx) win.webContents.send('container.context', ctx);
-    } catch { }
-  } catch (e) { console.error('[main] ensure three views error', e); }
-  win.on('closed', () => {
-    // メモリ拡張を防ぐため、閉じる際にすべてのBrowserViewプロセスを明示的に破壊する
-    if (entry && entry.views) {
-      entry.views.forEach(v => {
-        try { (v.webContents as any).destroy(); } catch (e) { }
-      });
-    }
-    openedById.delete(container.id);
-    DB.closeSession(sessionId, Date.now());
-    // Clear cache on close (preserves cookies and session data)
-    clearContainerCacheOnClose(container.id).catch((e) => {
-      console.warn('[main] clearContainerCacheOnClose failed in closed handler', e);
-    });
-  });
-
-  // 1) 先にシェルUI（アドレスバー等）をロードし、ブラウザウィンドウを表示する
-  // これにより、サイトのロードを待たずにUIが表示され「真っ白で固まった」ように見えるのを防ぐ
-  const devUrl = process.env['ELECTRON_RENDERER_URL'];
-  const shellHtml = devUrl ? `${devUrl.replace(/\/\/$/, '')}/containerShell.html` : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'containerShell.html')).toString();
-
-  // シェルUIをロードして表示
-  await win.loadURL(shellHtml);
-  win.show();
-
-  // 2) プロキシが設定されている場合はウォームアップを実行（接続確認）
-  if (container.proxy?.server) {
-    try {
-      proxyLog.log(`[proxy-warmup] Starting warmup for container ${container.id}...`);
-      const warmupResult = await runWarmupViaHiddenView({
-        ses,
-        partition: part,
-        startUrl,
-        proxyServer: container.proxy.server,
-        containerId: container.id
-      });
-
-      warmupState.set(container.id, { ok: warmupResult.ok });
-
-      if (!warmupResult.ok) {
-        proxyLog.warn(`[proxy-warmup] Warmup failed for container ${container.id}: ${warmupResult.error}`);
-        // ウォームアップ失敗でも続行するが、エラーは記録する
-      } else {
-        proxyLog.log(`[proxy-warmup] Warmup SUCCESS for container ${container.id}`);
-      }
-    } catch (e) {
-      console.error('[proxy-warmup] Unexpected error during warmup', e);
-      warmupState.set(container.id, { ok: false });
-    }
-  } else {
-    warmupState.set(container.id, { ok: true });
-  }
-
-  // 3) startUrlをロード（非同期で待機は最小限に）
-  if (startUrl) {
-    try {
-      // 既にUIは見えているので、ロードを開始
-      console.log('[main] starting startUrl load', { containerId: container.id, startUrl });
-
-      // 非同期でロード（完了を待つが、UIは既に操作可能）
-      const navPromise = waitForNavigationComplete(firstView.webContents, 30000); // 30秒タイムアウト
-      await firstView.webContents.loadURL(startUrl);
-
-      // ナビゲーション完了を待つのをバックグラウンドで行うか検討
-      // ここで await しても、既に win.show() されているので UI は表示されている
-      await navPromise.catch(e => {
-        console.warn('[main] startUrl navigation timeout or error', e.message);
-      });
-
-      console.log('[main] startUrl navigation done', { containerId: container.id, finalUrl: firstView.webContents.getURL() });
-    } catch (e) {
-      console.error('[main] load startUrl error', e, { containerId: container.id, startUrl });
-    }
-  }
-
-  // 復元ロジック（2タブのみ復元）
-  const shouldRestore = opts.restore ?? true;
-  let restoreUrls: string[] = [];
-  if (!startUrl && shouldRestore && prevLastSessionId) {
-    try {
-      console.log('[main] attempting restore from prevLastSessionId=', prevLastSessionId);
-      const prevTabs = DB.tabsOfSession(prevLastSessionId) || [];
-      // Filter out shell/renderer URLs (containerShell.html, file://, dev server) and keep only http(s) URLs
-      const candidates = (prevTabs || [])
-        .map((t: any) => (t && t.url) ? String(t.url) : '')
-        .filter((u: string) => !!u && /^https?:\/\//i.test(u));
-      if (candidates.length > 0) {
-        restoreUrls = candidates.slice(0, 3);
-        // attempt to ensure at least the first two are different when possible
-        if (restoreUrls.length >= 2 && restoreUrls[0] === restoreUrls[1]) {
-          const altCandidates = (prevTabs || []).map((t: any) => (t && t.url) ? String(t.url) : '').filter((u: string) => !!u && /^https?:\/\//i.test(u));
-          const alt = altCandidates.find((u: string) => u !== restoreUrls[0]);
-          if (alt) restoreUrls[1] = alt;
-        }
-      }
-    } catch (e) { console.error('[main] restore tabs error', e); }
-  }
-  const firstTarget = startUrl || (restoreUrls[0] ?? 'about:blank');
-  const secondTarget = restoreUrls[1] ?? 'about:blank';
-  const thirdTarget = restoreUrls[2] ?? 'about:blank';
-
-  // シェルUIは既にロード済み
-  // load restored URLs into the two views (firstView and second view if present).
-  // If singleTab option is set, only load the first target.
-  // Skip restore if startUrl is explicitly provided (to avoid double navigation)
-  if (restoreUrls.length > 0 && !startUrl) {
-    try {
-      isRestoringGlobal = true;
-      console.log('[main] starting restore load: firstTarget=', firstTarget, 'secondTarget=', secondTarget);
-      // ensure tabIndex assignment
-      entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch { } });
-      // load sequentially and wait finish
-      try { await firstView.webContents.loadURL(firstTarget); } catch (e) { console.error('[main] load firstTarget error', e); }
       if (!opts.singleTab) {
-        if (entry.views[1]) {
-          try { await entry.views[1].webContents.loadURL(secondTarget); } catch (e) { console.error('[main] load secondTarget error', e); }
-        }
-        if (entry.views[2]) {
-          try { await entry.views[2].webContents.loadURL(thirdTarget); } catch (e) { console.error('[main] load thirdTarget error', e); }
+        while (entry.views.length < 3) {
+          const vNew = createView('about:blank');
+          entry.views.push(vNew);
         }
       }
-      // after loads, write canonical entries into DB with tabIndex
+      // assign tabIndex values according to array index
+      entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch { } });
+      // do not set additional views as visible; keep firstView shown
+      // send updated context so renderer sees at least three tabs
       try {
-        const ctxTabs = entry.views.map((vv: any, i: number) => ({ url: vv.webContents.getURL(), tabIndex: i, title: vv.webContents.getTitle?.(), favicon: vv.webContents.getURL && undefined }));
-        console.log('[main] restore finished, writing canonical tabs to DB:', ctxTabs);
-        for (const t of ctxTabs) {
-          try { DB.addOrUpdateTab({ containerId: container.id, sessionId, url: t.url, tabIndex: t.tabIndex, title: t.title ?? '', favicon: '', scrollY: 0, updatedAt: Date.now() }); } catch (e) { console.error('[main] addOrUpdateTab restore write error', e); }
-        }
-      } catch (e) { console.error('[main] restore db write error', e); }
-    } finally { isRestoringGlobal = false; }
-  }
-  // 既に表示済み
+        const ctx = getContextForWindow(win);
+        if (ctx) win.webContents.send('container.context', ctx);
+      } catch { }
+    } catch (e) { console.error('[main] ensure three views error', e); }
+    win.on('closed', () => {
+      // メモリ拡張を防ぐため、閉じる際にすべてのBrowserViewプロセスを明示的に破壊する
+      if (entry && entry.views) {
+        entry.views.forEach(v => {
+          try { (v.webContents as any).destroy(); } catch (e) { }
+        });
+      }
+      openedById.delete(container.id);
+      DB.closeSession(sessionId, Date.now());
+      // Clear cache on close (preserves cookies and session data)
+      clearContainerCacheOnClose(container.id).catch((e) => {
+        console.warn('[main] clearContainerCacheOnClose failed in closed handler', e);
+      });
+    });
 
-  return win;
+    // 1) 先にシェルUI（アドレスバー等）をロードし、ブラウザウィンドウを表示する
+    // これにより、サイトのロードを待たずにUIが表示され「真っ白で固まった」ように見えるのを防ぐ
+    const devUrl = process.env['ELECTRON_RENDERER_URL'];
+    const shellHtml = devUrl ? `${devUrl.replace(/\/\/$/, '')}/containerShell.html` : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'containerShell.html')).toString();
+
+    // シェルUIをロードして表示
+    await win.loadURL(shellHtml);
+    win.show();
+
+    // 2) プロキシが設定されている場合はウォームアップを実行（接続確認）
+    if (container.proxy?.server) {
+      try {
+        proxyLog.log(`[proxy-warmup] Starting warmup for container ${container.id}...`);
+        const warmupResult = await runWarmupViaHiddenView({
+          ses,
+          partition: part,
+          startUrl,
+          proxyServer: container.proxy.server,
+          containerId: container.id
+        });
+
+        warmupState.set(container.id, { ok: warmupResult.ok });
+
+        if (!warmupResult.ok) {
+          proxyLog.warn(`[proxy-warmup] Warmup failed for container ${container.id}: ${warmupResult.error}`);
+          // ウォームアップ失敗でも続行するが、エラーは記録する
+        } else {
+          proxyLog.log(`[proxy-warmup] Warmup SUCCESS for container ${container.id}`);
+        }
+      } catch (e) {
+        console.error('[proxy-warmup] Unexpected error during warmup', e);
+        warmupState.set(container.id, { ok: false });
+      }
+    } else {
+      warmupState.set(container.id, { ok: true });
+    }
+
+    // 3) startUrlをロード（非同期で待機は最小限に）
+    if (startUrl) {
+      try {
+        // 既にUIは見えているので、ロードを開始
+        console.log('[main] starting startUrl load', { containerId: container.id, startUrl });
+
+        // 非同期でロード（完了を待つが、UIは既に操作可能）
+        const navPromise = waitForNavigationComplete(firstView.webContents, 30000); // 30秒タイムアウト
+        await firstView.webContents.loadURL(startUrl);
+
+        // ナビゲーション完了を待つのをバックグラウンドで行うか検討
+        // ここで await しても、既に win.show() されているので UI は表示されている
+        await navPromise.catch(e => {
+          console.warn('[main] startUrl navigation timeout or error', e.message);
+        });
+
+        console.log('[main] startUrl navigation done', { containerId: container.id, finalUrl: firstView.webContents.getURL() });
+      } catch (e) {
+        console.error('[main] load startUrl error', e, { containerId: container.id, startUrl });
+      }
+    }
+
+    // 復元ロジック（2タブのみ復元）
+    const shouldRestore = opts.restore ?? true;
+    let restoreUrls: string[] = [];
+    if (!startUrl && shouldRestore && prevLastSessionId) {
+      try {
+        console.log('[main] attempting restore from prevLastSessionId=', prevLastSessionId);
+        const prevTabs = DB.tabsOfSession(prevLastSessionId) || [];
+        // Filter out shell/renderer URLs (containerShell.html, file://, dev server) and keep only http(s) URLs
+        const candidates = (prevTabs || [])
+          .map((t: any) => (t && t.url) ? String(t.url) : '')
+          .filter((u: string) => !!u && /^https?:\/\//i.test(u));
+        if (candidates.length > 0) {
+          restoreUrls = candidates.slice(0, 3);
+          // attempt to ensure at least the first two are different when possible
+          if (restoreUrls.length >= 2 && restoreUrls[0] === restoreUrls[1]) {
+            const altCandidates = (prevTabs || []).map((t: any) => (t && t.url) ? String(t.url) : '').filter((u: string) => !!u && /^https?:\/\//i.test(u));
+            const alt = altCandidates.find((u: string) => u !== restoreUrls[0]);
+            if (alt) restoreUrls[1] = alt;
+          }
+        }
+      } catch (e) { console.error('[main] restore tabs error', e); }
+    }
+    const firstTarget = startUrl || (restoreUrls[0] ?? 'about:blank');
+    const secondTarget = restoreUrls[1] ?? 'about:blank';
+    const thirdTarget = restoreUrls[2] ?? 'about:blank';
+
+    // シェルUIは既にロード済み
+    // load restored URLs into the two views (firstView and second view if present).
+    // If singleTab option is set, only load the first target.
+    // Skip restore if startUrl is explicitly provided (to avoid double navigation)
+    if (restoreUrls.length > 0 && !startUrl) {
+      try {
+        isRestoringGlobal = true;
+        console.log('[main] starting restore load: firstTarget=', firstTarget, 'secondTarget=', secondTarget);
+        // ensure tabIndex assignment
+        entry.views.forEach((vv, i) => { try { (vv as any).__tabIndex = i; } catch { } });
+        // load sequentially and wait finish
+        try { await firstView.webContents.loadURL(firstTarget); } catch (e) { console.error('[main] load firstTarget error', e); }
+        if (!opts.singleTab) {
+          if (entry.views[1]) {
+            try { await entry.views[1].webContents.loadURL(secondTarget); } catch (e) { console.error('[main] load secondTarget error', e); }
+          }
+          if (entry.views[2]) {
+            try { await entry.views[2].webContents.loadURL(thirdTarget); } catch (e) { console.error('[main] load thirdTarget error', e); }
+          }
+        }
+        // after loads, write canonical entries into DB with tabIndex
+        try {
+          const ctxTabs = entry.views.map((vv: any, i: number) => ({ url: vv.webContents.getURL(), tabIndex: i, title: vv.webContents.getTitle?.(), favicon: vv.webContents.getURL && undefined }));
+          console.log('[main] restore finished, writing canonical tabs to DB:', ctxTabs);
+          for (const t of ctxTabs) {
+            try { DB.addOrUpdateTab({ containerId: container.id, sessionId, url: t.url, tabIndex: t.tabIndex, title: t.title ?? '', favicon: '', scrollY: 0, updatedAt: Date.now() }); } catch (e) { console.error('[main] addOrUpdateTab restore write error', e); }
+          }
+        } catch (e) { console.error('[main] restore db write error', e); }
+      } finally { isRestoringGlobal = false; }
+    }
+    // 既に表示済み
+
+    return win;
+  } finally {
+    const resultWin = openedById.get(container.id)?.win || null;
+    if (resolvePending!) resolvePending!(resultWin);
+    pendingOpens.delete(container.id);
+  }
 }
 
 export function closeAllContainers() {
