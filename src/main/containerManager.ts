@@ -1736,8 +1736,8 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     }
     kameleoProfileId = profile.id;
 
-    // Proxy Update Policy: Only if stopped (avoid side effects during run)
-    if (container.proxy && profile.status === 'stopped') {
+    // Proxy Update Policy: Only if managed + stopped (avoid side effects for shared/cloud attached profiles)
+    if (container.proxy && profile.status === 'stopped' && container.profileMode === 'managed') {
       const hostPort = extractProxyHostPort(container.proxy.server);
       const [host, port] = hostPort.split(':');
       const updateOptions = {

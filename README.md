@@ -103,7 +103,7 @@ await migrationAPI.importCredentials({ credentials });
 ### 注意事項
 - **動作環境**: ローカルの Port 5050 で Kameleo が動作している必要があります。
 - **Single-tab 制約**: 現在のバージョンは 1 コンテナにつき 1 タブ (Single Window/Single Page) の操作を前提としています。`switchTab` などのマルチタブ操作 API は現在対応していません。
-- **プロキシ更新**: attached プロパティの場合、意図しない設定変更を防ぐため、プロファイルが `stopped` 状態の時のみプロキシ情報を更新します。
+- **プロキシ更新**: `managed` プロファイルは起動時に DB 設定に基づいて自動更新されますが、`attached` プロファイルは意図しない設定変更を防ぐため自動更新を行いません。
 
 ## 詳細ドキュメント
 
