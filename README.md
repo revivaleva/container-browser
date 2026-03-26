@@ -1,6 +1,17 @@
-# Container Browser (Electron + TypeScript) — v2
-- **Restore last session tabs**: opens each previous tab as its own window (simple baseline; you can later replace with BrowserViews for true tabs).
-- **Per-origin auto-fill ON/OFF UI**: Site preferences (autoFill/autoSaveForms) can be set in the main UI; `autoFill` governs whether credentials are auto-filled in container windows.
+# Container Browser (Kameleo Edition)
+
+本リポジトリには2つの主要な系統があります：
+- **`main`**: 従来の Chrome / Electron 直接操作（BrowserView 使用）の系統です。
+- **`kameleo-main`**: 現在の Kameleo Local API + Playwright 統合版の本流です。今後 Kameleo 版の修正はこちらに行われます。
+- **`feature/kameleo-backend`**: 初期実装時の履歴保持用ブランチです。
+
+Kameleo 版のアーキテクチャや API 仕様については [Kameleo 仕様書 (docs/KAMELEO_SPEC.md)](docs/KAMELEO_SPEC.md) を参照してください。
+
+## 主な特徴 (Kameleo 版)
+- **Kameleo 統合**: Kameleo の指紋偽装プロファイルを利用した高度なブラウザ操作。
+- **Playwright 連携**: CDP (Chrome DevTools Protocol) 経由で Kameleo プロファイルを自動操作。
+- **プロファイル管理モード**: `managed`（アプリが生成・破棄）と `attached`（既存プロファイルの紐付け）の使い分け。
+- **Single-tab 制約**: 1コンテナ = 1ウィンドウ = 1ページ（タブ）のシンプルな運用モデル。
 
 ## Dev
 ```bash

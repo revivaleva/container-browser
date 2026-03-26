@@ -1,34 +1,25 @@
-## POST /internal/export-restored/close
+# プロジェクト概要 (Project Overview)
 
-### Purpose
-Close an opened container (BrowserWindow + BrowserView) and release resources. Idempotent: closing an already-closed container returns success with `closed=false`.
+> [!IMPORTANT]
+> 本リポジトリの `kameleo-main` ブランチは、従来の Electron BrowserView ベースの基盤から **Kameleo Local API + Playwright** ベースの基盤に移行しています。
+> 最新のアーキテクチャ、API 仕様、およびプロファイル管理については [Kameleo 仕様書 (docs/KAMELEO_SPEC.md)](KAMELEO_SPEC.md) を必ず参照してください。
 
-### Request
-```
-POST /internal/export-restored/close
-Body: JSON { "id": "<container-uuid>", "timeoutMs": 30000 } (timeoutMs optional)
-```
+## アーキテクチャ構成 (Kameleo 版)
 
-### Responses
-- `200 { "ok": true, "closed": true, "message": "closed" }` — closed successfully  
-- `200 { "ok": true, "closed": false, "message": "not-open" }` — already closed / not open  
-- `400 { "ok": false, "error": "missing id" }` — bad request  
-- `404 { "ok": false, "error": "container not found" }` — unknown id  
-- `500 { "ok": false, "error": "internal" }` — internal failure
+現在の Kameleo 版の全体像は以下のとおりです。
 
-### Behavior
-- Validates container exists via `DB.getContainer(id)`.  
-- If open, calls `closeContainer(id)` and waits for `waitForContainerClosed(id, timeoutMs)`.  
-- Clears any internal export/exec locks for the id prior to closing.  
-- Logs `runId`, `closedBy` (if provided via `x-requested-by`) and timestamp for audit.  
-- Runs only on local binding (`127.0.0.1`) — do not expose publicly.
+- **CSP**: 外部システム（呼び出し側）。REST API 経由で操作を依頼。
+- **Container Browser**: 本アプリケーション。エクスポートサーバー、DB、プロファイル管理を担う。
+- **Kameleo**: 指紋偽装プロファイルの生成・管理エンジン。
+- **Playwright**: CDP (Chrome DevTools Protocol) を通じたブラウザ自動操作。
 
-### Example
-```
-curl -X POST http://127.0.0.1:3001/internal/export-restored/close \
-  -H "Content-Type: application/json" \
-  -d '{"id":"489efb6c-7a56-4fc3-97c6-83a93971094e"}'
-```
+詳細は [KAMELEO_SPEC.md](KAMELEO_SPEC.md) を参照してください。
+
+---
+
+## 内部 REST API (Port 3001)
+
+以下は共通またはレガシーな API 仕様です。Kameleo 固有の API については [KAMELEO_SPEC.md](KAMELEO_SPEC.md#5-内部-api-port-3001) を参照してください。
 
 ## POST /internal/exec
 
