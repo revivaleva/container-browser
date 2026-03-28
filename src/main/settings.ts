@@ -11,6 +11,7 @@ type ExportConfig = {
 type AuthConfig = {
   apiBase?: string;  // License Token API endpoint
   timeoutMs?: number;
+  twoCaptchaApiKey?: string; // 2Captcha API Key
 };
 
 type GraphicsConfig = {
@@ -31,7 +32,8 @@ const DEFAULT: AppConfig = {
   exportServer: { enabled: false, port: 3001 },
   auth: {
     apiBase: 'https://2y8hntw0r3.execute-api.ap-northeast-1.amazonaws.com/prod',
-    timeoutMs: 5000
+    timeoutMs: 5000,
+    twoCaptchaApiKey: ''
   },
   graphics: {
     graphicsMode: 'auto',
@@ -101,6 +103,10 @@ export function getAuthApiBase(): string {
 
 export function getAuthTimeoutMs(): number {
   return Number(process.env.AUTH_API_TIMEOUT_MS || getAuthSettings().timeoutMs || DEFAULT.auth?.timeoutMs || 5000);
+}
+
+export function getTwoCaptchaApiKey(): string {
+  return process.env.TWO_CAPTCHA_API_KEY || getAuthSettings().twoCaptchaApiKey || '';
 }
 
 export function getGraphicsSettings(): GraphicsConfig {

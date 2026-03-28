@@ -11,7 +11,7 @@ import { DB } from './db';
 import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed } from './containerManager';
 import { getToken, getOrCreateDeviceId } from './tokenStore';
 import { openedById } from './containerState';
-import { getAuthApiBase, getAuthTimeoutMs } from './settings';
+import { getAuthApiBase, getAuthTimeoutMs, getTwoCaptchaApiKey } from './settings';
 import setCookieParser from 'set-cookie-parser';
 import crypto, { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint, ProxyConfig } from '../shared/types';
@@ -81,6 +81,168 @@ async function waitForNavigationComplete(page: any, timeoutMs: number): Promise<
 function getPlaywrightPage(containerId: string) {
   const entry = openedById.get(containerId);
   return entry ? entry.playwrightPage : null;
+}
+
+async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; token?: string; type?: string; action?: string; error?: string; errorDetail?: any }> {
+  const apiKey = getTwoCaptchaApiKey();
+  if (!apiKey) return { ok: false, error: '2Captcha API key is not configured' };
+
+  const timeoutMs = Number(options.timeoutMs || 90000);
+  const pollingMs = Number(options.pollingMs || 5000);
+
+  // 1. Detection & Parameter Extraction
+  const extractionScript = `
+    (function() {
+      const result = { type: null, sitekey: null, action: null, pkey: null, surl: null, blob: null, enterprise: false };
+      
+      // Try reCAPTCHA
+      const recaptchaEl = document.querySelector('.g-recaptcha, [data-sitekey], [src*="google.com/recaptcha"], [src*="recaptcha.net/recaptcha"]');
+      if (recaptchaEl) {
+        result.type = 'recaptcha';
+        result.sitekey = recaptchaEl.getAttribute('data-sitekey') || 
+                         new URL(recaptchaEl.src || location.href).searchParams.get('k');
+        if (recaptchaEl.src && (recaptchaEl.src.includes('enterprise.js') || recaptchaEl.src.includes('/enterprise'))) {
+          result.enterprise = true;
+          result.type = 'recaptcha_enterprise';
+        }
+      }
+      
+      // Try FunCaptcha
+      const funEl = document.querySelector('[data-pkey], [src*="arkoselabs.com"], #fc-token');
+      if (funEl) {
+        result.type = 'funcaptcha';
+        result.pkey = funEl.getAttribute('data-pkey') || 
+                      document.querySelector('#fc-token')?.value?.match(/pk=([^&]+)/)?.[1];
+        result.surl = document.querySelector('#fc-token')?.value?.match(/surl=([^&]+)/)?.[1] || 'https://client-api.arkoselabs.com';
+      }
+      
+      return result;
+    })()
+  `;
+
+  let info: any;
+  try {
+    info = await page.evaluate(extractionScript);
+  } catch (e: any) {
+    return { ok: false, error: 'Failed to extract captcha info', errorDetail: e.message };
+  }
+
+  const type = options.type !== 'auto' ? options.type : info.type;
+  const sitekey = options.sitekey || info.sitekey || info.pkey;
+  const pageUrl = options.url || page.url();
+  const action = options.action || info.action;
+  const surl = options.surl || info.surl;
+  const blob = options.blob || info.blob;
+
+  if (!sitekey) return { ok: false, error: 'Captcha sitekey/publickey not found' };
+
+  // 2. Request to 2Captcha
+  let method = 'userrecaptcha';
+  const params: any = {
+    key: apiKey,
+    method: method,
+    pageurl: pageUrl,
+    googlekey: sitekey,
+    json: 1
+  };
+
+  if (type === 'funcaptcha') {
+    params.method = 'funcaptcha';
+    params.publickey = sitekey;
+    params.surl = surl;
+    if (blob) params['data[blob]'] = blob;
+    delete params.googlekey;
+  } else if (type === 'recaptcha_enterprise' || info.enterprise) {
+    params.enterprise = 1;
+  }
+  
+  if (action) params.action = action;
+
+  try {
+    const inResp = await fetch('https://2captcha.com/in.php', {
+      method: 'POST',
+      body: new URLSearchParams(params)
+    });
+    const inResult: any = await inResp.json();
+    if (inResult.status !== 1) {
+      return { ok: false, error: '2Captcha request failed', errorDetail: inResult };
+    }
+
+    const requestId = inResult.request;
+
+    // 3. Polling for result
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise(r => setTimeout(r, pollingMs));
+      const resResp = await fetch(`https://2captcha.com/res.php?key=${apiKey}&action=get&id=${requestId}&json=1`);
+      const resResult: any = await resResp.json();
+
+      if (resResult.status === 1) {
+        const token = resResult.request;
+        
+        // 4. Injection
+        let injectionScript = '';
+        if (type.includes('recaptcha')) {
+          injectionScript = `
+            (function(token, callbackName) {
+              const el = document.getElementById('g-recaptcha-response') || document.querySelector('[name="g-recaptcha-response"]');
+              if (el) {
+                el.value = token;
+                el.innerHTML = token;
+              }
+              
+              const findAndRunCallback = () => {
+                if (callbackName && typeof window[callbackName] === 'function') {
+                  window[callbackName](token);
+                  return 'manual';
+                }
+                const dataCb = document.querySelector('[data-callback]')?.getAttribute('data-callback');
+                if (dataCb && typeof window[dataCb] === 'function') {
+                  window[dataCb](token);
+                  return 'data-callback';
+                }
+                if (typeof ___grecaptcha_cfg !== 'undefined' && ___grecaptcha_cfg.clients) {
+                  for (const client of Object.values(___grecaptcha_cfg.clients)) {
+                    for (const v of Object.values(client)) {
+                      if (v && typeof v === 'object' && typeof v.callback === 'function') {
+                        v.callback(token);
+                        return '___grecaptcha_cfg';
+                      }
+                    }
+                  }
+                }
+                return 'none';
+              };
+              return findAndRunCallback();
+            })(${JSON.stringify(token)}, ${JSON.stringify(options.callbackName)});
+          `;
+        } else if (type === 'funcaptcha') {
+          injectionScript = `
+            (function(token) {
+              const el = document.getElementById('fc-token') || document.querySelector('#fc-token');
+              if (el) {
+                el.value = token;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              return 'funcaptcha-injected';
+            })(${JSON.stringify(token)});
+          `;
+        }
+
+        const actionTaken = await page.evaluate(injectionScript);
+        return { ok: true, token, type, action: actionTaken };
+      }
+
+      if (resResult.request !== 'CAPCHA_NOT_READY' && resResult.status === 0) {
+        return { ok: false, error: '2Captcha solving error', errorDetail: resResult };
+      }
+    }
+
+    return { ok: false, error: 'Timeout waiting for 2Captcha solution' };
+  } catch (e: any) {
+    return { ok: false, error: 'Internal error during captcha solve', errorDetail: e.message };
+  }
 }
 
 function generateBezierPath(start: { x: number; y: number }, end: { x: number; y: number }, steps: number) {
@@ -554,6 +716,13 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 const msg = String(e?.message || e);
                 if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
                 return jsonResponse(res, 500, { ok: false, error: msg });
+              }
+            } else if (command === 'solve_captcha') {
+              const solveResult = await solveCaptcha(page, options);
+              if (solveResult.ok) {
+                return jsonResponse(res, 200, solveResult);
+              } else {
+                return jsonResponse(res, 500, solveResult);
               }
             } else if (command === 'setFileInput') {
               const selector = body.selector;
