@@ -10,21 +10,24 @@ contextBridge.exposeInMainWorld('containersAPI', {
   open: (payload: any) => ipcRenderer.invoke('containers.open', payload),
   openByName: (payload: any) => ipcRenderer.invoke('containers.openByName', payload),
   delete: (payload: any) => ipcRenderer.invoke('containers.delete', payload),
+  close: (payload: { id: string }) => ipcRenderer.invoke('containers.close', payload),
   update: (payload: any) => ipcRenderer.invoke('containers.update', payload),
+
+  syncKameleo: () => ipcRenderer.invoke('containers.syncKameleo'),
   saveCredential: (payload: any) => ipcRenderer.invoke('vault.saveCredential', payload),
   compare: (payload: { successName: string; failNameOrId: string }) => ipcRenderer.invoke('containers.compare', payload),
   clearCache: (payload: { id: string }) => ipcRenderer.invoke('containers.clearCache', payload),
   clearAllData: (payload: { id: string }) => ipcRenderer.invoke('containers.clearAllData', payload),
   clearAllCacheStart: () => ipcRenderer.invoke('containers.clearAllCache.start'),
   onClearAllCacheProgress: (cb: (payload: any) => void) => {
-    const listener = (_e: any, payload: any) => { try { cb(payload); } catch {} };
+    const listener = (_e: any, payload: any) => { try { cb(payload); } catch { } };
     ipcRenderer.on('containers.clearAllCache.progress', listener);
-    return () => { try { ipcRenderer.removeListener('containers.clearAllCache.progress', listener); } catch {} };
+    return () => { try { ipcRenderer.removeListener('containers.clearAllCache.progress', listener); } catch { } };
   },
   onClearAllCacheDone: (cb: (payload: any) => void) => {
-    const listener = (_e: any, payload: any) => { try { cb(payload); } catch {} };
+    const listener = (_e: any, payload: any) => { try { cb(payload); } catch { } };
     ipcRenderer.on('containers.clearAllCache.done', listener);
-    return () => { try { ipcRenderer.removeListener('containers.clearAllCache.done', listener); } catch {} };
+    return () => { try { ipcRenderer.removeListener('containers.clearAllCache.done', listener); } catch { } };
   }
 });
 
@@ -42,21 +45,21 @@ contextBridge.exposeInMainWorld('bookmarksAPI', {
 
 contextBridge.exposeInMainWorld('prefsAPI', {
   get: (payload: { containerId: string; origin: string }) => ipcRenderer.invoke('prefs.get', payload),
-  set: (payload: { containerId: string; origin: string; autoFill: 0|1; autoSaveForms: 0|1 }) => ipcRenderer.invoke('prefs.set', payload),
+  set: (payload: { containerId: string; origin: string; autoFill: 0 | 1; autoSaveForms: 0 | 1 }) => ipcRenderer.invoke('prefs.set', payload),
 });
 
 // Shell 用: コンテナコンテキスト受信とナビゲーション
 const __ctxListeners = new Set<(ctx: any) => void>();
 ipcRenderer.on('container.context', (_e, ctx) => {
   for (const cb of __ctxListeners) {
-    try { cb(ctx); } catch {}
+    try { cb(ctx); } catch { }
   }
 });
 // DevTools change notification listeners
 const __devtoolsListeners = new Set<(payload: any) => void>();
 ipcRenderer.on('container.devtoolsChanged', (_e, payload) => {
   for (const cb of __devtoolsListeners) {
-    try { cb(payload); } catch {}
+    try { cb(payload); } catch { }
   }
 });
 contextBridge.exposeInMainWorld('containerShellAPI', {
@@ -75,7 +78,7 @@ contextBridge.exposeInMainWorld('tabsAPI', {
 
 // forward renderer console messages to main for easier debugging
 ipcRenderer.on('forward-log', (_e, msg) => {
-  try { logger.debug('[preload-forward]', msg); } catch {}
+  try { logger.debug('[preload-forward]', msg); } catch { }
 });
 
 // DevTools control for renderer: toggle DevTools when requested (e.g. F12)
@@ -110,15 +113,15 @@ contextBridge.exposeInMainWorld('exportAPI', {
   saveSettings: (payload: any) => ipcRenderer.invoke('export.saveSettings', payload),
   getStatus: () => ipcRenderer.invoke('export.getStatus'),
   onStatus: (cb: (payload: any) => void) => {
-    const listener = (_e: any, payload: any) => { try { cb(payload); } catch {} };
+    const listener = (_e: any, payload: any) => { try { cb(payload); } catch { } };
     ipcRenderer.on('export.server.status', listener);
-    return () => { try { ipcRenderer.removeListener('export.server.status', listener); } catch {} };
+    return () => { try { ipcRenderer.removeListener('export.server.status', listener); } catch { } };
   }
   ,
   onOpenSettings: (cb: () => void) => {
-    const listener = () => { try { cb(); } catch {} };
+    const listener = () => { try { cb(); } catch { } };
     ipcRenderer.on('open-settings', listener);
-    return () => { try { ipcRenderer.removeListener('open-settings', listener); } catch {} };
+    return () => { try { ipcRenderer.removeListener('open-settings', listener); } catch { } };
   }
 });
 
@@ -137,7 +140,7 @@ contextBridge.exposeInMainWorld('debugAPI', {
 contextBridge.exposeInMainWorld('migrationAPI', {
   exportCredentials: () => ipcRenderer.invoke('migration.exportCredentials'),
   exportAll: () => ipcRenderer.invoke('migration.exportAll'),
-  exportComplete: (payload?: { includeProfiles?: boolean }) => 
+  exportComplete: (payload?: { includeProfiles?: boolean }) =>
     ipcRenderer.invoke('migration.exportComplete', payload || {}),
   // エクスポート進捗イベントリスナー
   onExportProgress: (callback: (progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => void) => {
@@ -147,11 +150,11 @@ contextBridge.exposeInMainWorld('migrationAPI', {
       ipcRenderer.removeAllListeners('migration.exportProgress');
     };
   },
-  importCredentials: (payload: { credentials: Array<{ containerId: string; origin: string; username: string; password: string }> }) => 
+  importCredentials: (payload: { credentials: Array<{ containerId: string; origin: string; username: string; password: string }> }) =>
     ipcRenderer.invoke('migration.importCredentials', payload),
-  importAll: (payload: { data: any; updatePaths?: { oldBasePath: string; newBasePath: string }; containerIdMapping?: Record<string, string> }) => 
+  importAll: (payload: { data: any; updatePaths?: { oldBasePath: string; newBasePath: string }; containerIdMapping?: Record<string, string> }) =>
     ipcRenderer.invoke('migration.importAll', payload),
-  importComplete: (payload?: { containerIdMapping?: Record<string, string> }) => 
+  importComplete: (payload?: { containerIdMapping?: Record<string, string> }) =>
     ipcRenderer.invoke('migration.importComplete', payload || {}),
   // インポート進捗イベントリスナー
   onImportProgress: (callback: (progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => void) => {
@@ -161,7 +164,7 @@ contextBridge.exposeInMainWorld('migrationAPI', {
       ipcRenderer.removeAllListeners('migration.importProgress');
     };
   },
-  updatePaths: (payload: { oldBasePath: string; newBasePath: string }) => 
+  updatePaths: (payload: { oldBasePath: string; newBasePath: string }) =>
     ipcRenderer.invoke('migration.updatePaths', payload),
   getUserDataPath: () => ipcRenderer.invoke('migration.getUserDataPath')
 });

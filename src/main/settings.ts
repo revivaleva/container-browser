@@ -119,5 +119,3 @@ export function setGraphicsSettings(s: Partial<GraphicsConfig>) {
   const next: AppConfig = Object.assign({}, cur, { graphics: Object.assign({}, cur.graphics || DEFAULT.graphics, s) });
   return saveConfig(next);
 }
-
-

@@ -1,10 +1,34 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, dialog, shell } from 'electron';
-import type { BrowserWindow as BrowserWindowType, Tray as TrayType, nativeImage as NativeImageType } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, dialog, shell, net } from 'electron';
+
+
+
+
+
+
+if (app) {
+  app.on('will-finish-launching', () => {
+    try {
+      if (app.commandLine) {
+        app.commandLine.appendSwitch('disable-renderer-backgrounding');
+        app.commandLine.appendSwitch('disable-background-timer-throttling');
+        app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+        // Limit global cache size to prevent disk bloat (100MB disk, 50MB media)
+        app.commandLine.appendSwitch('disk-cache-size', '104857600');
+        app.commandLine.appendSwitch('media-cache-size', '52428800');
+      }
+    } catch (e) { console.error('[main] Failed to set commandLine switches', e); }
+  });
+}
+
+
+
+
 import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
-import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows, cleanupOrphans, deleteContainerStorage, registerContainerIpcHandlers } from './containerManager';
+import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows, cleanupOrphans, deleteContainerStorage, registerContainerIpcHandlers, syncKameleoProfiles } from './containerManager';
+
 import { registerGeneralIpcHandlers } from './ipc';
 import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings, getGraphicsSettings, setGraphicsSettings } from './settings';
 import { registerCustomProtocol } from './protocol';
@@ -14,51 +38,8 @@ import logger from '../shared/logger';
 import { saveToken, getToken, clearToken, getOrCreateDeviceId } from './tokenStore';
 import { proxyCredentialsByPartition, proxyCredentialsByHostPort } from './containerState';
 
-// LOG_ONLY_PROXY=1時、console.log/warn/errorを上書きしてフィルタリング（直接consoleを使っている箇所も対象）
-const LOG_ONLY_PROXY = process.env.LOG_ONLY_PROXY === '1';
-if (LOG_ONLY_PROXY) {
-  const isProxyRelatedLog = (...args: any[]): boolean => {
-    const firstArg = args[0];
-    if (typeof firstArg === 'string') {
-      // [main]プレフィックスは除外（プロキシ関連でない限り）
-      if (firstArg.includes('[main]')) {
-        const allArgs = args.map(a => String(a)).join(' ');
-        if (!/proxy|Proxy|PROXY|setProxy/i.test(allArgs)) {
-          return false;
-        }
-      }
-      return /\[proxy-check\]|\[x-net\]|\[login\]|proxy|Proxy|PROXY|setProxy|onboarding\/task\.json/i.test(firstArg);
-    }
-    const allArgs = args.map(a => String(a)).join(' ');
-    // [main]プレフィックスは除外（プロキシ関連でない限り）
-    if (/\[main\]/i.test(allArgs) && !/proxy|Proxy|PROXY|setProxy/i.test(allArgs)) {
-      return false;
-    }
-    return /\[proxy-check\]|\[x-net\]|\[login\]|proxy|Proxy|PROXY|setProxy|onboarding\/task\.json/i.test(allArgs);
-  };
+// Log filtering disabled for debugging
 
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-
-  console.log = (...args: any[]) => {
-    if (isProxyRelatedLog(...args)) {
-      originalLog(...args);
-    }
-  };
-
-  console.warn = (...args: any[]) => {
-    if (isProxyRelatedLog(...args)) {
-      originalWarn(...args);
-    }
-  };
-
-  console.error = (...args: any[]) => {
-    if (isProxyRelatedLog(...args)) {
-      originalError(...args);
-    }
-  };
-}
 
 // Proxy認証情報の管理 moved to containerState.ts
 
@@ -108,8 +89,9 @@ function adjustDevtoolsWindowForWebContents(targetWC: Electron.WebContents) {
   } catch { }
 }
 
-let mainWindow: BrowserWindowType | null = null;
-let tray: TrayType | null = null;
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+
 let isQuitting = false;
 // prevent duplicate container opens from rapid repeated handleArgv calls
 const _pendingOpenNames = new Set<string>();
@@ -406,13 +388,8 @@ async function checkForUpdatesInteractive() {
   }
 }
 
-// バックグラウンドでもページ読み込みを確実に実行するためのChromiumフラグ
-// API呼び出しでコンテナを立ち上げた際に、ウィンドウ非表示でも読み込みが進むようにする
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-
 // グラフィクス/HWアクセラレーション設定（Xログイン問題の切り分け用）
+
 // 環境変数 > 設定ファイル > デフォルト の優先順位
 // 設定変更後はアプリ再起動が必要。
 const graphicsSettings = getGraphicsSettings();
@@ -422,54 +399,50 @@ const DISABLE_HTTP2 = process.env.DISABLE_HTTP2 === '1' || graphicsSettings.disa
 const DISABLE_QUIC = process.env.DISABLE_QUIC === '1' || graphicsSettings.disableQuic === true;
 const DEBUG_GPU = process.env.DEBUG_GPU === '1' || graphicsSettings.debugGpu === true;
 
-if (GRAPHICS_MODE === 'disable') {
-  app.disableHardwareAcceleration();
-  if (DEBUG_GPU) {
-    console.log('[gpu] Hardware acceleration disabled via GRAPHICS_MODE=disable');
+if (app) {
+  if (GRAPHICS_MODE === 'disable') {
+    app.disableHardwareAcceleration();
+    if (DEBUG_GPU) console.log('[gpu] Hardware acceleration disabled via GRAPHICS_MODE=disable');
+  }
+  if (ANGLE_MODE !== 'default') {
+    app.commandLine.appendSwitch('use-angle', ANGLE_MODE);
+    if (DEBUG_GPU) console.log('[gpu] ANGLE backend set to:', ANGLE_MODE);
+  }
+  if (DISABLE_HTTP2) {
+    app.commandLine.appendSwitch('disable-http2');
+    if (DEBUG_GPU) console.log('[gpu] HTTP/2 disabled via DISABLE_HTTP2=1');
+  }
+  if (DISABLE_QUIC) {
+    app.commandLine.appendSwitch('disable-quic');
+    if (DEBUG_GPU) console.log('[net] quic', { disableQuic: true });
   }
 }
 
-if (ANGLE_MODE !== 'default') {
-  // 有効な値: d3d11, gl, warp
-  app.commandLine.appendSwitch('use-angle', ANGLE_MODE);
-  if (DEBUG_GPU) {
-    console.log('[gpu] ANGLE backend set to:', ANGLE_MODE);
-  }
-}
-
-if (DISABLE_HTTP2) {
-  app.commandLine.appendSwitch('disable-http2');
-  if (DEBUG_GPU) {
-    console.log('[gpu] HTTP/2 disabled via DISABLE_HTTP2=1');
-  }
-}
-
-if (DISABLE_QUIC) {
-  app.commandLine.appendSwitch('disable-quic');
-  if (DEBUG_GPU) {
-    console.log('[net] quic', { disableQuic: true });
-  }
-}
 
 // WebRTC非プロキシUDP禁止を全てのBrowserWindow/BrowserViewに適用（window.open/popup対策）
-app.on('browser-window-created', (_event, win) => {
-  try {
-    if (win && win.webContents) {
-      win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
-      console.log('[main] setWebRTCIPHandlingPolicy applied via browser-window-created');
+if (app) {
+  app.on('browser-window-created', (_event, win) => {
+    try {
+      if (win && win.webContents) {
+        win.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+        console.log('[main] setWebRTCIPHandlingPolicy applied via browser-window-created');
+      }
+    } catch (e) {
+      console.error('[main] failed to setWebRTCIPHandlingPolicy in browser-window-created', e);
     }
-  } catch (e) {
-    console.error('[main] failed to setWebRTCIPHandlingPolicy in browser-window-created', e);
-  }
-});
+  });
+}
+
 
 // Register global login handler for proxy authentication (唯一の正)
 // process全体で1回だけ登録され、partition -> credentials Mapから認証情報を取得
 // This must be registered before app.whenReady() to catch all login events
-let appLoginHandlerRegistered = false;
-if (!appLoginHandlerRegistered) {
-  appLoginHandlerRegistered = true;
+if (app && !(global as any)._appLoginHandlerRegistered) {
+  (global as any)._appLoginHandlerRegistered = true;
+  console.log('[DEBUG] Registering app.on(login). app type:', typeof app, 'has on:', typeof app?.on);
   app.on('login', (event, webContents, request, authInfo, callback) => {
+
+
     // プロキシ以外の認証はスルー（詳細ログは出さない）
     if (!authInfo.isProxy) {
       return;
@@ -525,9 +498,10 @@ if (!appLoginHandlerRegistered) {
       }
 
       // 方法2: getWebPreferences() が利用可能な場合（フォールバック）
-      if (!creds && webContents && typeof webContents.getWebPreferences === 'function') {
+      if (!creds && webContents) {
         try {
-          partition = webContents.getWebPreferences()?.partition;
+          // @ts-ignore
+          partition = typeof webContents.getWebPreferences === 'function' ? webContents.getWebPreferences()?.partition : undefined;
           if (partition) {
             loginLogData.partition = partition;
             creds = proxyCredentialsByPartition.get(partition);
@@ -543,7 +517,7 @@ if (!appLoginHandlerRegistered) {
       // 方法3: webContents.session から取得（フォールバック）
       if (!creds && webContents?.session) {
         const sessionPartition = (webContents.session as any).partition;
-        if (sessionPartition) {
+        if (typeof sessionPartition === 'string') {
           partition = sessionPartition;
           loginLogData.partition = partition;
           creds = proxyCredentialsByPartition.get(partition);
@@ -602,300 +576,31 @@ if (!appLoginHandlerRegistered) {
   });
 }
 
-app.whenReady().then(async () => {
-  // Register container IPC handlers after app is ready to avoid module initialization issues
-  registerContainerIpcHandlers();
-  registerGeneralIpcHandlers();
-  registerMainIpcHandlers();
-
-  // --- データベース初期化 ---
-  console.log('[DEBUG] Initializing database...');
-  initDB();
-  console.log('[DEBUG] Database initialized');
-
-  // 起動時に不要なフォルダ（削除済みコンテナの残りカスや古いバックアップ）をクリーンアップ
-  cleanupOrphans().catch(err => console.error('[main] cleanupOrphans failed', err));
-
-  // 連続稼働時、24時間ごとに自動削除を実行するように設定
-  setInterval(() => {
-    console.log('[main] Running scheduled daily orphan cleanup...');
-    cleanupOrphans().catch(err => console.error('[main] Scheduled cleanupOrphans failed', err));
-  }, 24 * 60 * 60 * 1000); // 24時間間隔
-
-  // --- UserAgent のクリーニング (Stealth 対策) ---
-  // Electron や container-browser 固有の文字列が含まれると bot 判定されるため除去
-  if (app.userAgentFallback) {
-    app.userAgentFallback = app.userAgentFallback
-      .replace(/container-browser(-for-kameleo)?\/[0-9\.]+ /g, '')
-      .replace(/Electron\/[0-9\.]+ /g, '');
-  } else {
-    app.userAgentFallback = session.defaultSession.getUserAgent()
-      .replace(/container-browser(-for-kameleo)?\/[0-9\.]+ /g, '')
-      .replace(/Electron\/[0-9\.]+ /g, '');
-  }
-
+async function createContainerWithName(name: string): Promise<Container> {
+  let kameleoProfileId: string;
+  let kameleoEnv: any;
   try {
-    console.log('[DEBUG] App ready event triggered');
-    logger.info('[DEBUG] App ready event triggered (Cleaned UA: ' + app.userAgentFallback + ')');
-
-    // GPU診断ログ（DEBUG_GPU=1 の時のみ詳細に出力）
-    if (DEBUG_GPU) {
-      try {
-        console.log('[gpu] settings', {
-          GRAPHICS_MODE,
-          ANGLE_MODE,
-          DISABLE_HTTP2,
-          DISABLE_QUIC,
-          DEBUG_GPU: true
-        });
-
-        const featureStatus = app.getGPUFeatureStatus();
-        console.log('[gpu] featureStatus', JSON.stringify(featureStatus, null, 2));
-
-        const gpuInfo: any = await app.getGPUInfo('basic');
-        // 必要最小限の項目だけ抽出（大きなオブジェクトなので）
-        const gpuInfoSummary = {
-          vendorId: gpuInfo.auxAttributes?.vendorId,
-          deviceId: gpuInfo.auxAttributes?.deviceId,
-          vendorString: gpuInfo.auxAttributes?.vendorString,
-          deviceString: gpuInfo.auxAttributes?.deviceString,
-          driverVersion: gpuInfo.auxAttributes?.driverVersion,
-          driverDate: gpuInfo.auxAttributes?.driverDate,
-          glVersion: gpuInfo.auxAttributes?.glVersion,
-          glVendor: gpuInfo.auxAttributes?.glRenderer,
-          glRenderer: gpuInfo.auxAttributes?.glRenderer
-        };
-        console.log('[gpu] gpuInfo.basic (summary)', JSON.stringify(gpuInfoSummary, null, 2));
-      } catch (e) {
-        console.error('[gpu] failed to get GPU info', e);
-      }
-    }
-
-
-
-    console.log('[DEBUG] Registering custom protocol...');
-    registerCustomProtocol();
-    console.log('[DEBUG] Custom protocol registered');
-
-    // Setup auto-updater (will check for updates once app is ready)
-    // アップデート機能を一時的に無効化（サーバー問題回避）
-    const ENABLE_AUTO_UPDATE = false;
-
-    if (ENABLE_AUTO_UPDATE) {
-      try {
-        console.log('[DEBUG] Setting up auto-updater...');
-        autoUpdater.autoDownload = true;
-        autoUpdater.autoInstallOnAppQuit = false; // 手動でインストールタイミングを制御
-        autoUpdater.on('checking-for-update', () => logger.info('[auto-updater] checking for update'));
-        autoUpdater.on('update-available', (info) => console.log('[auto-updater] update available', info));
-        autoUpdater.on('update-not-available', (info) => console.log('[auto-updater] update not available', info));
-        autoUpdater.on('update-available', (info) => logger.info('[auto-updater] update available', info));
-        autoUpdater.on('update-not-available', (info) => logger.info('[auto-updater] update not available', info));
-        autoUpdater.on('error', (err) => {
-          logger.error('[auto-updater] error', err);
-          console.log('[auto-updater] Update check failed:', err.message);
-          // ネットワークエラーやサーバーエラーの場合は静かに失敗
-          if (err.message && (
-            err.message.includes('403') ||
-            err.message.includes('Forbidden') ||
-            err.message.includes('ENOTFOUND') ||
-            err.message.includes('net::ERR_')
-          )) {
-            console.log('[auto-updater] Network/server error detected, skipping update check');
-          }
-        });
-        autoUpdater.on('download-progress', (progress) => logger.info('[auto-updater] progress', progress));
-        autoUpdater.on('update-downloaded', (info) => {
-          logger.info('[auto-updater] update downloaded', info);
-          console.log('[auto-updater] Update downloaded, preparing to install...');
-
-          // 適切なプロセス終了処理を実行してからインストール
-          setTimeout(async () => {
-            try {
-              console.log('[auto-updater] Starting graceful shutdown for update...');
-
-              // 1. すべてのコンテナウィンドウを閉じる
-              try {
-                console.log('[auto-updater] Closing all containers...');
-                if (closeAllContainers) closeAllContainers();
-                await new Promise(resolve => setTimeout(resolve, 500));
-              } catch (e) {
-                console.error('[auto-updater] Error closing containers:', e);
-              }
-
-              // 2. すべての非メインウィンドウを強制終了
-              try {
-                console.log('[auto-updater] Force closing all non-main windows...');
-                if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows();
-                await new Promise(resolve => setTimeout(resolve, 300));
-              } catch (e) {
-                console.error('[auto-updater] Error force closing windows:', e);
-              }
-
-              // 3. メインウィンドウを閉じる
-              try {
-                console.log('[auto-updater] Closing main window...');
-                if (mainWindow && !mainWindow.isDestroyed()) {
-                  mainWindow.removeAllListeners();
-                  mainWindow.destroy();
-                }
-              } catch (e) {
-                console.error('[auto-updater] Error closing main window:', e);
-              }
-
-              // 4. トレイアイコンを削除
-              try {
-                if (tray && !tray.isDestroyed()) {
-                  tray.destroy();
-                }
-              } catch (e) {
-                console.error('[auto-updater] Error destroying tray:', e);
-              }
-
-              // 5. グローバルショートカットを解除
-              try {
-                globalShortcut.unregisterAll();
-              } catch (e) {
-                console.error('[auto-updater] Error unregistering shortcuts:', e);
-              }
-
-              // 6. 終了フラグを設定
-              isQuitting = true;
-
-              console.log('[auto-updater] Graceful shutdown completed, installing update...');
-
-              // 7. アップデートをインストール
-              autoUpdater.quitAndInstall(false, true);
-
-            } catch (e) {
-              console.error('[auto-updater] quitAndInstall error', e);
-              // フォールバック: 強制終了
-              setTimeout(() => process.exit(0), 1000);
-            }
-          }, 2000);
-        });
-        // trigger check
-        setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[auto-updater] check error', e); } }, 3000);
-        console.log('[DEBUG] Auto-updater setup complete');
-      } catch (e) {
-        console.error('[auto-updater] setup error', e);
-        logger.error('[auto-updater] setup error', e);
-      }
-    } else {
-      console.log('[DEBUG] Auto-updater disabled (standalone mode)');
-      logger.info('[DEBUG] Auto-updater disabled (standalone mode)');
-    }
-
-    console.log('[DEBUG] Creating main window...');
-    await createMainWindow();
-    console.log('[DEBUG] Main window created successfully');
-    try {
-      const es = await import('./exportServer');
-      // determine port/enabled from env or saved settings
-      const cfg = loadConfig();
-      const envPort = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
-      const exportSettings = cfg.exportServer || getExportSettings();
-      const shouldStart = !!envPort || !!exportSettings.enabled;
-      const portToUse = envPort || Number(exportSettings.port || 3001);
-      try {
-        if (shouldStart) {
-          const srv = es.startExportServer(Number(portToUse));
-          // notify renderer of status
-          try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(portToUse), error: null }); } catch { }
-        } else {
-          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: null }); } catch { }
-        }
-      } catch (e: any) {
-        logger.error('[main] failed to start export server', e);
-        try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: String(e?.message || e) }); } catch { }
-      }
-    } catch (e) {
-      console.error('[main] failed to start export server', e);
-      logger.error('[main] failed to start export server', e);
-    }
-
-    console.log('[DEBUG] App initialization completed successfully');
-    logger.info('[DEBUG] App initialization completed successfully');
-
-  } catch (error) {
-    console.error('[FATAL] App initialization failed:', error);
-    logger.error('[FATAL] App initialization failed:', error);
-    // アプリ初期化失敗時は終了
-    process.exit(1);
-  }
-
-});
-
-// If app is launched externally with a container request, open the requested container(s).
-// If the main window is not currently visible, keep it hidden (tray-minimized).
-app.on('second-instance', (_event, argv) => {
-  try {
-    handleArgv(argv);
-    try {
-      if (mainWindow) {
-        if (mainWindow.isVisible()) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.focus();
-        } else {
-          // keep main hidden when opened from external URL
-          try { mainWindow.hide(); } catch { }
-        }
-      }
-    } catch (e) { console.error('[main] second-instance window focus/hide error', e); }
-  } catch (e) { console.error('[main] second-instance handleArgv error', e); }
-});
-
-
-
-app.on('window-all-closed', () => {
-  // Protection: Don't quit if mainWindow still exists (e.g., after container close)
-  // Only quit when all windows including mainWindow are actually closed
-  try {
-    const allWindows = BrowserWindow.getAllWindows();
-    const hasMainWindow = allWindows.some((w: any) => w === mainWindow && !w.isDestroyed());
-    if (hasMainWindow) {
-      console.log('[main] window-all-closed: mainWindow still exists, skipping app.quit()');
-      return;
-    }
+    const { KameleoApi } = await import('./kameleoApi');
+    const p = await KameleoApi.createProfile({
+      name: name,
+      tags: ['container-browser'],
+      deviceType: 'desktop',
+      os: 'windows',
+      browser: 'chrome',
+      storage: 'cloud',
+      language: 'ja-JP'
+    });
+    kameleoProfileId = p.id;
+    kameleoEnv = {
+      deviceType: p.device?.deviceType,
+      os: p.device?.platform,
+      browser: p.device?.browser
+    };
   } catch (e) {
-    console.error('[main] window-all-closed: error checking mainWindow', e);
+    throw new Error('Kameleo profile creation failed: ' + (e as any).message);
   }
 
-  // Close all opened container windows when main window is closed, then quit.
-  try { if (closeAllContainers) closeAllContainers(); } catch { }
-  try { if (closeAllNonMainWindows) closeAllNonMainWindows(); } catch { }
-  if (process.platform !== 'darwin') app.quit();
-});
-
-// ensure before-quit also closes remaining container shells
-app.on('before-quit', () => {
-  try {
-    if (closeAllContainers) closeAllContainers();
-    if (closeAllNonMainWindows) closeAllNonMainWindows();
-  } catch (e) { console.error('[main] before-quit close containers error', e); }
-});
-
-// fallback: force destroy non-main windows shortly after quit if any remain
-app.on('will-quit', () => {
-  try { if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows(); } catch (e) { console.error('[main] will-quit force close error', e); }
-});
-
-
-
-// Bookmarks IPC handlers are defined in src/main/ipc.ts to avoid duplicate registration
-
-// === CLI / Custom Protocol ===
-function createContainerWithName(name: string): Container {
-  const id = randomUUID();
-  const fp = {
-    acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
-    locale: 'ja-JP',
-    timezone: 'Asia/Tokyo',
-    platform: 'Win32',
-    hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
-    deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
-    canvasNoise: true,
-  } satisfies Fingerprint;
+  const id = kameleoProfileId; // Use Kameleo ID as local ID
   const c: Container = {
     id,
     name,
@@ -904,17 +609,19 @@ function createContainerWithName(name: string): Container {
     userAgent: undefined,
     locale: 'ja-JP',
     timezone: 'Asia/Tokyo',
-    fingerprint: fp,
     proxy: null,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    lastSessionId: null
+    lastSessionId: null,
+    kameleoProfileId,
+    profileMode: 'attached',
+    kameleoEnv
   };
   DB.upsertContainer(c);
   return c;
 }
 
-function handleArgv(argv: string[]) {
+async function handleArgv(argv: string[]) {
   try {
     const link = argv.find(a => a.startsWith('mycontainers://'));
     if (!link) return;
@@ -928,64 +635,378 @@ function handleArgv(argv: string[]) {
     }
     _pendingOpenNames.add(name);
     setTimeout(() => _pendingOpenNames.delete(name), 1500);
-    const c = DB.getContainerByName(name) || createContainerWithName(name);
+    const c = DB.getContainerByName(name) || await createContainerWithName(name);
     openContainerWindow(c, openUrl);
   } catch { }
 }
 
-// Windows: 二重起動時のプロトコル引数
-// シングルインスタンスロックを有効化して別プロセス起動を抑止する
-const ENABLE_SINGLE_INSTANCE = true;
+if (app && !(global as any)._appReadyRegistered) {
+  (global as any)._appReadyRegistered = true;
+  app.whenReady().then(async () => {
 
-// デバッグ情報をログファイルに出力
-try {
-  const debugInfo = {
-    ENABLE_SINGLE_INSTANCE,
-    NODE_ENV: process.env.NODE_ENV,
-    ELECTRON_RENDERER_URL: process.env.ELECTRON_RENDERER_URL,
-    isPackaged: app.isPackaged,
-    appPath: app.getAppPath(),
-    timestamp: new Date().toISOString()
-  };
-  logger.info('[DEBUG] Environment check:', debugInfo);
-  console.log('[DEBUG] Environment check:', JSON.stringify(debugInfo, null, 2));
-} catch (e) {
-  console.log('[DEBUG] Failed to log environment info:', e);
-}
 
-let gotLock = true;
+    // Register container IPC handlers after app is ready to avoid module initialization issues
+    registerContainerIpcHandlers();
+    registerGeneralIpcHandlers();
+    registerMainIpcHandlers();
 
-if (ENABLE_SINGLE_INSTANCE) {
-  gotLock = app.requestSingleInstanceLock();
-  logger.info('[DEBUG] Single instance lock result:', gotLock);
-  console.log('[DEBUG] Single instance lock result:', gotLock);
+    // --- データベース初期化 ---
+    console.log('[DEBUG] Initializing database...');
+    initDB();
+    console.log('[DEBUG] Database initialized');
 
-  if (!gotLock) {
-    const msg = '[DEBUG] Single instance lock failed, quitting...';
-    logger.error(msg);
-    console.log(msg);
-    app.quit();
-    process.exit(1);
+    // 起動時に不要なフォルダ（削除済みコンテナの残りカスや古いバックアップ）をクリーンアップ
+    cleanupOrphans().catch(err => console.error('[main] cleanupOrphans failed', err));
+
+    // 起動時にKameleoプロファイルを強制同期
+    syncKameleoProfiles().then(res => {
+      console.log('[main] Startup Kameleo sync result:', res);
+    }).catch(err => {
+      console.error('[main] Startup Kameleo sync failed', err);
+    });
+
+    // 連続稼働時、24時間ごとに自動削除を実行するように設定
+    setInterval(() => {
+      console.log('[main] Running scheduled daily orphan cleanup...');
+      cleanupOrphans().catch(err => console.error('[main] Scheduled cleanupOrphans failed', err));
+    }, 24 * 60 * 60 * 1000); // 24時間間隔
+
+    // --- UserAgent のクリーニング (Stealth 対策) ---
+    // Electron や container-browser 固有の文字列が含まれると bot 判定されるため除去
+    if (app.userAgentFallback) {
+      app.userAgentFallback = app.userAgentFallback
+        .replace(/container-browser(-for-kameleo)?\/[0-9\.]+ /g, '')
+        .replace(/Electron\/[0-9\.]+ /g, '');
+    } else {
+      app.userAgentFallback = session.defaultSession.getUserAgent()
+        .replace(/container-browser(-for-kameleo)?\/[0-9\.]+ /g, '')
+        .replace(/Electron\/[0-9\.]+ /g, '');
+    }
+
+    try {
+      console.log('[DEBUG] App ready event triggered');
+      logger.info('[DEBUG] App ready event triggered (Cleaned UA: ' + app.userAgentFallback + ')');
+
+      // GPU診断ログ（DEBUG_GPU=1 の時のみ詳細に出力）
+      if (DEBUG_GPU) {
+        try {
+          console.log('[gpu] settings', {
+            GRAPHICS_MODE,
+            ANGLE_MODE,
+            DISABLE_HTTP2,
+            DISABLE_QUIC,
+            DEBUG_GPU: true
+          });
+
+          const featureStatus = app.getGPUFeatureStatus();
+          console.log('[gpu] featureStatus', JSON.stringify(featureStatus, null, 2));
+
+          const gpuInfo: any = await app.getGPUInfo('basic');
+          // 必要最小限の項目だけ抽出（大きなオブジェクトなので）
+          const gpuInfoSummary = {
+            vendorId: gpuInfo.auxAttributes?.vendorId,
+            deviceId: gpuInfo.auxAttributes?.deviceId,
+            vendorString: gpuInfo.auxAttributes?.vendorString,
+            deviceString: gpuInfo.auxAttributes?.deviceString,
+            driverVersion: gpuInfo.auxAttributes?.driverVersion,
+            driverDate: gpuInfo.auxAttributes?.driverDate,
+            glVersion: gpuInfo.auxAttributes?.glVersion,
+            glVendor: gpuInfo.auxAttributes?.glRenderer,
+            glRenderer: gpuInfo.auxAttributes?.glRenderer
+          };
+          console.log('[gpu] gpuInfo.basic (summary)', JSON.stringify(gpuInfoSummary, null, 2));
+        } catch (e) {
+          console.error('[gpu] failed to get GPU info', e);
+        }
+      }
+
+
+
+      console.log('[DEBUG] Registering custom protocol...');
+      registerCustomProtocol();
+      console.log('[DEBUG] Custom protocol registered');
+
+      // Setup auto-updater (will check for updates once app is ready)
+      // アップデート機能を一時的に無効化（サーバー問題回避）
+      const ENABLE_AUTO_UPDATE = false;
+
+      if (ENABLE_AUTO_UPDATE) {
+        try {
+          console.log('[DEBUG] Setting up auto-updater...');
+          autoUpdater.autoDownload = true;
+          autoUpdater.autoInstallOnAppQuit = false; // 手動でインストールタイミングを制御
+          autoUpdater.on('checking-for-update', () => logger.info('[auto-updater] checking for update'));
+          autoUpdater.on('update-available', (info) => console.log('[auto-updater] update available', info));
+          autoUpdater.on('update-not-available', (info) => console.log('[auto-updater] update not available', info));
+          autoUpdater.on('update-available', (info) => logger.info('[auto-updater] update available', info));
+          autoUpdater.on('update-not-available', (info) => logger.info('[auto-updater] update not available', info));
+          autoUpdater.on('error', (err) => {
+            logger.error('[auto-updater] error', err);
+            console.log('[auto-updater] Update check failed:', err.message);
+            // ネットワークエラーやサーバーエラーの場合は静かに失敗
+            if (err.message && (
+              err.message.includes('403') ||
+              err.message.includes('Forbidden') ||
+              err.message.includes('ENOTFOUND') ||
+              err.message.includes('net::ERR_')
+            )) {
+              console.log('[auto-updater] Network/server error detected, skipping update check');
+            }
+          });
+          autoUpdater.on('download-progress', (progress) => logger.info('[auto-updater] progress', progress));
+          autoUpdater.on('update-downloaded', (info) => {
+            logger.info('[auto-updater] update downloaded', info);
+            console.log('[auto-updater] Update downloaded, preparing to install...');
+
+            // 適切なプロセス終了処理を実行してからインストール
+            setTimeout(async () => {
+              try {
+                console.log('[auto-updater] Starting graceful shutdown for update...');
+
+                // 1. すべてのコンテナウィンドウを閉じる
+                try {
+                  console.log('[auto-updater] Closing all containers...');
+                  if (closeAllContainers) closeAllContainers();
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (e) {
+                  console.error('[auto-updater] Error closing containers:', e);
+                }
+
+                // 2. すべての非メインウィンドウを強制終了
+                try {
+                  console.log('[auto-updater] Force closing all non-main windows...');
+                  if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows();
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                } catch (e) {
+                  console.error('[auto-updater] Error force closing windows:', e);
+                }
+
+                // 3. メインウィンドウを閉じる
+                try {
+                  console.log('[auto-updater] Closing main window...');
+                  if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.removeAllListeners();
+                    mainWindow.destroy();
+                  }
+                } catch (e) {
+                  console.error('[auto-updater] Error closing main window:', e);
+                }
+
+                // 4. トレイアイコンを削除
+                try {
+                  if (tray && !tray.isDestroyed()) {
+                    tray.destroy();
+                  }
+                } catch (e) {
+                  console.error('[auto-updater] Error destroying tray:', e);
+                }
+
+                // 5. グローバルショートカットを解除
+                try {
+                  globalShortcut.unregisterAll();
+                } catch (e) {
+                  console.error('[auto-updater] Error unregistering shortcuts:', e);
+                }
+
+                // 6. 終了フラグを設定
+                isQuitting = true;
+
+                console.log('[auto-updater] Graceful shutdown completed, installing update...');
+
+                // 7. アップデートをインストール
+                autoUpdater.quitAndInstall(false, true);
+
+              } catch (e) {
+                console.error('[auto-updater] quitAndInstall error', e);
+                // フォールバック: 強制終了
+                setTimeout(() => process.exit(0), 1000);
+              }
+            }, 2000);
+          });
+          // trigger check
+          setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (e) { logger.error('[auto-updater] check error', e); } }, 3000);
+          console.log('[DEBUG] Auto-updater setup complete');
+        } catch (e) {
+          console.error('[auto-updater] setup error', e);
+          logger.error('[auto-updater] setup error', e);
+        }
+      } else {
+        console.log('[DEBUG] Auto-updater disabled (standalone mode)');
+        logger.info('[DEBUG] Auto-updater disabled (standalone mode)');
+      }
+
+      console.log('[DEBUG] Creating main window...');
+      await createMainWindow();
+      console.log('[DEBUG] Main window created successfully');
+      try {
+        const es = await import('./exportServer');
+        // determine port/enabled from env or saved settings
+        const cfg = loadConfig();
+        const envPort = process.env.CONTAINER_EXPORT_PORT ? Number(process.env.CONTAINER_EXPORT_PORT) : null;
+        const exportSettings = cfg.exportServer || getExportSettings();
+        const shouldStart = !!envPort || !!exportSettings.enabled;
+        const portToUse = envPort || Number(exportSettings.port || 3001);
+        try {
+          if (shouldStart) {
+            const srv = es.startExportServer(Number(portToUse));
+            // notify renderer of status
+            try { mainWindow?.webContents.send('export.server.status', { running: true, port: Number(portToUse), error: null }); } catch { }
+          } else {
+            try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: null }); } catch { }
+          }
+        } catch (e: any) {
+          logger.error('[main] failed to start export server', e);
+          try { mainWindow?.webContents.send('export.server.status', { running: false, port: Number(portToUse), error: String(e?.message || e) }); } catch { }
+        }
+      } catch (e) {
+        console.error('[main] failed to start export server', e);
+        logger.error('[main] failed to start export server', e);
+      }
+
+      console.log('[DEBUG] App initialization completed successfully');
+      logger.info('[DEBUG] App initialization completed successfully');
+
+    } catch (error) {
+      console.error('[FATAL] App initialization failed:', error);
+      logger.error('[FATAL] App initialization failed:', error);
+      // アプリ初期化失敗時は終了
+      process.exit(1);
+    }
+
+  });
+
+  // If app is launched externally with a container request, open the requested container(s).
+  // If the main window is not currently visible, keep it hidden (tray-minimized).
+  app.on('second-instance', (_event, argv) => {
+    try {
+      handleArgv(argv);
+      try {
+        if (mainWindow) {
+          if (mainWindow.isVisible()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+          } else {
+            // keep main hidden when opened from external URL
+            try { mainWindow.hide(); } catch { }
+          }
+        }
+      } catch (e) { console.error('[main] second-instance window focus/hide error', e); }
+    } catch (e) { console.error('[main] second-instance handleArgv error', e); }
+  });
+
+
+
+
+
+  app.on('window-all-closed', () => {
+    // Protection: Don't quit if mainWindow still exists (e.g., after container close)
+    // Only quit when all windows including mainWindow are actually closed
+    try {
+      const allWindows = BrowserWindow.getAllWindows();
+      const hasMainWindow = allWindows.some((w: any) => w === mainWindow && !w.isDestroyed());
+      if (hasMainWindow) {
+        console.log('[main] window-all-closed: mainWindow still exists, skipping app.quit()');
+        return;
+      }
+    } catch (e) {
+      console.error('[main] window-all-closed: error checking mainWindow', e);
+    }
+
+    // Close all opened container windows when main window is closed, then quit.
+    try { if (closeAllContainers) closeAllContainers(); } catch { }
+    try { if (closeAllNonMainWindows) closeAllNonMainWindows(); } catch { }
+    if (process.platform !== 'darwin') app.quit();
+  });
+
+  // ensure before-quit also closes remaining container shells
+  app.on('before-quit', () => {
+    try {
+      if (closeAllContainers) closeAllContainers();
+      if (closeAllNonMainWindows) closeAllNonMainWindows();
+    } catch (e) { console.error('[main] before-quit close containers error', e); }
+  });
+
+  // fallback: force destroy non-main windows shortly after quit if any remain
+  app.on('will-quit', () => {
+    try { if (forceCloseAllNonMainWindows) forceCloseAllNonMainWindows(); } catch (e) { console.error('[main] will-quit force close error', e); }
+  });
+
+
+
+  // Bookmarks IPC handlers are defined in src/main/ipc.ts to avoid duplicate registration
+
+  // === CLI / Custom Protocol ===
+
+
+  // Windows: 二重起動時のプロトコル引数
+  // シングルインスタンスロックを有効化して別プロセス起動を抑止する
+  const ENABLE_SINGLE_INSTANCE = true;
+
+  // デバッグ情報をログファイルに出力
+  if (app && !(global as any)._envCheckDone) {
+    (global as any)._envCheckDone = true;
+    try {
+      const debugInfo = {
+        ENABLE_SINGLE_INSTANCE,
+        NODE_ENV: process.env.NODE_ENV,
+        ELECTRON_RENDERER_URL: process.env.ELECTRON_RENDERER_URL,
+        isPackaged: app.isPackaged,
+        appPath: app.getAppPath(),
+        timestamp: new Date().toISOString()
+      };
+      logger.info('[DEBUG] Environment check:', debugInfo);
+      console.log('[DEBUG] Environment check:', JSON.stringify(debugInfo, null, 2));
+    } catch (e) {
+      console.log('[DEBUG] Failed to log environment info:', e);
+    }
+  }
+
+
+  let gotLock = true;
+
+  if (ENABLE_SINGLE_INSTANCE) {
+    gotLock = app.requestSingleInstanceLock();
+    logger.info('[DEBUG] Single instance lock result:', gotLock);
+    console.log('[DEBUG] Single instance lock result:', gotLock);
+
+    if (!gotLock) {
+      const msg = '[DEBUG] Single instance lock failed, quitting...';
+      logger.error(msg);
+      console.log(msg);
+      app.quit();
+      process.exit(1);
+    } else {
+      const msg = '[DEBUG] Single instance lock acquired successfully';
+      logger.info(msg);
+      console.log(msg);
+    }
   } else {
-    const msg = '[DEBUG] Single instance lock acquired successfully';
+    const msg = '[DEBUG] Single instance lock disabled';
     logger.info(msg);
     console.log(msg);
   }
-} else {
-  const msg = '[DEBUG] Single instance lock disabled';
-  logger.info(msg);
-  console.log(msg);
+
+  app.on('second-instance', (_event, argv) => {
+    handleArgv(argv);
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 }
 
-app.on('second-instance', (_event, argv) => {
-  handleArgv(argv);
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  }
-});
 
 export function registerMainIpcHandlers() {
+
+  if ((global as any)._mainIpcRegistered) {
+    console.log('[main] registerMainIpcHandlers: already registered (global hint), skipping.');
+    return;
+  }
+  (global as any)._mainIpcRegistered = true;
+
+
+
+
 
   // --- App Actions ---
   ipcMain.handle('app.getVersion', () => {
@@ -1126,7 +1147,14 @@ export function registerMainIpcHandlers() {
   });
 
   // --- Container Actions ---
-  ipcMain.handle('containers.list', () => { return DB.listContainers(); });
+  ipcMain.handle('containers.list', async () => {
+    try {
+      await syncKameleoProfiles();
+    } catch (e) {
+      console.warn('[main] Auto-sync failing on list', e);
+    }
+    return DB.listContainers();
+  });
   ipcMain.handle('containers.get', (_e, { id }: { id: string }) => {
     const c = DB.getContainer(id);
     if (!c) throw new Error('container not found');
@@ -1147,43 +1175,89 @@ export function registerMainIpcHandlers() {
       }
     } catch (err: any) { throw err; }
 
-    const id = randomUUID();
-    const fp: Fingerprint = {
-      acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
-      locale: 'ja-JP',
-      timezone: 'Asia/Tokyo',
-      platform: 'Win32',
-      hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
-      deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
-      canvasNoise: true,
-      screenWidth: 2560,
-      screenHeight: 1440,
-      viewportWidth: 1280,
-      viewportHeight: 800,
-      colorDepth: 24,
-      maxTouchPoints: 0,
-      deviceScaleFactor: 1.0,
-      cookieEnabled: true,
-      connectionType: '4g',
-      batteryLevel: 1,
-      batteryCharging: true
-    };
+    // Create actual Kameleo Profile immediately
+    let kameleoProfileId: string;
+    let kameleoEnv: any;
+    try {
+      const { KameleoApi } = await import('./kameleoApi');
+      const profiles = await KameleoApi.listProfiles();
+      const existingProfile = profiles.find(p => p.name === name);
+
+      if (existingProfile) {
+        console.log(`[main] [kameleo] Using existing profile found by name: ${name} (${existingProfile.id})`);
+        kameleoProfileId = existingProfile.id;
+        kameleoEnv = {
+          deviceType: (existingProfile as any).device?.deviceType || 'desktop',
+          os: (existingProfile as any).device?.platform || 'windows',
+          browser: (existingProfile as any).device?.browser || 'chrome'
+        };
+      } else {
+        let proxyOptions = undefined;
+        if (proxy && typeof proxy === 'object' && proxy.server) {
+          const hostPort = proxy.server.replace(/^[^:]+:\/\//, '').replace(/^[^@]+@/, '');
+          const [host, port] = hostPort.split(':');
+          proxyOptions = {
+            value: proxy.server.startsWith('socks5') ? 'socks5' : 'http',
+            extra: {
+              host,
+              port: parseInt(port) || 80,
+              id: proxy.username,
+              secret: proxy.password
+            }
+          };
+        }
+
+        const p = await KameleoApi.createProfile({
+          name: name,
+          tags: ['container-browser'],
+          deviceType: 'desktop',
+          os: 'windows',
+          browser: 'chrome',
+          storage: 'cloud',
+          language: 'ja-JP',
+          proxy: proxyOptions
+        });
+        kameleoProfileId = p.id;
+        kameleoEnv = {
+          deviceType: p.device?.deviceType,
+          os: p.device?.platform,
+          browser: p.device?.browser
+        };
+        console.log(`[main] [kameleo] New profile created: ${kameleoProfileId}`);
+      }
+    } catch (e) {
+      console.error('[main] [kameleo] Failed to create profile during container creation', e);
+      throw new Error('Kameleo profile creation failed: ' + (e as any).message);
+    }
+
+    const id = kameleoProfileId; // Use Kameleo ID as local ID
     const c: Container = {
-      id, name, userDataDir: path.join(app.getPath('userData'), 'profiles', id),
+      id,
+      name,
+      userDataDir: path.join(app.getPath('userData'), 'profiles', id),
       partition: `persist:container-${id}`,
-      userAgent: ua || undefined, locale: locale || 'ja-JP', timezone: timezone || 'Asia/Tokyo',
-      fingerprint: fp, proxy: proxy || null, createdAt: Date.now(), updatedAt: Date.now(), lastSessionId: null
+      userAgent: ua || undefined,
+      locale: locale || 'ja-JP',
+      timezone: timezone || 'Asia/Tokyo',
+      proxy: proxy || null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      kameleoProfileId,
+      profileMode: 'attached',
+      kameleoEnv
     };
+
     DB.upsertContainer(c);
     return c;
   });
+
   ipcMain.handle('containers.open', async (_e, { id, url }) => {
     const c = DB.getContainer(id);
     if (!c) throw new Error('container not found');
     return !!(await openContainerWindow(c, url));
   });
   ipcMain.handle('containers.openByName', async (_e, { name, url }) => {
-    const c = DB.getContainerByName(name) || createContainerWithName(name);
+    const c = DB.getContainerByName(name) || await createContainerWithName(name);
     return !!(await openContainerWindow(c, url));
   });
   ipcMain.handle('containers.delete', async (_e, { id }) => {
@@ -1193,24 +1267,127 @@ export function registerMainIpcHandlers() {
       const ses = session.fromPartition(c.partition, { cache: true });
       await ses.clearStorageData({});
     } catch { }
+
+    // Also delete Kameleo Profile if it is managed
+    if (c.kameleoProfileId && c.profileMode === 'managed') {
+      try {
+        const { KameleoApi } = await import('./kameleoApi');
+        await KameleoApi.deleteProfile(c.kameleoProfileId);
+        console.log(`[main] [kameleo] Deleted profile: ${c.kameleoProfileId}`);
+      } catch (e) {
+        console.error(`[main] [kameleo] Failed to delete profile: ${c.kameleoProfileId}`, e);
+      }
+    }
+
     await deleteContainerStorage(id);
     DB.asyncDeleteContainer(id);
     return true;
   });
-  ipcMain.handle('containers.update', async (_e, payload: Partial<Container> & { id: string }) => {
+  ipcMain.handle('containers.close', async (_e, { id }: { id: string }) => {
+    const c = DB.getContainer(id);
+    if (!c || !c.kameleoProfileId) return { ok: false, error: 'profile not found' };
+    try {
+      const { KameleoApi } = await import('./kameleoApi');
+      await KameleoApi.stopProfile(c.kameleoProfileId);
+      // Wait a bit for status update
+      setTimeout(async () => {
+        const p = await KameleoApi.getProfile(c.kameleoProfileId!);
+        if (p) {
+          DB.upsertContainer({ ...c, status: (p.status === 'started' ? '稼働中' : '停止') as any });
+        }
+      }, 1000);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  ipcMain.handle('containers.update', async (_e, payload: Partial<Container> & { id: string, kameleoTags?: string[] }) => {
     const cur = DB.getContainer(payload.id);
     if (!cur) throw new Error('container not found');
+
     const next: Container = { ...cur, ...payload, updatedAt: Date.now() } as Container;
-    // handle proxy if provided
-    if ((payload as any).proxy !== undefined) next.proxy = (payload as any).proxy;
+
+    // Handle proxy conversion if updated
+    if ((payload as any).proxy !== undefined) {
+      next.proxy = (payload as any).proxy;
+    }
+
+    // Update Kameleo Profile if linked
+    if (cur.kameleoProfileId) {
+      try {
+        const { KameleoApi } = await import('./kameleoApi');
+        const updateOptions: any = {};
+        if (payload.name) updateOptions.name = payload.name;
+        if (payload.kameleoTags) updateOptions.tags = payload.kameleoTags;
+
+        if (next.proxy) {
+          const s = next.proxy.server || '';
+          const match = s.match(/^(?:(http|socks5|socks4):\/\/)?([^:]+):(\d+)$/i);
+          if (match) {
+            updateOptions.proxy = {
+              type: (match[1] || 'http').toLowerCase(),
+              host: match[2],
+              port: parseInt(match[3]),
+              username: next.proxy.username,
+              password: next.proxy.password
+            };
+          }
+        } else if (payload.proxy === null) {
+          updateOptions.proxy = null;
+        }
+
+        if (Object.keys(updateOptions).length > 0) {
+          console.log(`[main] [kameleo] Updating profile ${cur.kameleoProfileId} for container ${cur.id}`, updateOptions);
+          await KameleoApi.updateProfile(cur.kameleoProfileId, updateOptions);
+
+          // Update cached metadata
+          if (payload.name) next.kameleoProfileMetadata = { ...next.kameleoProfileMetadata, name: payload.name } as any;
+          if (payload.kameleoTags) next.kameleoProfileMetadata = { ...next.kameleoProfileMetadata, tags: payload.kameleoTags } as any;
+        }
+      } catch (err) {
+        console.error('[main] [kameleo] Failed to sync update to Kameleo', err);
+        // We still update local DB even if Kameleo sync fails, but we might want to throw?
+        // Let's just log for now to avoid blocking local edits.
+      }
+    }
+
     DB.upsertContainer(next);
     return next;
   });
+
+  ipcMain.handle('containers.clearCache', async (_e, { id }: { id: string }) => {
+    const c = DB.getContainer(id);
+    if (!c) return { ok: false, error: 'container not found' };
+    try {
+      const ses = session.fromPartition(c.partition);
+      await ses.clearCache();
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
+  ipcMain.handle('containers.clearAllData', async (_e, { id }: { id: string }) => {
+    const c = DB.getContainer(id);
+    if (!c) return { ok: false, error: 'container not found' };
+    try {
+      const ses = session.fromPartition(c.partition);
+      await ses.clearStorageData({
+        storages: ['appcache', 'cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage'],
+        quotas: ['persistent', 'temporary', 'syncable']
+      });
+      return { ok: true };
+    } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
+  });
+
   ipcMain.handle('containers.setNote', (_e, { id, note }) => {
+
     const cur = DB.getContainer(id);
     if (!cur) throw new Error('container not found');
     DB.upsertContainer({ ...cur, note });
     return { ok: true };
+  });
+  ipcMain.handle('containers.syncKameleo', async () => {
+    return await syncKameleoProfiles();
   });
 
   // --- Tab Actions (Moved to containerManager.ts) ---
@@ -1342,3 +1519,4 @@ export function registerMainIpcHandlers() {
   ipcMain.on('renderer.log', (_e: any, msg: any) => { logger.info('[renderer]', msg); });
   app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createMainWindow(); });
 }
+

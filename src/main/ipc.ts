@@ -9,7 +9,14 @@ import type { Container } from '../shared/types';
 
 const SERVICE = 'ContainerBrowserVault';
 
+let _generalIpcRegistered = false;
 export function registerGeneralIpcHandlers() {
+  if (_generalIpcRegistered) {
+    console.log('[main] registerGeneralIpcHandlers: already registered, skipping.');
+    return;
+  }
+  _generalIpcRegistered = true;
+
   const sendProgress = (msg: string) => {
     BrowserWindow.getAllWindows().forEach(win => {
       try { win.webContents.send('migration.progress', msg); } catch { }
@@ -48,17 +55,8 @@ export function registerGeneralIpcHandlers() {
   ipcMain.handle('prefs.set', async (_e, pref) => { DB.upsertSitePref(pref); return true; });
   ipcMain.handle('prefs.get', async (_e, { containerId, origin }) => DB.getSitePref(containerId, origin) ?? null);
 
-  // Clear container cache (HTTP cache only, preserves cookies and session data)
-  ipcMain.handle('containers.clearCache', async (_e, { id }: { id: string }) => {
-    try {
-      const { clearContainerCache } = await import('./containerManager');
-      const result = clearContainerCache(id);
-      return { ok: result };
-    } catch (e: any) {
-      console.error('[main] containers.clearCache error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
+  // NOTE: containers.clearCache, clearAllData, clearStorageForX are now in index.ts or consolidated
+
 
   // Clear storage for X domains (for recovery from 400 errors)
   ipcMain.handle('containers.clearStorageForX', async (_e, { id }: { id: string }) => {
@@ -72,17 +70,7 @@ export function registerGeneralIpcHandlers() {
     }
   });
 
-  // Clear all storage data (cookies, localStorage, IndexedDB, etc.) for a container
-  ipcMain.handle('containers.clearAllData', async (_e, { id }: { id: string }) => {
-    try {
-      const { clearContainerAllData } = await import('./containerManager');
-      const result = await clearContainerAllData(id);
-      return { ok: result };
-    } catch (e: any) {
-      console.error('[main] containers.clearAllData error', e);
-      return { ok: false, error: e?.message || String(e) };
-    }
-  });
+
 
   type ClearAllCacheProgressPayload = {
     message: string;

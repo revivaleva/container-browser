@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { Container } from '../shared/types';
 import { DB } from './db';
 import fs, { existsSync } from 'node:fs';
+import fsp from 'node:fs/promises';
 import { OpenedContainer, openedById, proxyCredentialsByPartition, proxyCredentialsByHostPort } from './containerState';
 import { KameleoApi } from './kameleoApi';
 import { PlaywrightService } from './playwrightService';
@@ -1682,6 +1683,58 @@ export function waitForContainerClosed(containerId: string, timeoutMs = 60000) {
 // set BAR_HEIGHT to match renderer padding-top
 export const BAR_HEIGHT = 150;
 
+// Clear cache on container close (preserves cookies and session data)
+// Clears: HTTP cache, ServiceWorker cache, CacheStorage
+// Preserves: cookies, localStorage, IndexedDB
+export async function clearContainerCacheOnClose(containerId: string): Promise<void> {
+  try {
+    if (!containerId) {
+      console.warn('[main] clearContainerCacheOnClose: containerId is missing');
+      return;
+    }
+
+    const container = DB.getContainer(containerId);
+    if (!container) {
+      console.warn('[main] clearContainerCacheOnClose: container not found', containerId);
+      return;
+    }
+
+    const part = container.partition;
+    if (!part) {
+      console.warn('[main] clearContainerCacheOnClose: container has no partition', containerId);
+      return;
+    }
+
+    const ses = session.fromPartition(part, { cache: true });
+
+    // Clear HTTP cache
+    await new Promise<void>((resolve) => {
+      ses.clearCache((error) => {
+        if (error) {
+          console.warn('[main] clearContainerCacheOnClose: failed to clear HTTP cache', error);
+        } else {
+          console.log('[main] clearContainerCacheOnClose: HTTP cache cleared for container', containerId);
+        }
+        resolve();
+      });
+    });
+
+    // Clear ServiceWorker cache and CacheStorage (preserving cookies)
+    try {
+      await ses.clearStorageData({
+        storages: ['serviceworkers', 'cachestorage']
+      });
+      console.log('[main] clearContainerCacheOnClose: ServiceWorker and CacheStorage cleared for container', containerId);
+    } catch (e) {
+      console.warn('[main] clearContainerCacheOnClose: failed to clear ServiceWorker/CacheStorage', e);
+    }
+
+  } catch (e) {
+    // エラーはログのみ（コンテナの閉じる処理をブロックしない）
+    console.warn('[main] clearContainerCacheOnClose error', e);
+  }
+}
+
 export async function openContainerWindow(container: Container, startUrl?: string, opts: OpenOpts = {}) {
   // If a window for this container already exists, focus it and optionally navigate
   try {
@@ -1713,21 +1766,46 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     }
 
     if (!profile && container.profileMode !== 'attached') {
-      const profileName = `container-browser-${container.id}`;
+      const profileName = container.name;
       profile = profiles.find(p => p.name === profileName);
+      if (!profile) {
+        // Fallback to legacy naming if needed, but primarily search for X ID
+        profile = profiles.find(p => p.name === `container-browser-${container.id}`);
+      }
     }
 
     if (!profile) {
       if (container.profileMode === 'attached') {
         throw new Error(`Attached profile ${kameleoProfileId} not found in Kameleo.`);
       }
-      console.log(`[main] [kameleo] Creating new profile for container ${container.id} with env:`, container.kameleoEnv);
+      const profileName = container.name || `container-browser-${container.id}`;
+      console.log(`[main] [kameleo] Creating new profile "${profileName}" for container ${container.id} with env:`, container.kameleoEnv);
+
+
+      let proxyOptions = undefined;
+      if (container.proxy) {
+        const hostPort = extractProxyHostPort(container.proxy.server);
+        const [host, port] = hostPort.split(':');
+        proxyOptions = {
+          value: container.proxy.server.startsWith('socks5') ? 'socks5' : 'http',
+          extra: {
+            host,
+            port: parseInt(port) || 80,
+            id: container.proxy.username,
+            secret: container.proxy.password
+          }
+        };
+      }
+
       profile = await KameleoApi.createProfile({
-        name: `container-browser-${container.id}`,
+        name: profileName,
         tags: ['container-browser'],
-        deviceType: container.kameleoEnv?.deviceType,
-        os: container.kameleoEnv?.os,
-        browser: container.kameleoEnv?.browser,
+        deviceType: container.kameleoEnv?.deviceType || 'desktop',
+        os: container.kameleoEnv?.os || 'windows',
+        browser: container.kameleoEnv?.browser || 'chrome',
+        storage: 'cloud',
+        language: 'ja-JP',
+        proxy: proxyOptions
       });
       // Save the new ID to DB
       container.kameleoProfileId = profile.id;
@@ -1742,11 +1820,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       const [host, port] = hostPort.split(':');
       const updateOptions = {
         proxy: {
-          type: container.proxy.server.startsWith('socks5') ? 'socks5' : 'http',
-          host,
-          port: parseInt(port) || 80,
-          username: container.proxy.username,
-          password: container.proxy.password
+          value: container.proxy.server.startsWith('socks5') ? 'socks5' : 'http',
+          extra: {
+            host,
+            port: parseInt(port) || 80,
+            id: container.proxy.username,
+            secret: container.proxy.password
+          }
         }
       };
       try {
@@ -1756,13 +1836,26 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       }
     }
 
-    if (profile.status === 'stopped') {
+    let statusString = '';
+    if (typeof profile.status === 'object' && profile.status !== null) {
+      statusString = String(profile.status.value || '');
+    } else {
+      statusString = String(profile.status || '');
+    }
+    const status = statusString.toLowerCase();
+    if (status === 'stopped' || status === 'terminated') {
       console.log(`[main] [kameleo] Starting profile ${kameleoProfileId} for container ${container.id}`);
       await KameleoApi.startProfile(kameleoProfileId);
       startedByThisProcess = true;
+    } else if (status === 'running') {
+      console.warn(`[main] [kameleo] Profile ${kameleoProfileId} is already running. Attempting to connect to an existing session...`);
+    } else if (status === 'locked') {
+      throw new Error(`Kameleoプロファイル(${kameleoProfileId})は別の環境で使用中のためロックされています。他端末で終了するか、Kameleoの管理画面でロックを解除してください。`);
     } else {
-      console.log(`[main] [kameleo] Profile ${kameleoProfileId} is already ${profile.status}, skipping start call`);
+      console.warn(`[main] [kameleo] Profile ${kameleoProfileId} has unknown status: ${status}. Proceeding with connection attempt...`);
     }
+
+
   } catch (e) {
     console.error(`[main] [kameleo] Failed to manage profile for container ${container.id}`, e);
     throw e;
@@ -1773,7 +1866,13 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   let playwrightPage: any;
   try {
     console.log(`[main] [playwright] Connecting to Kameleo profile ${kameleoProfileId}`);
-    playwrightPage = await PlaywrightService.getPage(kameleoProfileId);
+    try {
+      console.log(`[main] [kameleo] [DEBUG] Connecting to Playwright for profile ${kameleoProfileId}`);
+      playwrightPage = await PlaywrightService.getPage(kameleoProfileId);
+    } catch (pwErr: any) {
+      console.error(`[main] [kameleo] [ERROR] Failed to connect to Playwright:`, pwErr);
+      throw pwErr;
+    }
     console.log(`[main] [playwright] Connected to page of profile ${kameleoProfileId}`);
   } catch (e) {
     console.error(`[main] [playwright] Failed to connect to Kameleo profile ${kameleoProfileId}`, e);
@@ -1790,12 +1889,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   const win = new BrowserWindow({
     width: w,
     height: h + BAR_HEIGHT,
+    show: false, // Hidden in Kameleo mode as indicated by user
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: shellPreloadPath,
     }
   });
+
 
   // mark this window as a container shell
   (win as any).__isContainerShell = true;
@@ -1810,8 +1911,10 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     DB.closeSession(sessionId, Date.now());
     openedById.delete(container.id);
     try {
+      // Trigger automated cache cleanup on close
+      await clearContainerCacheOnClose(container.id);
       await PlaywrightService.disconnect(kameleoProfileId);
-      
+
       // Auto-stop policy: managed は常にストップ、attached はこのプロセスで開始した場合のみストップ
       const shouldStop = container.profileMode === 'managed' || startedByThisProcess;
       if (shouldStop) {
@@ -1838,14 +1941,14 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   // Proxy Playwright events to Electron Shell
   playwrightPage.on('framenavigated', (frame: any) => {
     if (frame === playwrightPage.mainFrame()) {
-        const url = playwrightPage.url();
-        win.webContents.send('container.context', {
-            containerId: container.id,
-            sessionId,
-            currentUrl: url,
-            tabs: [{ url, title: 'Loading...' }],
-            activeIndex: 0
-        });
+      const url = playwrightPage.url();
+      win.webContents.send('container.context', {
+        containerId: container.id,
+        sessionId,
+        currentUrl: url,
+        tabs: [{ url, title: 'Loading...' }],
+        activeIndex: 0
+      });
     }
   });
 
@@ -1854,11 +1957,11 @@ export async function openContainerWindow(container: Container, startUrl?: strin
       const title = await playwrightPage.title();
       const url = playwrightPage.url();
       win.webContents.send('container.context', {
-          containerId: container.id,
-          sessionId,
-          currentUrl: url,
-          tabs: [{ url, title }],
-          activeIndex: 0
+        containerId: container.id,
+        sessionId,
+        currentUrl: url,
+        tabs: [{ url, title }],
+        activeIndex: 0
       });
       DB.addOrUpdateTab({ containerId: container.id, sessionId, url, tabIndex: 0, updatedAt: Date.now() });
     } catch { }
@@ -1868,11 +1971,11 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     try {
       const title = await playwrightPage.title();
       win.webContents.send('container.context', {
-          containerId: container.id,
-          sessionId,
-          currentUrl: playwrightPage.url(),
-          tabs: [{ url: playwrightPage.url(), title }],
-          activeIndex: 0
+        containerId: container.id,
+        sessionId,
+        currentUrl: playwrightPage.url(),
+        tabs: [{ url: playwrightPage.url(), title }],
+        activeIndex: 0
       });
     } catch { }
   });
@@ -1904,7 +2007,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     : new URL('file://' + path.join(app.getAppPath(), 'out', 'renderer', 'containerShell.html')).toString();
 
   await win.loadURL(shellHtml);
-  win.show();
+  // win.show(); // User indicated they don't use this window, keep it hidden
 
   // Load startUrl via Playwright if provided
   if (startUrl) {
@@ -1967,11 +2070,11 @@ export function forceCloseAllNonMainWindows() {
 export async function getContextForWindow(win: BrowserWindow) {
   for (const [containerId, entry] of openedById.entries()) {
     if (entry.win === win) {
-      const containerRecord = DB.getContainer(containerId) || { name: undefined };
+      const containerRecord = DB.getContainer(containerId) || ({ name: '', fingerprint: {} } as any);
       const containerName = containerRecord.name ?? '';
       const url = entry.playwrightPage.url();
       let title = await entry.playwrightPage.title().catch(() => '(Kameleo Browser)');
-      
+
       const tabs = [{ url, title }];
       const currentUrl = url;
       try { entry.win.setTitle(containerName || 'コンテナシェル'); } catch { }
@@ -2017,7 +2120,14 @@ export async function navigateContainer(containerId: string, url: string) {
   }
 }
 
+let _containerIpcRegistered = false;
 export function registerContainerIpcHandlers() {
+  if (_containerIpcRegistered) {
+    console.log('[main] registerContainerIpcHandlers: already registered, skipping.');
+    return;
+  }
+  _containerIpcRegistered = true;
+
   const ipc = ipcMain;
   if (!ipc) return;
   ipc.handle('container.navigate', (_e, { containerId, url }) => navigateContainer(containerId, url));
@@ -2092,57 +2202,6 @@ export function clearContainerCache(containerId: string) {
   }
 }
 
-// Clear cache on container close (preserves cookies and session data)
-// Clears: HTTP cache, ServiceWorker cache, CacheStorage
-// Preserves: cookies, localStorage, IndexedDB
-export async function clearContainerCacheOnClose(containerId: string): Promise<void> {
-  try {
-    if (!containerId) {
-      console.warn('[main] clearContainerCacheOnClose: containerId is missing');
-      return;
-    }
-
-    const container = DB.getContainer(containerId);
-    if (!container) {
-      console.warn('[main] clearContainerCacheOnClose: container not found', containerId);
-      return;
-    }
-
-    const part = container.partition;
-    if (!part) {
-      console.warn('[main] clearContainerCacheOnClose: container has no partition', containerId);
-      return;
-    }
-
-    const ses = session.fromPartition(part, { cache: true });
-
-    // Clear HTTP cache
-    await new Promise<void>((resolve) => {
-      ses.clearCache((error) => {
-        if (error) {
-          console.warn('[main] clearContainerCacheOnClose: failed to clear HTTP cache', error);
-        } else {
-          console.log('[main] clearContainerCacheOnClose: HTTP cache cleared for container', containerId);
-        }
-        resolve();
-      });
-    });
-
-    // Clear ServiceWorker cache and CacheStorage (preserving cookies)
-    try {
-      await ses.clearStorageData({
-        storages: ['serviceworkers', 'cachestorage']
-      });
-      console.log('[main] clearContainerCacheOnClose: ServiceWorker and CacheStorage cleared for container', containerId);
-    } catch (e) {
-      console.warn('[main] clearContainerCacheOnClose: failed to clear ServiceWorker/CacheStorage', e);
-    }
-
-  } catch (e) {
-    // エラーはログのみ（コンテナの閉じる処理をブロックしない）
-    console.warn('[main] clearContainerCacheOnClose error', e);
-  }
-}
 
 // Clear storage for X domains (cookies, localStorage, etc.) for recovery from 400 errors
 export async function clearContainerStorageForX(containerId: string): Promise<boolean> {
@@ -2258,20 +2317,23 @@ export async function deleteContainerStorage(containerId: string) {
     const partitionPath = path.join(userDataPath, 'Partitions', partitionDirName);
     const profilePath = path.join(userDataPath, 'profiles', containerId);
 
-    // Delete partition folder
-    if (fs.existsSync(partitionPath)) {
+    // Delete partition folder asynchronously
+    if (existsSync(partitionPath)) {
       try {
-        fs.rmSync(partitionPath, { recursive: true, force: true });
+        console.log(`[main] Deleting partition folder asynchronously: ${partitionPath}`);
+        // Use fs.promises.rm for non-blocking deletion
+        await fsp.rm(partitionPath, { recursive: true, force: true });
         console.log(`[main] Deleted partition folder: ${partitionPath}`);
       } catch (e) {
         console.warn(`[main] Failed to delete partition folder (likely in use): ${partitionPath}`);
       }
     }
 
-    // Delete profile folder
-    if (fs.existsSync(profilePath)) {
+    // Delete profile folder asynchronously
+    if (existsSync(profilePath)) {
       try {
-        fs.rmSync(profilePath, { recursive: true, force: true });
+        console.log(`[main] Deleting profile folder asynchronously: ${profilePath}`);
+        await fsp.rm(profilePath, { recursive: true, force: true });
         console.log(`[main] Deleted profile folder: ${profilePath}`);
       } catch (e) {
         console.warn(`[main] Failed to delete profile folder (likely in use): ${profilePath}`);
@@ -2308,6 +2370,9 @@ export async function cleanupOrphans() {
     const activeIds = new Set(containers.map(c => c.id));
     const userDataPath = app.getPath('userData');
 
+    let partitionCount = 0;
+    let profileCount = 0;
+
     // 1. Cleanup Partitions
     const partitionsDir = path.join(userDataPath, 'Partitions');
     if (fs.existsSync(partitionsDir)) {
@@ -2321,11 +2386,12 @@ export async function cleanupOrphans() {
           const id = idMatch[1];
           if (!activeIds.has(id)) {
             const target = path.join(partitionsDir, folder);
-            console.log(`[main] Found orphan partition folder: ${folder}. Deleting...`);
+            console.log(`[main] [cleanup] Found orphan partition folder: ${folder}. Deleting...`);
             try {
               fs.rmSync(target, { recursive: true, force: true });
+              partitionCount++;
             } catch (e) {
-              console.warn(`[main] Could not delete orphan partition ${folder} (maybe in use)`);
+              console.warn(`[main] [cleanup] Could not delete orphan partition ${folder} (maybe in use)`);
             }
           }
         }
@@ -2341,18 +2407,123 @@ export async function cleanupOrphans() {
         if (/^[0-9a-f-]{36}$/i.test(folder)) {
           if (!activeIds.has(folder)) {
             const target = path.join(profilesDir, folder);
-            console.log(`[main] Found orphan profile folder: ${folder}. Deleting...`);
+            console.log(`[main] [cleanup] Found orphan profile folder: ${folder}. Deleting...`);
             try {
               fs.rmSync(target, { recursive: true, force: true });
+              profileCount++;
             } catch (e) {
-              console.warn(`[main] Could not delete orphan profile ${folder}`);
+              console.warn(`[main] [cleanup] Could not delete orphan profile ${folder}`);
             }
           }
         }
       }
     }
-    console.log('[main] Orphan cleanup finished.');
+    console.log(`[main] Orphan cleanup finished. Removed ${partitionCount} partitions and ${profileCount} profiles.`);
   } catch (e) {
     console.error('[main] Error during cleanupOrphans', e);
   }
 }
+
+/**
+ * Sync Kameleo profiles with internal DB.
+ * Fetch all profiles from Kameleo and add/update them as 'attached' containers.
+ */
+export async function syncKameleoProfiles(): Promise<{ ok: boolean; added: number; updated: number; error?: string }> {
+  console.time('[sync] total');
+  try {
+    console.time('[sync] fetch_profiles');
+    const profiles = await KameleoApi.listProfiles();
+    console.timeEnd('[sync] fetch_profiles');
+
+    const existingList = DB.listContainers();
+    // Create a Map for O(1) lookup by kameleoProfileId
+    const existingMapByKameleoId = new Map(existingList.filter(c => !!c.kameleoProfileId).map(c => [c.kameleoProfileId, c]));
+    // Also by ID since some IDs are same as profile IDs
+    const existingMapById = new Map(existingList.map(c => [c.id, c]));
+
+    let added = 0;
+    let updated = 0;
+
+    for (const p of profiles) {
+      const cur = existingMapByKameleoId.get(p.id) || existingMapById.get(p.id);
+
+      if (cur) {
+        // Already exists, check if update is needed
+        if (cur.name !== p.name || cur.status !== (p.status === 'started' ? '稼働中' : '停止')) {
+          DB.upsertContainer({
+            ...cur,
+            name: p.name,
+            status: (p.status === 'started' ? '稼働中' : '停止') as any,
+            updatedAt: Date.now(),
+            kameleoProfileMetadata: {
+              name: p.name,
+              isCloud: !!(p as any).isCloud,
+              tags: (p as any).tags || [],
+              status: p.status
+            }
+          });
+          updated++;
+        }
+        continue;
+      }
+
+      // Add missing Kameleo profile to DB using its own ID
+      const id = p.id;
+      const rawP = p as any;
+      const c: any = {
+        id,
+        name: p.name,
+        userDataDir: path.join(app.getPath('userData'), 'profiles', id),
+        partition: `persist:container-${id}`,
+        userAgent: rawP.browser?.userAgent || undefined,
+        locale: rawP.browser?.language || 'ja-JP',
+        timezone: rawP.browser?.timezone || 'Asia/Tokyo',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        lastSessionId: null,
+        kameleoProfileId: id, // Keep it for backward compatibility or explicit association
+        profileMode: 'attached',
+        kameleoProfileMetadata: {
+          name: p.name,
+          isCloud: !!p.isCloud,
+          tags: p.tags || [],
+          status: p.status
+        },
+        kameleoEnv: {
+          deviceType: p.device?.deviceType || rawP.deviceType,
+          os: p.device?.platform || rawP.os,
+          browser: p.device?.browser || rawP.browser?.product
+        }
+      };
+
+      DB.upsertContainer(c);
+      added++;
+    }
+
+    // --- Data removal logic: Remove containers that no longer exist in Kameleo ---
+    const profileIdsFromKameleo = new Set(profiles.map(p => p.id));
+    let removed = 0;
+    for (const c of existingList) {
+      if (c.kameleoProfileId && !profileIdsFromKameleo.has(c.kameleoProfileId)) {
+        console.log(`[main] [kameleo] Profile ${c.kameleoProfileId} (container: ${c.id}) no longer exists in Kameleo. Removing from local DB...`);
+        try {
+          // Asynchronously delete storage but proceed with DB removal
+          deleteContainerStorage(c.id).catch(err => console.warn(`[main] Failed to delete storage for stale container ${c.id}`, err));
+          DB.asyncDeleteContainer(c.id);
+          removed++;
+        } catch (err) {
+          console.warn(`[main] [kameleo] Error removing stale container ${c.id} record`, err);
+        }
+      }
+    }
+
+    console.log(`[sync] Finished. Added: ${added}, Updated: ${updated}, Removed: ${removed}`);
+    console.timeEnd('[sync] total');
+
+    return { ok: true, added, updated };
+  } catch (e: any) {
+    console.error('[containerManager] syncKameleoProfiles error:', e);
+    return { ok: false, added: 0, updated: 0, error: e?.message || String(e) };
+  }
+}
+

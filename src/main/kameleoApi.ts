@@ -16,11 +16,13 @@ export interface KameleoProfile {
     deviceType: string;
   };
   proxy?: {
-    type: string;
-    host: string;
-    port: number;
-    username?: string;
-    password?: string;
+    value: string;
+    extra: {
+      host: string;
+      port: number;
+      id?: string;
+      secret?: string;
+    };
   };
 }
 
@@ -52,8 +54,8 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
     });
 
     req.on('error', (err) => {
-        console.error(`[main] [kameleo] network error: ${err.message} for ${method} ${path}`);
-        reject(err);
+      console.error(`[main] [kameleo] network error: ${err.message} for ${method} ${path}`);
+      reject(err);
     });
     if (body) req.write(JSON.stringify(body));
     req.end();
@@ -65,24 +67,27 @@ export const KameleoApi = {
     const profiles = await request<any[]>('GET', '/profiles');
     if (!Array.isArray(profiles)) return [];
     return profiles.map(p => ({
-        ...p,
-        isCloud: p.persistence === 'cloud'
+      ...p,
+      isCloud: p.storage === 'cloud'
     }));
   },
 
   async getStatus(): Promise<any> {
-      return request<any>('GET', '/status');
+    return request<any>('GET', '/status');
   },
 
-  async createProfile(options: { 
-    name: string, 
+  async createProfile(options: {
+    name: string,
     deviceType?: string,
     os?: string,
     browser?: string,
-    proxy?: { type: string, host: string, port: number, username?: string, password?: string },
+    proxy?: { value: string, extra: { host: string, port: number, id?: string, secret?: string } },
     tags?: string[],
+    storage?: 'local' | 'cloud',
+    language?: string,
     allowFallback?: boolean
   }): Promise<KameleoProfile> {
+
     const deviceType = options.deviceType || 'desktop';
     const os = options.os || 'windows';
     const browser = options.browser || 'chrome';
@@ -91,7 +96,7 @@ export const KameleoApi = {
     const query = `limit=1&deviceType=${deviceType}&os=${os}&browser=${browser}`;
     const fps = await request<any[]>('GET', `/fingerprints?${query}`);
     const fingerprint = (Array.isArray(fps) ? fps[0] : null) || (fps as any).value?.[0];
-    
+
     if (!fingerprint) {
       if (options.allowFallback) {
         console.warn(`[main] [kameleo] No specific fingerprints found for ${query}, trying any desktop fallback`);
@@ -108,16 +113,35 @@ export const KameleoApi = {
   },
 
   async createProfileInternal(fingerprintId: string, options: any): Promise<KameleoProfile> {
-    const body = {
+    const pVal = options.persistence || options.storage || 'cloud';
+    const body: any = {
       fingerprintId,
       name: options.name,
       proxy: options.proxy,
       tags: options.tags || [],
+      storage: pVal, // storage: 'cloud' or 'local'
       browser: {
         launcher: 'playwright'
       }
     };
-    return request<KameleoProfile>('POST', '/profiles/new', body);
+
+    // If language is specified, override browser settings
+    if (options.language) {
+      body.browser.webgl = body.browser.webgl || {};
+      body.browser.webgl.webglMetadata = 'mask'; // Ensure masking is on if we touch browser
+      body.language = options.language;
+    }
+
+    console.log(`[main] [kameleo] POST /profiles/new body:`, JSON.stringify(body, null, 2));
+    const result = await request<KameleoProfile>('POST', '/profiles/new', body);
+
+    // Check if result returned successfully and normalize status if it's an object
+    if (result && result.id) {
+      console.log(`[main] [kameleo] Profile created: ${result.id}`);
+    } else {
+      console.error(`[main] [kameleo] Profile creation failed? Result:`, JSON.stringify(result));
+    }
+    return result;
   },
 
   async startProfile(id: string): Promise<void> {
@@ -132,7 +156,12 @@ export const KameleoApi = {
     await request('DELETE', `/profiles/${id}`);
   },
 
+  async getProfile(id: string): Promise<KameleoProfile> {
+    return request<KameleoProfile>('GET', `/profiles/${id}`);
+  },
+
   async updateProfile(id: string, options: any): Promise<KameleoProfile> {
-      return request<KameleoProfile>('PATCH', `/profiles/${id}`, options);
+
+    return request<KameleoProfile>('PATCH', `/profiles/${id}`, options);
   }
 };

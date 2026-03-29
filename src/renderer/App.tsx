@@ -15,18 +15,21 @@ declare global {
       list: () => Promise<Container[]>;
       create: (payload: any) => Promise<Container>;
       open: (payload: { id: string; url?: string }) => Promise<boolean>;
+      close: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
       update: (payload: any) => Promise<Container>;
       delete: (payload: { id: string }) => Promise<boolean>;
+      syncKameleo: () => Promise<any>;
       openByName: (payload: { name: string; url?: string }) => Promise<boolean>;
       clearCache: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
-      clearAllData?: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
+      clearAllData: (payload: { id: string }) => Promise<{ ok: boolean; error?: string }>;
       clearAllCacheStart?: () => Promise<{ ok: boolean; error?: string }>;
       onClearAllCacheProgress?: (cb: (payload: { message: string; progress?: { current: number; total: number; percent: number }; freedBytesSoFar?: number; errorCount?: number; timestamp: number }) => void) => () => void;
       onClearAllCacheDone?: (cb: (payload: { ok: boolean; freedBytes: number; total: number; errorCount: number; errors?: string[]; timestamp: number }) => void) => () => void;
     };
+
     prefsAPI: {
       get: (payload: { containerId: string; origin: string }) => Promise<any>;
-      set: (payload: { containerId: string; origin: string; autoFill: 0|1; autoSaveForms: 0|1 }) => Promise<boolean>;
+      set: (payload: { containerId: string; origin: string; autoFill: 0 | 1; autoSaveForms: 0 | 1 }) => Promise<boolean>;
     };
     authAPI?: {
       validateToken: (opts?: any) => Promise<any>;
@@ -72,6 +75,8 @@ export default function App() {
   const [modalProxyString, setModalProxyString] = useState<string>('');
   const [modalNote, setModalNote] = useState<string>('');
   const [modalStatus, setModalStatus] = useState<string>('未使用');
+  const [modalTags, setModalTags] = useState<string[]>([]);
+
   const [fpLocale, setFpLocale] = useState('ja-JP');
   const [fpAcceptLang, setFpAcceptLang] = useState('ja,en-US;q=0.8,en;q=0.7');
   const [fpTimezone, setFpTimezone] = useState('Asia/Tokyo');
@@ -89,7 +94,7 @@ export default function App() {
   const [modalSiteOrigin, setModalSiteOrigin] = useState<string>('');
   const [modalSiteAutoFill, setModalSiteAutoFill] = useState<boolean>(false);
   const [modalSiteAutoSave, setModalSiteAutoSave] = useState<boolean>(false);
-  
+
   // インポート進捗表示用のstate
   const [importProgress, setImportProgress] = useState<{ message: string; progress?: { current: number; total: number; percent: number }; timestamp: number } | null>(null);
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -100,7 +105,7 @@ export default function App() {
   const [lastClearedAllCacheErrorCount, setLastClearedAllCacheErrorCount] = useState<number>(0);
   const [lastClearedAllCacheErrors, setLastClearedAllCacheErrors] = useState<string[] | null>(null);
 
-  const [containerUrls, setContainerUrls] = useState<Record<string,string>>({});
+  const [containerUrls, setContainerUrls] = useState<Record<string, string>>({});
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
   const [editBmTitle, setEditBmTitle] = useState<string>('');
   const [editBmUrl, setEditBmUrl] = useState<string>('');
@@ -111,8 +116,8 @@ export default function App() {
   const [origin, setOrigin] = useState('https://example.com');
   const [autoFill, setAutoFill] = useState<boolean>(false);
   const [autoSaveForms, setAutoSaveForms] = useState<boolean>(false);
-  const selected = useMemo(()=> list.find((c:any)=> c.id === selectedContainerId), [list, selectedContainerId]);
-  
+  const selected = useMemo(() => list.find((c: any) => c.id === selectedContainerId), [list, selectedContainerId]);
+
   // 検索でフィルタリングされたコンテナ一覧
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return list;
@@ -124,7 +129,7 @@ export default function App() {
     const l = await window.containersAPI.list();
     setList(l);
     if (!selectedContainerId && l[0]) setSelectedContainerId(l[0].id);
-    const sel = l.find((x:any)=> x.id === (selectedContainerId || (l[0]?.id)));
+    const sel = l.find((x: any) => x.id === (selectedContainerId || (l[0]?.id)));
     if (sel?.fingerprint) {
       setFpLocale(sel.fingerprint.locale || 'ja-JP');
       setFpAcceptLang(sel.fingerprint.acceptLanguage || 'ja,en-US;q=0.8,en;q=0.7');
@@ -146,7 +151,7 @@ export default function App() {
       setBookmarks(b || []);
       (window as any).bookmarksList = b || [];
       if (!selectedBookmarkId && (b || [])[0]) setSelectedBookmarkId(b[0].id);
-    } catch {}
+    } catch { }
   }
 
   async function loadPref() {
@@ -173,7 +178,7 @@ export default function App() {
   // helper: format existing proxy config to IP:PORT:USERNAME:PASSWORD format
   function formatProxyString(proxy: { server?: string; username?: string; password?: string } | null | undefined): string {
     if (!proxy || !proxy.server) return '';
-    
+
     // Extract host:port from server string
     let hostPort = proxy.server.trim();
     // Remove protocol prefixes
@@ -191,10 +196,10 @@ export default function App() {
         }
       }
     }
-    
+
     const username = proxy.username || '';
     const password = proxy.password || '';
-    
+
     // Always return IP:PORT:USERNAME:PASSWORD format (empty username/password if not set)
     return `${hostPort}:${username}:${password}`;
   }
@@ -203,10 +208,10 @@ export default function App() {
   function normalizeProxyString(proxyString: string): { server: string; username?: string; password?: string } | null {
     const parsed = parseProxyString(proxyString);
     if (!parsed) return null;
-    
+
     const { ip, port, username, password } = parsed;
     const server = `${ip}:${port}`;
-    
+
     return {
       server: `http=${server};https=${server}`,
       username: username || undefined,
@@ -259,12 +264,12 @@ export default function App() {
       // Check if token is set
       const tokenResp = await (window as any).appAPI?.getToken?.();
       const hasToken = !!(tokenResp?.ok && tokenResp?.token);
-      
+
       if (!hasToken) {
         // No token - allow creation without restrictions
         return { ok: true };
       }
-      
+
       // Token exists - check quota
       const validateResp = await (window as any).authAPI.validateToken();
       if (!validateResp || !validateResp.ok) {
@@ -272,12 +277,12 @@ export default function App() {
         console.warn('[containers] token validation failed, but allowing creation');
         return { ok: true };
       }
-      
+
       if (!validateResp.data || typeof validateResp.data.remaining_quota !== 'number') {
         // Can't determine quota - allow creation
         return { ok: true };
       }
-      
+
       const remaining = validateResp.data.remaining_quota;
       const current = list.length;
       if (current >= remaining) {
@@ -295,15 +300,15 @@ export default function App() {
   function setupHeartbeatTimer() {
     const expiryStr = localStorage.getItem('session_expires_at');
     if (!expiryStr) return;
-    
+
     const expiryTime = parseInt(expiryStr) * 1000; // Convert to ms
     const now = Date.now();
     const timeUntilExpiry = expiryTime - now;
     const bufferTime = 5 * 60 * 1000; // 5 minutes before expiry
-    
+
     // Cancel existing timer
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
-    
+
     // Schedule heartbeat 5 minutes before expiry
     const nextHeartbeatTime = timeUntilExpiry - bufferTime;
     if (nextHeartbeatTime > 0) {
@@ -346,10 +351,10 @@ export default function App() {
   function checkSessionExpiry() {
     const expiryStr = localStorage.getItem('session_expires_at');
     if (!expiryStr) return false;
-    
+
     const expiryTime = parseInt(expiryStr);
     const now = Math.floor(Date.now() / 1000);
-    
+
     if (now > expiryTime) {
       console.warn('[session] expired, re-authenticating');
       performHeartbeat(); // Attempt to re-authenticate
@@ -363,7 +368,7 @@ export default function App() {
     try {
       const tokenResp = await (window as any).appAPI?.getToken?.();
       const hasToken = !!(tokenResp?.ok && tokenResp?.token);
-      
+
       if (!hasToken) {
         // No token set - allow to work without restrictions
         setTokenInfo({ hasToken: false });
@@ -379,7 +384,7 @@ export default function App() {
         // Save to localStorage
         localStorage.setItem('session_expires_at', validateResp.data.session_expires_at.toString());
         localStorage.setItem('remaining_quota', validateResp.data.remaining_quota.toString());
-        
+
         setTokenInfo({
           hasToken: true,
           remaining_quota: validateResp.data.remaining_quota,
@@ -387,7 +392,7 @@ export default function App() {
           session_expires_at: validateResp.data.session_expires_at,
           expires_at: validateResp.data.expires_at
         });
-        
+
         // Setup heartbeat timer
         setupHeartbeatTimer();
       } else {
@@ -419,20 +424,20 @@ export default function App() {
         setIsAuthenticating(false);
         return;
       }
-      
+
       // Get device ID
       const deviceResp = await (window as any).deviceAPI?.getDeviceId?.();
       if (deviceResp?.ok && deviceResp?.deviceId) {
         localStorage.setItem('deviceId', deviceResp.deviceId);
       }
-      
+
       // Validate token
       const validateResp = await (window as any).authAPI?.validateToken?.();
       if (validateResp?.ok && validateResp?.data) {
         // Save to localStorage
         localStorage.setItem('session_expires_at', validateResp.data.session_expires_at.toString());
         localStorage.setItem('remaining_quota', validateResp.data.remaining_quota.toString());
-        
+
         setTokenInfo({
           hasToken: true,
           remaining_quota: validateResp.data.remaining_quota,
@@ -442,7 +447,7 @@ export default function App() {
         });
         setTokenInput('');
         alert('トークンを設定しました');
-        
+
         // Setup heartbeat timer
         setupHeartbeatTimer();
       } else {
@@ -476,14 +481,14 @@ export default function App() {
   useEffect(() => { refresh(); }, []);
   useEffect(() => { loadPref(); }, [selectedContainerId, origin]);
 
-  const localeOptions = ['ja-JP','en-US','en-GB'];
-  const acceptLangOptions = ['ja,en-US;q=0.8,en;q=0.7','ja-JP,ja;q=0.9,en-US;q=0.8'];
-  const timezoneOptions = ['Asia/Tokyo','Asia/Shanghai','Asia/Hong_Kong'];
-  const coresOptions = [2,4,6,8,12];
-  const ramOptions = [2,4,6,8,16,32];
-  const viewportOptions = [{w:1280,h:800},{w:1920,h:1080},{w:375,h:812},{w:360,h:800}];
-  const colorDepthOptions = [24,30,32];
-  const connOptions = ['wifi','4g','3g','2g','ethernet'];
+  const localeOptions = ['ja-JP', 'en-US', 'en-GB'];
+  const acceptLangOptions = ['ja,en-US;q=0.8,en;q=0.7', 'ja-JP,ja;q=0.9,en-US;q=0.8'];
+  const timezoneOptions = ['Asia/Tokyo', 'Asia/Shanghai', 'Asia/Hong_Kong'];
+  const coresOptions = [2, 4, 6, 8, 12];
+  const ramOptions = [2, 4, 6, 8, 16, 32];
+  const viewportOptions = [{ w: 1280, h: 800 }, { w: 1920, h: 1080 }, { w: 375, h: 812 }, { w: 360, h: 800 }];
+  const colorDepthOptions = [24, 30, 32];
+  const connOptions = ['wifi', '4g', '3g', '2g', 'ethernet'];
   const [bookmarkSettingsOpen, setBookmarkSettingsOpen] = useState<boolean>(true);
   const [appVersion, setAppVersion] = useState<string>('');
   const [exportEnabled, setExportEnabled] = useState<boolean>(false);
@@ -519,15 +524,16 @@ export default function App() {
         const deviceId = deviceResp && deviceResp.deviceId ? deviceResp.deviceId : '';
         if (saved && saved.token) {
           try {
-            const res = await (window as any).ipcRenderer?.invoke ? window.api?.validateToken?.(saved.token) : null;
+            const res = await (window as any).authAPI?.validateToken?.(saved.token);
+
           } catch (e) {
             // show token prompt on error
-            setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500);
+            setTimeout(() => setOpenSettingsId('tokenPrompt'), 500);
           }
         } else {
-          setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500);
+          setTimeout(() => setOpenSettingsId('tokenPrompt'), 500);
         }
-      } catch (e) { setTimeout(()=> setOpenSettingsId('tokenPrompt'), 500); }
+      } catch (e) { setTimeout(() => setOpenSettingsId('tokenPrompt'), 500); }
     })();
     // load token info and check session expiry (optional - doesn't block if missing)
     (async () => {
@@ -565,21 +571,21 @@ export default function App() {
           setExportEnabled(!!s.settings.enabled);
           setExportPort(Number(s.settings.port || 3001));
         }
-      } catch {}
+      } catch { }
       try {
         const st = await window.exportAPI?.getStatus();
         if (st && st.ok) setExportStatus({ running: !!st.running, port: Number(st.port || 3001), error: st.error || undefined });
-      } catch {}
+      } catch { }
     })();
     // subscribe to status events
-    const unsub = window.exportAPI?.onStatus?.((p:any)=>{
-      try { setExportStatus({ running: !!p.running, port: Number(p.port || 3001), error: p.error || undefined }); } catch {}
+    const unsub = window.exportAPI?.onStatus?.((p: any) => {
+      try { setExportStatus({ running: !!p.running, port: Number(p.port || 3001), error: p.error || undefined }); } catch { }
     });
     // subscribe to explicit open-settings signal from main (used when query param may not be preserved)
     const unsub2 = window.exportAPI?.onOpenSettings?.(() => {
-      try { setOpenAsSettingsSignal(true); } catch {}
+      try { setOpenAsSettingsSignal(true); } catch { }
     });
-    
+
     // インポート進捗イベントリスナーを設定
     const unsubImport = (window as any).migrationAPI?.onImportProgress?.((progress: { message: string; progress?: { current: number; total: number; percent: number }; timestamp: number }) => {
       try {
@@ -591,13 +597,13 @@ export default function App() {
             setImportProgress(null);
           }, 2000);
         }
-      } catch {}
+      } catch { }
     });
-    
-    return () => { 
-      try { if (unsub) unsub(); } catch {} 
-      try { if (unsubImport) unsubImport(); } catch {}
-      try { if (heartbeatTimer) clearTimeout(heartbeatTimer); } catch {}
+
+    return () => {
+      try { if (unsub) unsub(); } catch { }
+      try { if (unsubImport) unsubImport(); } catch { }
+      try { if (heartbeatTimer) clearTimeout(heartbeatTimer); } catch { }
     };
   }, [heartbeatTimer]);
 
@@ -609,7 +615,7 @@ export default function App() {
         setClearAllCacheProgress(p);
         if (typeof p.freedBytesSoFar === 'number') setLastClearedAllCacheBytes(p.freedBytesSoFar);
         if (typeof p.errorCount === 'number') setLastClearedAllCacheErrorCount(p.errorCount);
-      } catch {}
+      } catch { }
     });
     const unsubDone = window.containersAPI?.onClearAllCacheDone?.((p) => {
       try {
@@ -626,11 +632,11 @@ export default function App() {
           timestamp: Date.now(),
         });
         setTimeout(() => setClearAllCacheProgress(null), 2000);
-      } catch {}
+      } catch { }
     });
     return () => {
-      try { if (unsubProgress) unsubProgress(); } catch {}
-      try { if (unsubDone) unsubDone(); } catch {}
+      try { if (unsubProgress) unsubProgress(); } catch { }
+      try { if (unsubDone) unsubDone(); } catch { }
     };
   }, []);
 
@@ -643,19 +649,19 @@ export default function App() {
   const SettingsOnly = () => (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
       <h1>設定</h1>
-      
+
       {/* Advanced API Settings (Troubleshooting only) */}
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8, backgroundColor: '#f9f9f9' }}>
-        <h3 
-          style={{ 
-            cursor: 'pointer', 
-            display: 'flex', 
-            alignItems: 'center', 
+        <h3
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
             gap: 8,
             fontSize: 12,
             color: '#666',
             margin: 0
-          }} 
+          }}
           onClick={() => setShowAdvanced(!showAdvanced)}
         >
           {showAdvanced ? '▼' : '▶'} トラブルシューティング
@@ -664,7 +670,7 @@ export default function App() {
           <div style={{ marginTop: 12, padding: 12, backgroundColor: '#fff', borderRadius: 4, border: '1px solid #ddd' }}>
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: 'block', marginBottom: 4, fontSize: 11, fontWeight: 'bold', color: '#666' }}>認証APIベースURL（カスタム設定用）</label>
-              <input 
+              <input
                 type="text"
                 value={apiBaseInput}
                 onChange={e => setApiBaseInput(e.target.value)}
@@ -676,7 +682,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button 
+              <button
                 onClick={async () => {
                   try {
                     const resp = await (window as any).authAPI?.getSettings?.();
@@ -692,7 +698,7 @@ export default function App() {
               >
                 読み込み
               </button>
-              <button 
+              <button
                 onClick={async () => {
                   if (!apiBaseInput.trim()) {
                     alert('URLを入力してください');
@@ -729,7 +735,7 @@ export default function App() {
             <div style={{ fontSize: 12, color: '#155724', marginBottom: 8 }}>
               トークン: {`${tokenInfo?.remaining_quota ? '●'.repeat(8) : ''}` || 'トークンID不明'}
             </div>
-            <button 
+            <button
               onClick={handleClearToken}
               style={{ padding: '6px 12px', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
             >
@@ -746,7 +752,7 @@ export default function App() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
             <label style={{ display: 'block', marginBottom: 4, fontSize: 12, fontWeight: 'bold' }}>トークンを入力</label>
-            <input 
+            <input
               type="password"
               value={tokenInput}
               onChange={e => setTokenInput(e.target.value)}
@@ -755,15 +761,15 @@ export default function App() {
               disabled={isAuthenticating}
             />
           </div>
-          <button 
+          <button
             onClick={handleAuthenticate}
             disabled={isAuthenticating || !tokenInput.trim()}
-            style={{ 
-              padding: '8px 16px', 
-              backgroundColor: '#0275d8', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: 4, 
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#0275d8',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
               cursor: isAuthenticating ? 'not-allowed' : 'pointer',
               opacity: isAuthenticating || !tokenInput.trim() ? 0.6 : 1
             }}
@@ -804,7 +810,7 @@ export default function App() {
                     </span>
                   </div>
                 </div>
-                
+
                 <div style={{ marginBottom: 8, fontSize: 13 }}>
                   <strong>トークン状態:</strong> <span style={{ color: '#5cb85c' }}>✓ 有効</span>
                 </div>
@@ -837,20 +843,20 @@ export default function App() {
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>Export Server 設定</h3>
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-          <label style={{ display:'flex', gap:8, alignItems:'center' }}>
-            <input type="checkbox" checked={exportEnabled} onChange={e=>setExportEnabled(e.target.checked)} /> Export Server を有効にする
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="checkbox" checked={exportEnabled} onChange={e => setExportEnabled(e.target.checked)} /> Export Server を有効にする
           </label>
-          <label style={{ display:'flex', gap:8, alignItems:'center', marginLeft: 8 }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 8 }}>
             ポート:
-            <input type="number" value={exportPort} onChange={e=>setExportPort(parseInt(e.target.value||'0')||0)} style={{ width: 100 }} />
+            <input type="number" value={exportPort} onChange={e => setExportPort(parseInt(e.target.value || '0') || 0)} style={{ width: 100 }} />
           </label>
-          <button onClick={async ()=>{
+          <button onClick={async () => {
             const ok = await window.exportAPI?.saveSettings?.({ enabled: exportEnabled, port: Number(exportPort) });
             if (ok && ok.ok) alert('設定を保存しました（次回起動で反映されます）');
             else alert('保存に失敗しました');
           }}>保存</button>
-          <button onClick={async ()=>{
+          <button onClick={async () => {
             try {
               const st = await window.exportAPI?.getStatus();
               if (st && st.ok) setExportStatus({ running: !!st.running, port: Number(st.port || 3001), error: st.error || undefined });
@@ -858,13 +864,13 @@ export default function App() {
             } catch { alert('ステータス取得に失敗しました'); }
           }}>ステータス更新</button>
         </div>
-        <div style={{ marginTop:8 }}>
+        <div style={{ marginTop: 8 }}>
           {exportStatus ? (
             <div style={{ color: exportStatus.running ? 'green' : 'orange' }}>
               {exportStatus.running ? `Export API 実行中: 127.0.0.1:${exportStatus.port}` : `Export API 停止中（設定ポート: ${exportPort}）`}
               {exportStatus.error ? ` — エラー: ${exportStatus.error}` : ''}
             </div>
-          ) : <div style={{ color:'#666' }}>ステータス情報がありません</div>}
+          ) : <div style={{ color: '#666' }}>ステータス情報がありません</div>}
         </div>
       </section>
 
@@ -875,18 +881,18 @@ export default function App() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>HWアクセラレーション</label>
-          <select 
-            value={graphicsMode} 
+          <select
+            value={graphicsMode}
             onChange={e => setGraphicsMode(e.target.value)}
             style={{ padding: 6, border: '1px solid #ddd', borderRadius: 4, fontSize: 12 }}
           >
             <option value="auto">自動（ON）</option>
             <option value="disable">OFF</option>
           </select>
-          
+
           <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>ANGLEバックエンド</label>
-          <select 
-            value={angleMode} 
+          <select
+            value={angleMode}
             onChange={e => setAngleMode(e.target.value)}
             style={{ padding: 6, border: '1px solid #ddd', borderRadius: 4, fontSize: 12 }}
           >
@@ -895,34 +901,34 @@ export default function App() {
             <option value="gl">OpenGL</option>
             <option value="warp">WARP（ソフトウェア）</option>
           </select>
-          
+
           <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>HTTP/2無効化</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input 
-              type="checkbox" 
-              checked={disableHttp2} 
+            <input
+              type="checkbox"
+              checked={disableHttp2}
               onChange={e => setDisableHttp2(e.target.checked)}
               style={{ width: 16, height: 16 }}
             />
             <span style={{ fontSize: 12 }}>HTTP/2を無効化する</span>
           </label>
-          
+
           <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>HTTP/3（QUIC）無効化</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input 
-              type="checkbox" 
-              checked={disableQuic} 
+            <input
+              type="checkbox"
+              checked={disableQuic}
               onChange={e => setDisableQuic(e.target.checked)}
               style={{ width: 16, height: 16 }}
             />
             <span style={{ fontSize: 12 }}>HTTP/3（QUIC）を無効化する</span>
           </label>
-          
+
           <label style={{ display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 'bold' }}>GPU診断ログ</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input 
-              type="checkbox" 
-              checked={debugGpu} 
+            <input
+              type="checkbox"
+              checked={debugGpu}
               onChange={e => setDebugGpu(e.target.checked)}
               style={{ width: 16, height: 16 }}
             />
@@ -930,7 +936,7 @@ export default function App() {
           </label>
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-          <button 
+          <button
             onClick={async () => {
               try {
                 const resp = await (window as any).graphicsAPI?.saveSettings?.({
@@ -949,19 +955,19 @@ export default function App() {
                 alert('保存に失敗: ' + (e?.message || '不明'));
               }
             }}
-            style={{ 
-              padding: '8px 16px', 
-              backgroundColor: '#0275d8', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: 4, 
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#0275d8',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
               cursor: 'pointer',
               fontSize: 13
             }}
           >
             保存
           </button>
-          <button 
+          <button
             onClick={async () => {
               try {
                 const g = await (window as any).graphicsAPI?.getSettings?.();
@@ -979,12 +985,12 @@ export default function App() {
                 alert('読み込みに失敗: ' + (e?.message || '不明'));
               }
             }}
-            style={{ 
-              padding: '8px 16px', 
-              backgroundColor: '#6c757d', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: 4, 
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: 4,
               cursor: 'pointer',
               fontSize: 13
             }}
@@ -1005,7 +1011,7 @@ export default function App() {
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>データ移行</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button 
+          <button
             onClick={handleImport}
             disabled={isImporting}
             style={{
@@ -1097,10 +1103,10 @@ export default function App() {
       setImportProgress({ message: 'インポートを開始します...', timestamp: Date.now() });
       const result = await (window as any).migrationAPI?.importComplete?.();
       if (result?.ok) {
-        setImportProgress({ 
-          message: 'インポートが完了しました！', 
+        setImportProgress({
+          message: 'インポートが完了しました！',
           progress: { current: 100, total: 100, percent: 100 },
-          timestamp: Date.now() 
+          timestamp: Date.now()
         });
         setTimeout(() => {
           setIsImporting(false);
@@ -1108,9 +1114,9 @@ export default function App() {
           refresh();
         }, 2000);
       } else {
-        setImportProgress({ 
-          message: `インポート失敗: ${result?.error || '不明なエラー'}`, 
-          timestamp: Date.now() 
+        setImportProgress({
+          message: `インポート失敗: ${result?.error || '不明なエラー'}`,
+          timestamp: Date.now()
         });
         setTimeout(() => {
           setIsImporting(false);
@@ -1118,9 +1124,9 @@ export default function App() {
         }, 3000);
       }
     } catch (e: any) {
-      setImportProgress({ 
-        message: `インポートエラー: ${e?.message || String(e)}`, 
-        timestamp: Date.now() 
+      setImportProgress({
+        message: `インポートエラー: ${e?.message || String(e)}`,
+        timestamp: Date.now()
       });
       setTimeout(() => {
         setIsImporting(false);
@@ -1132,7 +1138,7 @@ export default function App() {
   // Render settings-only when opened as settings window, otherwise render main dashboard
   return isSettingsWindow ? <SettingsOnly /> : (
     <div style={{ padding: 16, fontFamily: 'system-ui', display: 'grid', gap: 16 }}>
-      
+
       {/* インポート進捗表示モーダル */}
       {(isImporting || importProgress) && (
         <div style={{
@@ -1163,9 +1169,9 @@ export default function App() {
                 </div>
                 {importProgress.progress && (
                   <div>
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
                       marginBottom: 8,
                       fontSize: 12,
                       color: '#666'
@@ -1250,9 +1256,9 @@ export default function App() {
                 )}
                 {clearAllCacheProgress.progress && (
                   <div>
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
                       marginBottom: 8,
                       fontSize: 12,
                       color: '#666'
@@ -1337,7 +1343,7 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <button 
+            <button
               onClick={fetchTokenInfo}
               style={{ padding: '8px 12px', fontSize: 12, height: 'fit-content' }}
             >
@@ -1350,22 +1356,22 @@ export default function App() {
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>コンテナ作成</h3>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input value={name} onChange={e=>setName(e.target.value)} placeholder="名前" />
-          <button onClick={async ()=>{ 
-              const check = await canCreateContainer();
-              if(!check.ok) return alert(check.message || '同時作成数が上限に達しています');
-              try {
-                await window.containersAPI.create({ name }); 
-                await refresh();
-              } catch (e: any) {
-                const errMsg = e?.message || String(e);
-                if (errMsg.includes('QUOTA_EXCEEDED') || errMsg.includes('Quota exceeded')) {
-                  alert('割り当ての消費に失敗しました。別のデバイスで既に使用されている可能性があります。');
-                } else {
-                  alert('コンテナ作成に失敗しました: ' + errMsg);
-                }
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="名前" />
+          <button onClick={async () => {
+            const check = await canCreateContainer();
+            if (!check.ok) return alert(check.message || '同時作成数が上限に達しています');
+            try {
+              await window.containersAPI.create({ name });
+              await refresh();
+            } catch (e: any) {
+              const errMsg = e?.message || String(e);
+              if (errMsg.includes('QUOTA_EXCEEDED') || errMsg.includes('Quota exceeded')) {
+                alert('割り当ての消費に失敗しました。別のデバイスで既に使用されている可能性があります。');
+              } else {
+                alert('コンテナ作成に失敗しました: ' + errMsg);
               }
-            }}>作成</button>
+            }
+          }}>作成</button>
         </div>
       </section>
 
@@ -1373,21 +1379,41 @@ export default function App() {
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h3>ブックマーク</h3>
-        <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:8 }}>
-          <div style={{ flex:1, display:'flex', gap:8, alignItems:'center', overflow:'auto' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center', overflow: 'auto' }}>
             {/* ブックマークバー（クリックで選択） */}
-            {bookmarks.map((b:any)=> (
+            {bookmarks.map((b: any) => (
               <button key={b.id}
-                style={{ whiteSpace:'nowrap', background: selectedBookmarkId === b.id ? '#eef' : undefined }}
-                onClick={()=> setSelectedBookmarkId(b.id)}>{b.title}</button>
+                style={{ whiteSpace: 'nowrap', background: selectedBookmarkId === b.id ? '#eef' : undefined }}
+                onClick={() => setSelectedBookmarkId(b.id)}>{b.title}</button>
             ))}
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <h3 style={{ margin: 0 }}>コンテナ一覧</h3>
-          <button onClick={refresh} style={{ padding: '4px 12px', fontSize: 14, cursor: 'pointer' }} title="コンテナ一覧を更新">🔄 更新</button>
+          <button onClick={refresh} style={{ padding: '4px 12px', fontSize: 14, cursor: 'pointer' }} title="コンテナ一覧を再読み込み">🔄 更新</button>
+          <button
+            onClick={async () => {
+              try {
+                const res = await (window as any).containersAPI.syncKameleo();
+                if (res.ok) {
+                  alert(`Kameleo同期完了: ${res.added} 件追加、${res.updated} 件更新されました。`);
+                  refresh();
+                } else {
+                  alert(`Kameleo同期失敗: ${res.error}`);
+                }
+              } catch (err: any) {
+                alert(`Kameleo同期エラー: ${err.message || String(err)}`);
+              }
+            }}
+            style={{ padding: '4px 12px', fontSize: 14, cursor: 'pointer', backgroundColor: '#e7f3ff', border: '1px solid #b3d9ff', borderRadius: 4, color: '#004085' }}
+            title="Kameleoのプロファイル一覧を同期します"
+          >
+            🦎 Kameleoから同期
+          </button>
         </div>
+
         <div style={{ marginBottom: 8 }}>
           <input
             type="text"
@@ -1399,14 +1425,27 @@ export default function App() {
         </div>
         {filteredList.length === 0 && <p>{searchQuery ? '検索結果がありません。' : 'コンテナがありません。'}</p>}
         <ul>
-          {filteredList.map((c:any)=> (
+          {filteredList.map((c: any) => (
             <li key={c.id} style={{ padding: 8, borderBottom: '1px solid #eee' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={()=>{ setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalStatus(c.status ?? '未使用'); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyString(formatProxyString(c.proxy)); }}>
+                <div style={{ minWidth: 160, cursor: 'pointer' }} onClick={() => { setOpenSettingsId(c.id); setModalContainerName(c.name || ''); setModalNote(c.note || ''); setModalStatus(c.status ?? '未使用'); setModalLocale(c.fingerprint?.locale ?? 'ja-JP'); setModalAcceptLang(c.fingerprint?.acceptLanguage ?? 'ja,en-US;q=0.8,en;q=0.7'); setModalTimezone(c.fingerprint?.timezone ?? 'Asia/Tokyo'); setFpCores(c.fingerprint?.hardwareConcurrency ?? 4); setFpRam(c.fingerprint?.deviceMemory ?? 4); setFpViewportW(c.fingerprint?.viewportWidth ?? 1280); setFpViewportH(c.fingerprint?.viewportHeight ?? 800); setFpColorDepth(c.fingerprint?.colorDepth ?? 24); setFpMaxTouch(c.fingerprint?.maxTouchPoints ?? 0); setFpConn(c.fingerprint?.connectionType ?? '4g'); setFpCookie(c.fingerprint?.cookieEnabled ?? true); setFpWebglVendor(c.fingerprint?.webglVendor ?? ''); setFpWebglRenderer(c.fingerprint?.webglRenderer ?? ''); setFpFakeIp(!!c.fingerprint?.fakeIp); setModalProxyString(formatProxyString(c.proxy)); }}>
                   <label><strong>{c.name}</strong></label>
-                  <div style={{ marginTop: 4, width: 'fit-content', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 'bold', color: 'white', backgroundColor: c.status === '稼働中' ? '#28a745' : c.status === '停止' ? '#dc3545' : '#6c757d' }}>
+                  <div style={{
+                    marginTop: 4,
+                    width: 'fit-content',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    color: 'white',
+                    backgroundColor:
+                      (c.status?.toLowerCase() === 'running' || c.status === '稼働中') ? '#28a745' :
+                        (c.status?.toLowerCase() === 'stopped' || c.status?.toLowerCase() === 'terminated' || c.status === '停止') ? '#6c757d' :
+                          (c.status?.toLowerCase() === 'locked') ? '#dc3545' : '#6c757d'
+                  }}>
                     {c.status ?? '未使用'}
                   </div>
+
                   <small style={{ display: 'block', marginTop: 4 }}>ID: {c.id}</small>
                   {c.createdAt && (
                     <small style={{ display: 'block', marginTop: 4, color: '#666' }}>
@@ -1415,14 +1454,29 @@ export default function App() {
                   )}
                 </div>
                 {/* per-container URL input removed */}
-                <div style={{ display:'flex', gap:8, marginLeft: 'auto' }}>
-                  <button onClick={async ()=>{
-                    const bm = bookmarks.find((x:any)=> x.id === selectedBookmarkId);
-                    const urlToOpen = bm?.url;
-                    await window.containersAPI.open({ id: c.id, url: urlToOpen });
-                  }}>開く</button>
-                  <button title="前回の状態で開きます" onClick={()=> window.containersAPI.open({ id: c.id })}>復元</button>
-                    <button style={{ marginLeft: 8 }} onClick={()=>{
+                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                  {c.status === '稼働中' ? (
+                    <button
+                      style={{ backgroundColor: '#fff0f0', border: '1px solid #ffcccc', color: '#d00' }}
+                      onClick={async () => {
+                        await window.containersAPI.close({ id: c.id });
+                        await refresh();
+                      }}
+                    >
+                      🛑 停止
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={async () => {
+                        const bm = bookmarks.find((x: any) => x.id === selectedBookmarkId);
+                        const urlToOpen = bm?.url;
+                        await window.containersAPI.open({ id: c.id, url: urlToOpen });
+                        await refresh();
+                      }}>開く</button>
+                    </>
+                  )}
+
+                  <button style={{ marginLeft: 8 }} onClick={() => {
                     setOpenSettingsId(c.id);
                     setModalContainerName(c.name || '');
                     setModalLocale(c.fingerprint?.locale ?? 'ja-JP');
@@ -1443,7 +1497,7 @@ export default function App() {
                     setModalNote(c.note ?? '');
                     setModalStatus(c.status ?? '未使用');
                   }}>設定</button>
-                  <button style={{ marginLeft: 'auto', color: 'crimson' }} onClick={async ()=>{
+                  <button style={{ marginLeft: 'auto', color: 'crimson' }} onClick={async () => {
                     if (!confirm(`コンテナ「${c.name}」を削除しますか？この操作は元に戻せません。`)) return;
                     await window.containersAPI.delete({ id: c.id });
                     await refresh();
@@ -1451,275 +1505,195 @@ export default function App() {
                 </div>
               </div>
 
+
               {openSettingsId === c.id && (
-                <div style={{ marginTop: 8, padding: 12, border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <strong>設定（{c.name}）</strong>
-                    <div>
-                      <button style={{ marginRight: 8 }} onClick={saveCurrentSettings}>保存</button>
-                      <button onClick={()=> setOpenSettingsId(null)}>閉じる</button>
-                    </div>
-                  </div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr', gap:8, marginTop:8 }}>
-                    <label>コンテナ名</label>
-                    <input value={modalContainerName} onChange={e=>setModalContainerName(e.target.value)} />
-                    <label>ステータス</label>
-                    <select value={modalStatus} onChange={e=>setModalStatus(e.target.value)}>
-                      <option value="未使用">未使用</option>
-                      <option value="稼働中">稼働中</option>
-                      <option value="停止">停止</option>
-                    </select>
-                    <label>メモ</label>
-                    <textarea value={modalNote} onChange={e=>setModalNote(e.target.value)} style={{ width: '100%', minHeight: 80 }} />
-                    <label>ロケール</label>
-                    <input value={modalLocale} onChange={e=>setModalLocale(e.target.value)} />
-                    <label>Accept-Language</label>
-                    <input value={modalAcceptLang} onChange={e=>setModalAcceptLang(e.target.value)} />
-                    <label>タイムゾーン</label>
-                    <input value={modalTimezone} onChange={e=>setModalTimezone(e.target.value)} />
-                    <label>CPU コア数</label>
-                    <input type="number" min={1} max={32} value={fpCores} onChange={e=>setFpCores(parseInt(e.target.value||'0')||0)} />
-                    <label>RAM(GB)</label>
-                    <input type="number" min={1} max={64} value={fpRam} onChange={e=>setFpRam(parseInt(e.target.value||'0')||0)} />
-                    <label>表示サイズ（幅 x 高）</label>
-                    <div style={{ display:'flex', gap:6 }}>
-                      <input type="number" value={fpViewportW} onChange={e=>setFpViewportW(parseInt(e.target.value||'0')||0)} />
-                      <input type="number" value={fpViewportH} onChange={e=>setFpViewportH(parseInt(e.target.value||'0')||0)} />
-                    </div>
-                    <label>色の深さ</label>
-                    <input type="number" min={8} max={48} value={fpColorDepth} onChange={e=>setFpColorDepth(parseInt(e.target.value||'0')||0)} />
-                    <label>タッチポイント</label>
-                    <input type="number" min={0} max={10} value={fpMaxTouch} onChange={e=>setFpMaxTouch(parseInt(e.target.value||'0')||0)} />
-                    <label>回線種別</label>
-                    <select value={fpConn} onChange={e=>setFpConn(e.target.value)}>
-                      {connOptions.map(c=> <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <label>Cookie 有効</label>
-                    <input type="checkbox" checked={fpCookie} onChange={e=>setFpCookie(e.target.checked)} />
-                    <label>IP 偽装</label>
-                    <input type="checkbox" checked={fpFakeIp} onChange={e=>setFpFakeIp(e.target.checked)} disabled={!!modalProxyString} />
-                    <label>WebGL Vendor</label>
-                    <input value={fpWebglVendor} onChange={e=>setFpWebglVendor(e.target.value)} />
-                    <label>WebGL Renderer</label>
-                    <input value={fpWebglRenderer} onChange={e=>setFpWebglRenderer(e.target.value)} />
-                    <label>起動URL</label>
-                    <input value={containerUrls[c.id] ?? ''} onChange={e=> setContainerUrls(prev=> ({ ...prev, [c.id]: e.target.value }))} />
-                    <label>サイト設定（Origin）</label>
-                    <input value={modalSiteOrigin} onChange={e=>setModalSiteOrigin(e.target.value)} placeholder="https://example.com" />
-                    <label>自動入力</label>
-                    <input type="checkbox" checked={modalSiteAutoFill} onChange={e=>setModalSiteAutoFill(e.target.checked)} />
-                    <label>フォーム自動保存</label>
-                    <input type="checkbox" checked={modalSiteAutoSave} onChange={e=>setModalSiteAutoSave(e.target.checked)} />
-                    <label>プロキシ接続テスト</label>
-                    <div style={{ display:'flex', gap:8 }}>
-                      <button onClick={async ()=>{
-                        const proxy = normalizeProxyString(modalProxyString);
-                        if (!proxy) {
-                          alert('プロキシ情報が入力されていません');
-                          return;
-                        }
-                        console.log('[renderer] proxy.test ->', proxy);
-                        const res = await (window as any).proxyAPI.test({ proxy });
-                        console.log('[renderer] proxy.test result ->', res);
-                        alert(res.ok ? '接続成功' : `接続失敗: ${res.errorCode ?? res.error}`);
-                      }}>テスト</button>
-                    </div>
-                    <label>トークン</label>
+                <div style={{ marginTop: 8, padding: 16, border: '1px solid #ccc', borderRadius: 8, background: '#fafafa', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <h4 style={{ margin: 0 }}>コンテナ設定 ({c.name})</h4>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <input id="tokenInput" placeholder="トークンを入力" style={{ flex:1 }} />
-                      <button onClick={async ()=>{
-                        const t = (document.getElementById('tokenInput') as HTMLInputElement).value.trim();
-                        if(!t) return alert('トークンを入力してください');
-                        const res = await (window as any).appAPI.saveToken(t);
-                        if(res && res.ok) alert('トークンを保存しました'); else alert('保存に失敗しました');
-                      }}>保存</button>
-                      <button onClick={async ()=>{
-                        const res = await (window as any).appAPI.getToken();
-                        alert(res && res.token ? '保存済みトークンあり' : '保存トークンなし');
-                      }}>確認</button>
+                      <button
+                        style={{ padding: '4px 16px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                        onClick={async () => {
+                          const proxy = modalProxyString ? normalizeProxyString(modalProxyString) : null;
+                          const payload = {
+                            id: c.id,
+                            name: modalContainerName,
+                            note: modalNote,
+                            proxy,
+                            kameleoTags: modalTags
+                          };
+                          await window.containersAPI.update(payload);
+                          await refresh();
+                          setOpenSettingsId(null);
+                        }}
+                      >
+                        保存して閉じる
+                      </button>
+                      <button
+                        style={{ padding: '4px 12px', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                        onClick={() => setOpenSettingsId(null)}
+                      >
+                        キャンセル
+                      </button>
                     </div>
-                    <label>プロキシ（IP:PORT:USERNAME:PASSWORD）</label>
-                    <input 
-                      value={modalProxyString} 
-                      onChange={e=>setModalProxyString(e.target.value)} 
-                      placeholder="54.65.19.52:23465:3idyqw0i:pznZsMZ2QhHtaq0d" 
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                      形式: IP:PORT:USERNAME:PASSWORD
-                    </div>
-                    <label>キャッシュ削除</label>
-                    <div style={{ display:'flex', gap:8 }}>
-                      <button onClick={async ()=>{
-                        if (!confirm('ページのキャッシュを削除しますか？\n（セッションやCookieなどのデータは保持されます）')) return;
-                        try {
-                          const result = await window.containersAPI.clearCache({ id: c.id });
-                          if (result && result.ok) {
-                            alert('キャッシュを削除しました');
-                          } else {
-                            alert('キャッシュの削除に失敗しました: ' + (result?.error || '不明なエラー'));
-                          }
-                        } catch (e: any) {
-                          alert('エラー: ' + (e?.message || String(e)));
-                        }
-                      }}>キャッシュ削除</button>
-                    </div>
-                    <label>すべてのデータを削除</label>
-                    <div style={{ display:'flex', gap:8 }}>
-                      <button onClick={async ()=>{
-                        if (!confirm('Cookie、セッション、LocalStorage、IndexedDBなどのすべてのデータを削除しますか？\nこの操作は元に戻せません。')) return;
-                        try {
-                          const result = await window.containersAPI.clearAllData({ id: c.id });
-                          if (result && result.ok) {
-                            alert('すべてのデータを削除しました');
-                          } else {
-                            alert('データの削除に失敗しました: ' + (result?.error || '不明なエラー'));
-                          }
-                        } catch (e: any) {
-                          alert('エラー: ' + (e?.message || String(e)));
-                        }
-                      }} style={{ backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', padding: '6px 12px' }}>すべてのデータを削除</button>
-                    </div>
-                    
                   </div>
-                  <div style={{ marginTop:10, display:'flex', gap:8 }}>
-                    <button onClick={async ()=>{
-                      // save fingerprint and close
-                      const proxy = modalProxyString ? normalizeProxyString(modalProxyString) : null;
-                      const fingerprint: any = {
-                        locale: modalLocale,
-                        acceptLanguage: modalAcceptLang,
-                        timezone: modalTimezone,
-                        hardwareConcurrency: fpCores,
-                        deviceMemory: fpRam,
-                        viewportWidth: fpViewportW,
-                        viewportHeight: fpViewportH,
-                        colorDepth: fpColorDepth,
-                        maxTouchPoints: fpMaxTouch,
-                        connectionType: fpConn,
-                        cookieEnabled: fpCookie,
-                        webglVendor: fpWebglVendor || undefined,
-                        webglRenderer: fpWebglRenderer || undefined,
-                      };
-                      if (!proxy) fingerprint.fakeIp = fpFakeIp;
-                      const payload2 = proxy ? { id: c.id, name: modalContainerName, fingerprint, proxy } : { id: c.id, name: modalContainerName, fingerprint };
-                      await window.containersAPI.update(payload2);
-                      // save note separately to ensure DB column is updated via dedicated IPC
-                      await (window as any).containersAPI.setNote({ id: c.id, note: modalNote === '' ? null : modalNote });
-                      // reflect url state (in-memory)
-                      await refresh();
-                      setOpenSettingsId(null);
-                    }}>保存</button>
-                    <button onClick={async ()=>{
-                      // reset fingerprint and update UI
-                      const seed: any = {
-                        acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7', locale: 'ja-JP', timezone:'Asia/Tokyo', platform:'Win32',
-                        hardwareConcurrency: [4,6,8,12][Math.floor(Math.random()*4)], deviceMemory: [4,6,8,12][Math.floor(Math.random()*4)],
-                        canvasNoise: true,
-                      };
-                      await window.containersAPI.update({ id: c.id, fingerprint: seed });
-                      // reflect into modal inputs
-                      setModalLocale(seed.locale);
-                      setModalAcceptLang(seed.acceptLanguage);
-                      setModalTimezone(seed.timezone);
-                      setFpCores(seed.hardwareConcurrency);
-                      setFpRam(seed.deviceMemory);
-                      setFpViewportW(seed.viewportWidth ?? fpViewportW);
-                      setFpViewportH(seed.viewportHeight ?? fpViewportH);
-                      setFpColorDepth(seed.colorDepth ?? fpColorDepth);
-                      setFpMaxTouch(seed.maxTouchPoints ?? fpMaxTouch);
-                      setFpConn(seed.connectionType ?? fpConn);
-                      setFpCookie(seed.cookieEnabled ?? fpCookie);
-                      setFpWebglVendor(seed.webglVendor ?? fpWebglVendor);
-                      setFpWebglRenderer(seed.webglRenderer ?? fpWebglRenderer);
-                      await refresh();
-                    }}>リセット</button>
-                    <button onClick={()=> setOpenSettingsId(null)}>閉じる</button>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '12px 16px', alignItems: 'start' }}>
+                    <label style={{ fontWeight: 'bold' }}>名前</label>
+                    <input
+                      value={modalContainerName}
+                      onChange={e => setModalContainerName(e.target.value)}
+                      style={{ padding: '6px', border: '1px solid #ddd', borderRadius: 4 }}
+                    />
+
+                    <label style={{ fontWeight: 'bold' }}>タグ</label>
+                    <input
+                      value={modalTags ? modalTags.join(', ') : ''}
+                      onChange={e => setModalTags(e.target.value.split(',').map(t => t.trim()).filter(Boolean))}
+                      placeholder="tag1, tag2 (カンマ区切り)"
+                      style={{ padding: '6px', border: '1px solid #ddd', borderRadius: 4 }}
+                    />
+
+                    <label style={{ fontWeight: 'bold' }}>メモ</label>
+                    <textarea
+                      value={modalNote}
+                      onChange={e => setModalNote(e.target.value)}
+                      style={{ width: '100%', minHeight: 60, padding: '6px', border: '1px solid #ddd', borderRadius: 4, boxSizing: 'border-box' }}
+                    />
+
+                    <label style={{ fontWeight: 'bold' }}>プロキシ</label>
+                    <div>
+                      <input
+                        value={modalProxyString}
+                        onChange={e => setModalProxyString(e.target.value)}
+                        placeholder="IP:PORT:USER:PASS"
+                        style={{ width: '100%', padding: '6px', border: '1px solid #ddd', borderRadius: 4, boxSizing: 'border-box' }}
+                      />
+                      <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>形式: IP:PORT:USER:PASS (省略可)</div>
+                      <button
+                        style={{ marginTop: 8, padding: '4px 8px', fontSize: 12 }}
+                        onClick={async () => {
+                          const proxy = normalizeProxyString(modalProxyString);
+                          if (!proxy) return alert('プロキシ情報を入力してください');
+                          const res = await (window as any).proxyAPI.test({ proxy });
+                          alert(res.ok ? '✅ 接続成功' : `❌ 接続失敗: ${res.error || res.errorCode}`);
+                        }}
+                      >
+                        接続テストを実行
+                      </button>
+                    </div>
+
+                    <label style={{ fontWeight: 'bold' }}>データ管理</label>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <button
+                        style={{ padding: '4px 10px', fontSize: 12 }}
+                        onClick={async () => {
+                          if (!confirm('キャッシュ（閲覧履歴を除く一時データ）を削除しますか？')) return;
+                          const res = await window.containersAPI.clearCache({ id: c.id });
+                          alert(res.ok ? 'キャッシュを削除しました' : '削除に失敗しました');
+                        }}
+                      >
+                        キャッシュ削除
+                      </button>
+                      <button
+                        style={{ padding: '4px 10px', fontSize: 12, backgroundColor: '#fff0f0', color: '#c00', border: '1px solid #ffcccc' }}
+                        onClick={async () => {
+                          if (!confirm('Cookie・ログイン情報を含むすべてのデータを初期化しますか？\nこの操作は元に戻せません。')) return;
+                          const res = await window.containersAPI.clearAllData({ id: c.id });
+                          if (res.ok) alert('データを初期化しました');
+                          else alert('失敗: ' + (res.error || '不明なエラー'));
+                        }}
+                      >
+                        全データ初期化
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
             </li>
           ))}
+
+
         </ul>
       </section>
 
       <section style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <h3 style={{ margin:0 }}>ブックマーク設定</h3>
-          <button onClick={()=> setBookmarkSettingsOpen(prev=>!prev)}>{bookmarkSettingsOpen ? '閉じる' : '開く'}</button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0 }}>ブックマーク設定</h3>
+          <button onClick={() => setBookmarkSettingsOpen(prev => !prev)}>{bookmarkSettingsOpen ? '閉じる' : '開く'}</button>
         </div>
         {bookmarkSettingsOpen && (
-        <div>
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-          <input id="bmTitle" placeholder="タイトル" style={{ flex:1 }} />
-          <input id="bmUrl" placeholder="https://example.com" style={{ flex:2 }} />
-          <button onClick={async ()=>{
-            const title = (document.getElementById('bmTitle') as HTMLInputElement).value.trim();
-            const url = (document.getElementById('bmUrl') as HTMLInputElement).value.trim();
-            if (!title || !url) return alert('タイトル/URLを指定してください');
-            const id = crypto.randomUUID();
-            await (window as any).bookmarksAPI.add({ id, containerId: '', title, url });
-            alert('Bookmark added');
-            await refresh();
-          }}>追加</button>
-        </div>
-        <ul style={{ marginTop:8 }}>
-          {bookmarks.map((b:any, idx:number)=> (
-            <li key={b.id} style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <div style={{ flex:1, display:'flex', gap:8, alignItems:'center' }}>
-                <span style={{ cursor:'grab' }}>::</span>
-                <div>
-                  {editingBookmarkId === b.id ? (
-                    <div style={{ display:'flex', gap:8 }}>
-                      <input value={editBmTitle} onChange={e=>setEditBmTitle(e.target.value)} />
-                      <input value={editBmUrl} onChange={e=>setEditBmUrl(e.target.value)} />
-                      <button onClick={async ()=>{
-                        if (!editBmTitle || !editBmUrl) return alert('タイトル/URLを指定してください');
-                        await (window as any).bookmarksAPI.delete({ id: b.id });
-                        await (window as any).bookmarksAPI.add({ id: b.id, containerId: '', title: editBmTitle, url: editBmUrl });
-                        setEditingBookmarkId(null);
-                        await refresh();
-                      }}>保存</button>
-                      <button onClick={()=> setEditingBookmarkId(null)}>キャンセル</button>
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input id="bmTitle" placeholder="タイトル" style={{ flex: 1 }} />
+              <input id="bmUrl" placeholder="https://example.com" style={{ flex: 2 }} />
+              <button onClick={async () => {
+                const title = (document.getElementById('bmTitle') as HTMLInputElement).value.trim();
+                const url = (document.getElementById('bmUrl') as HTMLInputElement).value.trim();
+                if (!title || !url) return alert('タイトル/URLを指定してください');
+                const id = crypto.randomUUID();
+                await (window as any).bookmarksAPI.add({ id, containerId: '', title, url });
+                alert('Bookmark added');
+                await refresh();
+              }}>追加</button>
+            </div>
+            <ul style={{ marginTop: 8 }}>
+              {bookmarks.map((b: any, idx: number) => (
+                <li key={b.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ cursor: 'grab' }}>::</span>
+                    <div>
+                      {editingBookmarkId === b.id ? (
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input value={editBmTitle} onChange={e => setEditBmTitle(e.target.value)} />
+                          <input value={editBmUrl} onChange={e => setEditBmUrl(e.target.value)} />
+                          <button onClick={async () => {
+                            if (!editBmTitle || !editBmUrl) return alert('タイトル/URLを指定してください');
+                            await (window as any).bookmarksAPI.delete({ id: b.id });
+                            await (window as any).bookmarksAPI.add({ id: b.id, containerId: '', title: editBmTitle, url: editBmUrl });
+                            setEditingBookmarkId(null);
+                            await refresh();
+                          }}>保存</button>
+                          <button onClick={() => setEditingBookmarkId(null)}>キャンセル</button>
+                        </div>
+                      ) : (
+                        <div>{b.title} <small style={{ color: '#666' }}>({b.url})</small></div>
+                      )}
                     </div>
-                  ) : (
-                    <div>{b.title} <small style={{ color:'#666' }}>({b.url})</small></div>
-                  )}
-                </div>
-              </div>
-              <div style={{ display:'flex', gap:8 }}>
-                {/* ブックマーク設定内の開くボタンは不要になったため削除 */}
-                <button onClick={async ()=>{ await (window as any).bookmarksAPI.delete({ id: b.id }); await refresh(); }}>削除</button>
-                <button onClick={()=>{
-                  setEditingBookmarkId(b.id);
-                  setEditBmTitle(b.title);
-                  setEditBmUrl(b.url);
-                }}>編集</button>
-                <button onClick={async ()=>{
-                  // move up
-                  if (idx === 0) return;
-                  const ids = bookmarks.map((x:any)=> x.id);
-                  const tmp = ids[idx-1]; ids[idx-1] = ids[idx]; ids[idx] = tmp;
-                  await (window as any).bookmarksAPI.reorder({ ids });
-                  await refresh();
-                }}>↑</button>
-                <button onClick={async ()=>{
-                  // move down
-                  if (idx === bookmarks.length-1) return;
-                  const ids = bookmarks.map((x:any)=> x.id);
-                  const tmp = ids[idx+1]; ids[idx+1] = ids[idx]; ids[idx] = tmp;
-                  await (window as any).bookmarksAPI.reorder({ ids });
-                  await refresh();
-                }}>↓</button>
-              </div>
-            </li>
-          ))}
-        </ul>
-        </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {/* ブックマーク設定内の開くボタンは不要になったため削除 */}
+                    <button onClick={async () => { await (window as any).bookmarksAPI.delete({ id: b.id }); await refresh(); }}>削除</button>
+                    <button onClick={() => {
+                      setEditingBookmarkId(b.id);
+                      setEditBmTitle(b.title);
+                      setEditBmUrl(b.url);
+                    }}>編集</button>
+                    <button onClick={async () => {
+                      // move up
+                      if (idx === 0) return;
+                      const ids = bookmarks.map((x: any) => x.id);
+                      const tmp = ids[idx - 1]; ids[idx - 1] = ids[idx]; ids[idx] = tmp;
+                      await (window as any).bookmarksAPI.reorder({ ids });
+                      await refresh();
+                    }}>↑</button>
+                    <button onClick={async () => {
+                      // move down
+                      if (idx === bookmarks.length - 1) return;
+                      const ids = bookmarks.map((x: any) => x.id);
+                      const tmp = ids[idx + 1]; ids[idx + 1] = ids[idx]; ids[idx] = tmp;
+                      await (window as any).bookmarksAPI.reorder({ ids });
+                      await refresh();
+                    }}>↓</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </section>
 
       {/* グローバルなサイト設定は廃止しました。サイト設定は各コンテナの「設定」内で行ってください。 */}
-    </div>
+    </div >
   );
 }
