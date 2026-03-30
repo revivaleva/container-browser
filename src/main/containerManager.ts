@@ -1651,15 +1651,24 @@ export function isContainerOpen(containerId: string) {
   return openedById.has(containerId);
 }
 
-export function closeContainer(containerId: string) {
+export async function closeContainer(containerId: string) {
   const entry = openedById.get(containerId);
   if (!entry || !entry.win) return false;
+
   try {
-    entry.win.close();
+    console.log(`[main] [closeContainer] requesting close for ${containerId}`);
+    if (!entry.win.isDestroyed()) {
+      entry.win.close();
+    }
+    await waitForContainerClosed(containerId);
     return true;
   } catch (e) {
-    console.error('[main] closeContainer error', e);
-    return false;
+    console.warn(`[main] [closeContainer] close() failed, trying destroy() for ${containerId}`, e);
+    try {
+      if (entry.win && !entry.win.isDestroyed()) entry.win.destroy();
+    } catch { }
+    await waitForContainerClosed(containerId);
+    return true;
   }
 }
 
@@ -1908,23 +1917,52 @@ export async function openContainerWindow(container: Container, startUrl?: strin
   DB.recordSession(sessionId, container.id, Date.now());
 
   win.on('closed', async () => {
-    DB.closeSession(sessionId, Date.now());
-    openedById.delete(container.id);
+    console.log(`[main] [closed] Cleanup starting for ${container.id} (Session: ${sessionId})`);
     try {
-      // Trigger automated cache cleanup on close
-      await clearContainerCacheOnClose(container.id);
-      await PlaywrightService.disconnect(kameleoProfileId);
-
-      // Auto-stop policy: managed は常にストップ、attached はこのプロセスで開始した場合のみストップ
+      // 1. Kameleo Profile Stop (Highest Priority - stop before disconnect to ensure browser closure)
       const shouldStop = container.profileMode === 'managed' || startedByThisProcess;
       if (shouldStop) {
-        console.log(`[main] [kameleo] Auto-stopping profile ${kameleoProfileId} (Mode: ${container.profileMode}, Started: ${startedByThisProcess})`);
-        await KameleoApi.stopProfile(kameleoProfileId);
+        try {
+          console.log(`[main] [closed] [1/3] Kameleo stop starting for ${kameleoProfileId}...`);
+          await Promise.race([
+            KameleoApi.stopProfile(kameleoProfileId),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Kameleo stop timeout')), 10000))
+          ]);
+          console.log(`[main] [closed] [1/3] Kameleo stop finished for ${kameleoProfileId}`);
+        } catch (e) {
+          console.error(`[main] [closed] [1/3] Kameleo stop failed for ${kameleoProfileId}`, e);
+        }
       } else {
-        console.log(`[main] [kameleo] Keeping profile ${kameleoProfileId} running (Mode: ${container.profileMode}, Started: ${startedByThisProcess})`);
+        console.log(`[main] [closed] [1/3] Kameleo stop skipped for ${kameleoProfileId} (Mode: ${container.profileMode}, Started: ${startedByThisProcess})`);
       }
-    } catch (e) {
-      console.error(`[main] [kameleo] Error during window close cleanup for profile ${kameleoProfileId}`, e);
+
+      // 2. Playwright Disconnect (Secondary cleanup)
+      try {
+        console.log(`[main] [closed] [2/3] Playwright disconnect starting for ${kameleoProfileId}...`);
+        await PlaywrightService.disconnect(kameleoProfileId); // Already has internal 5s timeout
+        console.log(`[main] [closed] [2/3] Playwright disconnect finished for ${kameleoProfileId}`);
+      } catch (e) {
+        console.warn(`[main] [closed] [2/3] Playwright disconnect failed for ${kameleoProfileId}`, e);
+      }
+
+      // 3. Cache cleanup (Non-blocking, low priority - moved to last as it can hang)
+      try {
+        console.log(`[main] [closed] [3/3] Cache cleanup starting for ${container.id}...`);
+        await Promise.race([
+          clearContainerCacheOnClose(container.id),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Cache cleanup timeout')), 10000))
+        ]);
+        console.log(`[main] [closed] [3/3] Cache cleanup finished for ${container.id}`);
+      } catch (e) {
+        console.warn(`[main] [closed] [3/3] Cache cleanup failed for ${container.id}`, e);
+      }
+    } catch (outerE) {
+      console.error(`[main] [closed] Unexpected error in cleanup for ${container.id}`, outerE);
+    } finally {
+      // Final state cleanup: Ensure this ALWAYS happens at the end to notify observers
+      try { DB.closeSession(sessionId, Date.now()); } catch { }
+      openedById.delete(container.id);
+      console.log(`[main] [closed] Cleanup finished for ${container.id}. Management state removed.`);
     }
   });
 
@@ -2028,7 +2066,7 @@ export function closeAllContainers() {
     for (const entry of openedById.values()) {
       try { entry.win.close(); } catch { }
     }
-    openedById.clear();
+    // Management state will be cleared individually by 'closed' handlers
   } catch { }
 }
 

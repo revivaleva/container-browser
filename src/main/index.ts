@@ -27,7 +27,7 @@ import { autoUpdater } from 'electron-updater';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { initDB, DB } from './db';
-import { openContainerWindow, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows, cleanupOrphans, deleteContainerStorage, registerContainerIpcHandlers, syncKameleoProfiles } from './containerManager';
+import { openContainerWindow, closeContainer, isContainerOpen, closeAllContainers, closeAllNonMainWindows, forceCloseAllNonMainWindows, cleanupOrphans, deleteContainerStorage, registerContainerIpcHandlers, syncKameleoProfiles } from './containerManager';
 
 import { registerGeneralIpcHandlers } from './ipc';
 import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings, getGraphicsSettings, setGraphicsSettings } from './settings';
@@ -1287,17 +1287,34 @@ export function registerMainIpcHandlers() {
     const c = DB.getContainer(id);
     if (!c || !c.kameleoProfileId) return { ok: false, error: 'profile not found' };
     try {
-      const { KameleoApi } = await import('./kameleoApi');
-      await KameleoApi.stopProfile(c.kameleoProfileId);
-      // Wait a bit for status update
-      setTimeout(async () => {
+      // If the container window is open, use closeContainer to close shell + stop Kameleo
+      if (isContainerOpen(id)) {
+        console.log(`[main] [ipc] Closing open container ${id}`);
+        await closeContainer(id);
+      } else {
+        // Just stop the profile if no shell window is open
+        console.log(`[main] [ipc] Stopping Kameleo profile ${c.kameleoProfileId} (no shell open)`);
+        const { KameleoApi } = await import('./kameleoApi');
+        await KameleoApi.stopProfile(c.kameleoProfileId);
+      }
+
+      // Update status in local DB
+      try {
+        const { KameleoApi } = await import('./kameleoApi');
         const p = await KameleoApi.getProfile(c.kameleoProfileId!);
         if (p) {
-          DB.upsertContainer({ ...c, status: (p.status === 'started' ? '稼働中' : '停止') as any });
+          DB.upsertContainer({
+            ...c,
+            status: (p.status === 'started' || p.status === 'running' ? '稼働中' : '停止') as any
+          });
         }
-      }, 1000);
+      } catch (e) {
+        // ignore status update error
+      }
+
       return { ok: true };
     } catch (err: any) {
+      console.error(`[main] [ipc] Error closing container ${id}:`, err);
       return { ok: false, error: err?.message || String(err) };
     }
   });
