@@ -57,6 +57,17 @@ async function request<T>(method: string, path: string, body?: any): Promise<T> 
       console.error(`[main] [kameleo] network error: ${err.message} for ${method} ${path}`);
       reject(err);
     });
+
+    // Add timeout to prevent indefinite hangs
+    const timeout = setTimeout(() => {
+      try {
+        req.abort();
+        reject(new Error(`Kameleo API timeout: ${method} ${path} exceeded 10000ms`));
+      } catch { }
+    }, 10000);
+
+    req.on('close', () => clearTimeout(timeout));
+
     if (body) req.write(JSON.stringify(body));
     req.end();
   });
@@ -93,7 +104,7 @@ export const KameleoApi = {
     const browser = options.browser || 'chrome';
 
     // 1. Fetch fingerprints
-    const query = `limit=1&deviceType=${deviceType}&os=${os}&browser=${browser}`;
+    const query = `limit=1&deviceType=${deviceType}&os=${os}&browserProduct=${browser}`;
     const fps = await request<any[]>('GET', `/fingerprints?${query}`);
     const fingerprint = (Array.isArray(fps) ? fps[0] : null) || (fps as any).value?.[0];
 

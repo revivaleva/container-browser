@@ -29,7 +29,7 @@ const locks = new Set<string>();
 function jsonResponse(res: http.ServerResponse, status: number, body: any) {
   const s = JSON.stringify(body);
   try {
-    // 軽量ログ�E�スチE�Eタス・bodyの要点・斁E��長を�E力（ログ失敗�E無視！E
+    // 霆ｽ驥上Ο繧ｰ・壹せ繝・・繧ｿ繧ｹ繝ｻbody縺ｮ隕∫せ繝ｻ譁・ｭ鈴聞繧貞・蜉幢ｼ医Ο繧ｰ螟ｱ謨励・辟｡隕厄ｼ・
     let bodySummary: any = undefined;
     if (body && typeof body === 'object') {
       bodySummary = { ok: (body as any).ok, error: (body as any).error };
@@ -267,7 +267,7 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
 
         // Wait for screen transition (optional but helpful for "confirm human")
         if (type === 'funcaptcha') {
-          const waitMsg = getLocale() === 'ja' ? '[exportServer] Arkoseの遷移めE秒間征E��してぁE��ぁE..' : '[exportServer] Waiting 3s for Arkose transition...';
+          const waitMsg = getLocale() === 'ja' ? '[exportServer] Arkose縺ｮ驕ｷ遘ｻ繧・遘帝俣蠕・ｩ溘＠縺ｦ縺・∪縺・..' : '[exportServer] Waiting 3s for Arkose transition...';
           console.log(waitMsg);
           await new Promise(r => setTimeout(r, 3000));
         }
@@ -579,7 +579,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               }
             } catch (e) { rawCookies = []; }
 
-                        const parsed = rawCookies.length ? setCookieParser.parse(rawCookies) : [];
+            const parsed = rawCookies.length ? setCookieParser.parse(rawCookies) : [];
             if (parsed.length > 0) {
               const page = getPlaywrightPage(id);
               if (page) {
@@ -607,718 +607,710 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
         } finally { locks.delete(id); }
       }
 
-// 1. Native Cookie Injection (Electron session level)
-if (req.method === 'POST' && u.pathname === '/internal/cookies/set_native') {
-  try {
-    const body = await parseBody(req);
-    const id = body.contextId;
-    const cookies = body.cookies || [];
-    if (!id || !Array.isArray(cookies)) return jsonResponse(res, 400, { ok: false, error: 'missing contextId or cookies array' });
-
-    const c = DB.getContainer(id);
-    if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-
-    const part = c.partition || `persist:container-${id}`;
-    const ses = (await import('electron')).session.fromPartition(part);
-
-    console.log(`[exportServer] [native-cookies] Starting injection for contextId: ${id}, partition: ${part}`);
-
-    for (const pc of (cookies as any[])) {
-      const domain = pc.domain || '.x.com';
-      // Electron cookies.set needs a URL. If not provided, derive from domain
-      const url = pc.url || (domain.startsWith('.') ? `https://www${domain}` : `https://${domain}`);
-
-      try {
-        await ses.cookies.set({
-          url,
-          name: pc.name,
-          value: pc.value,
-          domain: pc.domain,
-          path: pc.path || '/',
-          secure: !!pc.secure,
-          httpOnly: !!pc.httpOnly,
-          sameSite: (pc.sameSite === 'Strict' ? 'strict' : pc.sameSite === 'None' ? 'no_restriction' : 'lax') as any,
-          expirationDate: pc.expirationDate || (pc.expires ? new Date(pc.expires).getTime() / 1000 : undefined)
-        });
-      } catch (ce) {
-        console.error(`[exportServer] [native-cookies] Failed to set cookie ${pc.name}:`, ce);
-      }
-    }
-    console.log(`[exportServer] [native-cookies] Successfully processed ${cookies.length} cookies into partition ${part}`);
-          return jsonResponse(res, 200, { ok: true, message: `Processed ${cookies.length} cookies natively` });
-  } catch (err: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(err?.message || err) });
-  }
-}
-
-// remote exec endpoint: DOM operations / click / type / navigate / eval
-if (req.method === 'POST' && u.pathname === '/internal/exec') {
-  try {
-    const raw = await parseBodyRaw(req);
-    const body = raw.json || {};
-    // optional HMAC check
-    const secret = process.env.REMOTE_EXEC_HMAC;
-    if (secret) {
-      const sig = req.headers['x-remote-hmac'] as string | undefined;
-      const mac = crypto.createHmac('sha256', secret).update(raw.raw).digest('hex');
-      if (!sig || sig !== mac) return jsonResponse(res, 401, { ok: false, error: 'hmac mismatch' });
-    }
-    const contextId = String(body.contextId || '');
-    const command = String(body.command || '');
-    const options = body.options || {};
-    const timeoutMs = Number(options.timeoutMs || 30000);
-    if (!contextId || !command) return jsonResponse(res, 400, { ok: false, error: 'missing contextId or command' });
-
-    console.log('[exportServer] exec request', { contextId, command, url: body.url, selector: body.selector, evalId: body.exprId, options });
-    if (locks.has(contextId)) return jsonResponse(res, 409, { ok: false, error: 'context busy' });
-    locks.add(contextId);
-    const tstart = Date.now();
-    try {
-      // resolve container
-      const c = DB.getContainer(contextId);
-      if (!c) throw new Error('container not found');
-      // ensure container open
-      let navigationAlreadyDone = false;
-      if (!isContainerOpen(contextId)) {
-        if (command === 'navigate') {
-          const url = String(body.url || '');
-          if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
-          await openContainerWindow(c, url, { singleTab: true });
-          navigationAlreadyDone = true;
-        } else {
-          await openContainerWindow(c, undefined, { singleTab: true });
-        }
-      }
-      // get playwright page
-      const page = getPlaywrightPage(contextId);
-      if (!page) return jsonResponse(res, 404, { ok: false, error: 'no active playwright page' });
-
-      // helper: wait for selector (Playwright style)
-      const waitForSelector = async (selector: string, ms: number) => {
+      // 1. Native Cookie Injection (Electron session level)
+      if (req.method === 'POST' && u.pathname === '/internal/cookies/set_native') {
         try {
-          if (selector.startsWith('xpath:')) {
-            await page.waitForSelector(`xpath=${selector.slice(6)}`, { timeout: ms });
-          } else {
-            await page.waitForSelector(selector, { timeout: ms });
-          }
-          return true;
-        } catch {
-          return false;
-        }
-      };
+          const body = await parseBody(req);
+          const id = body.contextId;
+          const cookies = body.cookies || [];
+          if (!id || !Array.isArray(cookies)) return jsonResponse(res, 400, { ok: false, error: 'missing contextId or cookies array' });
 
-      let navigationOccurred = false;
-      let evalResult: any = undefined;
-      if (command === 'save_media') {
-        const selector = body.selector;
-        const mediaType = body.mediaType || 'image'; // 'image' or 'pdf'
-        const outputDir = path.join(process.cwd(), 'media');
-        if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
-        const fileName = `media-${contextId}-${Date.now()}.${mediaType === 'pdf' ? 'pdf' : 'png'}`;
-        const fp = path.join(outputDir, fileName);
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
 
-        try {
-          if (mediaType === 'pdf') {
-            await page.pdf({ path: fp, format: 'A4' });
-          } else {
-            if (selector) {
-              const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
-              const element = await page.$(pSelector);
-              if (!element) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
-              await element.screenshot({ path: fp });
-            } else {
-              await page.screenshot({ path: fp, fullPage: true });
+          const part = c.partition || `persist:container-${id}`;
+          const ses = (await import('electron')).session.fromPartition(part);
+
+          console.log(`[exportServer] [native-cookies] Starting injection for contextId: ${id}, partition: ${part}`);
+
+          for (const pc of (cookies as any[])) {
+            const domain = pc.domain || '.x.com';
+            // Electron cookies.set needs a URL. If not provided, derive from domain
+            const url = pc.url || (domain.startsWith('.') ? `https://www${domain}` : `https://${domain}`);
+
+            try {
+              await ses.cookies.set({
+                url,
+                name: pc.name,
+                value: pc.value,
+                domain: pc.domain,
+                path: pc.path || '/',
+                secure: !!pc.secure,
+                httpOnly: !!pc.httpOnly,
+                sameSite: (pc.sameSite === 'Strict' ? 'strict' : pc.sameSite === 'None' ? 'no_restriction' : 'lax') as any,
+                expirationDate: pc.expirationDate || (pc.expires ? new Date(pc.expires).getTime() / 1000 : undefined)
+              });
+            } catch (ce) {
+              console.error(`[exportServer] [native-cookies] Failed to set cookie ${pc.name}:`, ce);
             }
           }
-          return jsonResponse(res, 200, { ok: true, path: fp, fileName });
+          console.log(`[exportServer] [native-cookies] Successfully processed ${cookies.length} cookies into partition ${part}`);
+          return jsonResponse(res, 200, { ok: true, message: `Processed ${cookies.length} cookies natively` });
+        } catch (err: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      // remote exec endpoint: DOM operations / click / type / navigate / eval
+      if (req.method === 'POST' && u.pathname === '/internal/exec') {
+        try {
+          const raw = await parseBodyRaw(req);
+          const body = raw.json || {};
+          // optional HMAC check
+          const secret = process.env.REMOTE_EXEC_HMAC;
+          if (secret) {
+            const sig = req.headers['x-remote-hmac'] as string | undefined;
+            const mac = crypto.createHmac('sha256', secret).update(raw.raw).digest('hex');
+            if (!sig || sig !== mac) return jsonResponse(res, 401, { ok: false, error: 'hmac mismatch' });
+          }
+          const contextId = String(body.contextId || '');
+          const command = String(body.command || '');
+          const options = body.options || {};
+          const timeoutMs = Number(options.timeoutMs || 30000);
+          if (!contextId || !command) return jsonResponse(res, 400, { ok: false, error: 'missing contextId or command' });
+
+          console.log('[exportServer] exec request', { contextId, command, url: body.url, selector: body.selector, evalId: body.exprId, options });
+          if (locks.has(contextId)) return jsonResponse(res, 409, { ok: false, error: 'context busy' });
+          locks.add(contextId);
+          const tstart = Date.now();
+          try {
+            // resolve container
+            const c = DB.getContainer(contextId);
+            if (!c) throw new Error('container not found');
+            // ensure container open
+            let navigationAlreadyDone = false;
+            if (!isContainerOpen(contextId)) {
+              if (command === 'navigate') {
+                const url = String(body.url || '');
+                if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
+                await openContainerWindow(c, url, { singleTab: true });
+                navigationAlreadyDone = true;
+              } else {
+                await openContainerWindow(c, undefined, { singleTab: true });
+              }
+            }
+            // get playwright page
+            const page = getPlaywrightPage(contextId);
+            if (!page) return jsonResponse(res, 404, { ok: false, error: 'no active playwright page' });
+
+            // helper: wait for selector (Playwright style)
+            const waitForSelector = async (selector: string, ms: number) => {
+              try {
+                if (selector.startsWith('xpath:')) {
+                  await page.waitForSelector(`xpath=${selector.slice(6)}`, { timeout: ms });
+                } else {
+                  await page.waitForSelector(selector, { timeout: ms });
+                }
+                return true;
+              } catch {
+                return false;
+              }
+            };
+
+            let navigationOccurred = false;
+            let evalResult: any = undefined;
+            if (command === 'save_media') {
+              const selector = body.selector;
+              const mediaType = body.mediaType || 'image'; // 'image' or 'pdf'
+              const outputDir = path.join(process.cwd(), 'media');
+              if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
+              const fileName = `media-${contextId}-${Date.now()}.${mediaType === 'pdf' ? 'pdf' : 'png'}`;
+              const fp = path.join(outputDir, fileName);
+
+              try {
+                if (mediaType === 'pdf') {
+                  await page.pdf({ path: fp, format: 'A4' });
+                } else {
+                  if (selector) {
+                    const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                    const element = await page.$(pSelector);
+                    if (!element) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                    await element.screenshot({ path: fp });
+                  } else {
+                    await page.screenshot({ path: fp, fullPage: true });
+                  }
+                }
+                return jsonResponse(res, 200, { ok: true, path: fp, fileName });
+              } catch (e: any) {
+                return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+              }
+            } else if (command === 'navigate') {
+              const url = String(body.url || '');
+              if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
+              if (navigationAlreadyDone) {
+                navigationOccurred = true;
+              } else {
+                try {
+                  const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
+                  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
+                  if (options.waitForSelector) {
+                    const ok = await waitForSelector(options.waitForSelector, timeoutMs);
+                    if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
+                  }
+                  navigationOccurred = true;
+                } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+              }
+            } else if (command === 'click' || command === 'clickAndType') {
+              const selector = body.selector;
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              if (options.waitForSelector) {
+                const ok = await waitForSelector(options.waitForSelector, timeoutMs);
+                if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
+              }
+              try {
+                const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                await page.click(pSelector, { timeout: timeoutMs });
+
+                if (command === 'clickAndType') {
+                  const text = String(body.text || '');
+                  await page.fill(pSelector, text, { timeout: timeoutMs });
+                }
+              } catch (e: any) {
+                const msg = String(e?.message || e);
+                if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                return jsonResponse(res, 500, { ok: false, error: msg });
+              }
+            } else if (command === 'type' || command === 'eval') {
+              const selector = body.selector;
+              if (command === 'type' && !selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              if (options.waitForSelector) {
+                const ok = await waitForSelector(options.waitForSelector, timeoutMs);
+                if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
+              }
+              try {
+                if (command === 'type') {
+                  const text = String(body.text || '');
+                  const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                  await page.fill(pSelector, text, { timeout: timeoutMs });
+                } else if (command === 'eval') {
+                  const rawEval = body.eval;
+                  if (rawEval === undefined || rawEval === null) return jsonResponse(res, 400, { ok: false, error: 'missing eval' });
+                  let exprStr: string = rawEval as any;
+                  if (typeof rawEval === 'string') {
+                    try { const parsed = JSON.parse(rawEval); if (typeof parsed === 'string') exprStr = parsed; } catch { }
+                  } else {
+                    exprStr = String(rawEval);
+                  }
+                  try {
+                    evalResult = await page.evaluate(exprStr);
+                  } catch (e: any) {
+                    const message = String(e?.message || e);
+                    return jsonResponse(res, 500, { ok: false, error: message });
+                  }
+                }
+              } catch (e: any) {
+                const msg = String(e?.message || e);
+                if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                return jsonResponse(res, 500, { ok: false, error: msg });
+              }
+            } else if (command === 'setCookie') {
+              const { name, value, domain, path, secure, httpOnly, sameSite, expires } = body;
+              if (!name || !value) return jsonResponse(res, 400, { ok: false, error: 'missing name or value' });
+              const cookie = {
+                name,
+                value,
+                domain: domain || '.x.com',
+                path: path || '/',
+                secure: !!secure,
+                httpOnly: !!httpOnly,
+                sameSite: (sameSite === 'Strict' ? 'Strict' : sameSite === 'None' ? 'None' : 'Lax') as any,
+                expires: expires ? Number(expires) : undefined
+              };
+              await page.context().addCookies([cookie]);
+              return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'getCookies' || command === 'get_cookies') {
+              const urls = body.urls || ['https://x.com'];
+              const cookies = await page.context().cookies(urls);
+              return jsonResponse(res, 200, { ok: true, result: cookies });
+            } else if (command === 'solve_captcha') {
+              const solveResult = await solveCaptcha(page, options);
+              if (solveResult.ok) {
+                return jsonResponse(res, 200, solveResult);
+              } else {
+                return jsonResponse(res, 500, solveResult);
+              }
+            } else if (command === 'setFileInput') {
+              const selector = body.selector;
+              const fileUrl = body.fileUrl;
+              const fileName = body.fileName || 'file.jpg';
+              if (!selector || !fileUrl) return jsonResponse(res, 400, { ok: false, error: 'missing selector or fileUrl' });
+              try {
+                const resp = await fetch(fileUrl);
+                const buffer = Buffer.from(await resp.arrayBuffer());
+                const filePath = path.join(os.tmpdir(), fileName);
+                await fsp.writeFile(filePath, buffer);
+                const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                await page.setInputFiles(pSelector, filePath);
+                return jsonResponse(res, 200, { ok: true });
+              } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+            } else if (command === 'getElementRect') {
+              const selector = body.selector;
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              try {
+                const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+                const rect = await page.evaluate((sel: string) => {
+                  const el = document.querySelector(sel);
+                  if (!el) return null;
+                  const r = el.getBoundingClientRect();
+                  return { x: r.left, y: r.top, width: r.width, height: r.height };
+                }, pSelector);
+                if (!rect) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
+                return jsonResponse(res, 200, { ok: true, rect });
+              } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+            } else if (command === 'mouseMove') {
+              const x = Number(body.x), y = Number(body.y);
+              if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
+              await page.mouse.move(x, y, { steps: Number(options.steps || 1) });
+              return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'mouseClick') {
+              const x = Number(body.x), y = Number(body.y);
+              if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
+              await page.mouse.click(x, y, { delay: Number(options.delayMs || 100) });
+              return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'humanClick') {
+              const selector = body.selector;
+              if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
+              const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
+              await page.click(pSelector, { timeout: timeoutMs });
+              return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'status' || command === 'refresh' || command === 'current_url') {
+              // No-op
+            } else {
+              return jsonResponse(res, 400, { ok: false, error: 'unsupported command' });
+            }
+
+            // post-collection
+            const urlNow = page.url();
+            let title = '';
+            try { title = await page.title(); } catch { }
+            let html: string | null = null;
+            if (options.returnHtml && options.returnHtml !== 'none') {
+              try {
+                html = await page.content();
+                if (options.returnHtml === 'trim' && html) html = html.slice(0, 64 * 1024);
+              } catch { }
+            }
+            // cookies
+            let cookies: any[] | null = null;
+            if (options.returnCookies) {
+              try { cookies = await page.context().cookies(); } catch { }
+            }
+            // screenshot
+            let shotPath: string | null = null;
+            if (options.screenshot) {
+              try {
+                const shotsDir = path.join(process.cwd(), 'shots');
+                if (!existsSync(shotsDir)) mkdirSync(shotsDir, { recursive: true });
+                const fp = path.join(shotsDir, `exec-${contextId}-${Date.now()}.png`);
+                await page.screenshot({ path: fp });
+                shotPath = fp;
+              } catch { }
+            }
+
+            const elapsed = Date.now() - tstart;
+            const out: any = { ok: true, command, navigationOccurred, url: urlNow, title, html, screenshotPath: shotPath, cookies, elapsedMs: elapsed };
+            if (typeof evalResult !== 'undefined') out.result = evalResult;
+            return jsonResponse(res, 200, out);
+          } catch (e: any) {
+            const msg = String(e?.message || e);
+            if (msg.toLowerCase().includes('container not found')) return jsonResponse(res, 404, { ok: false, error: 'Context not found' });
+            if (msg && msg.toLowerCase().includes('timeout')) return jsonResponse(res, 504, { ok: false, error: 'timeout' });
+            console.error(`[exportServer] [/internal/exec] [ERROR] command=${command} id=${contextId}`, e);
+            return jsonResponse(res, 500, { ok: false, error: msg });
+          } finally { locks.delete(contextId); }
+        } catch (e: any) {
+          console.error(`[exportServer] [/internal/exec] [FATAL]`, e);
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // List active containers endpoint
+      if (req.method === 'GET' && u.pathname === '/internal/containers/active') {
+        try {
+          const activeIds = Array.from(openedById.keys());
+          return jsonResponse(res, 200, { ok: true, activeIds });
         } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
-      } else if (command === 'navigate') {
-        const url = String(body.url || '');
-        if (!url) return jsonResponse(res, 400, { ok: false, error: 'missing url' });
-        if (navigationAlreadyDone) {
-          navigationOccurred = true;
-        } else {
+      }
+
+      // List containers endpoint
+      if (req.method === 'GET' && (u.pathname === '/internal/containers/list' || u.pathname === '/internal/containers')) {
+        try {
+          const list = DB.listContainers();
+          return jsonResponse(res, 200, { ok: true, containers: list });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+
+      if ((req.method === 'DELETE' || req.method === 'POST') && u.pathname === '/internal/export-restored/delete') {
+        // accept JSON body with path or query ?path=
+        let body = {} as any;
+        try { body = await parseBody(req); } catch { }
+        const p = body.path || u.searchParams.get('path');
+        if (!p) return jsonResponse(res, 400, { ok: false, error: 'missing path' });
+        try { rmSync(String(p), { recursive: true, force: true }); return jsonResponse(res, 200, { ok: true }); } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
+      }
+
+      // Create container endpoint
+      if (req.method === 'POST' && u.pathname === '/internal/containers/create') {
+        try {
+          const body = await parseBody(req);
+          const name = String(body && body.name || '').trim();
+          const proxy: ProxyConfig | null = body.proxy ? {
+            server: String(body.proxy.server || ''),
+            username: body.proxy.username ? String(body.proxy.username) : undefined,
+            password: body.proxy.password ? String(body.proxy.password) : undefined
+          } : null;
+
+          if (!name) return jsonResponse(res, 400, { ok: false, error: 'missing name' });
+          if (proxy && !proxy.server) return jsonResponse(res, 400, { ok: false, error: 'proxy.server is required when proxy is provided' });
+
+          const id = randomUUID();
+
+          // Consume quota from token before creating container (only if token exists)
           try {
-            const navTimeoutMs = Number(options.navigationTimeoutMs ?? timeoutMs);
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: navTimeoutMs });
-            if (options.waitForSelector) {
-              const ok = await waitForSelector(options.waitForSelector, timeoutMs);
-              if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
-            }
-            navigationOccurred = true;
-          } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
-        }
-      } else if (command === 'click' || command === 'clickAndType') {
-        const selector = body.selector;
-        if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-        if (options.waitForSelector) {
-          const ok = await waitForSelector(options.waitForSelector, timeoutMs);
-          if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
-        }
-        try {
-          const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
-          await page.click(pSelector, { timeout: timeoutMs });
+            const token = await getToken();
 
-          if (command === 'clickAndType') {
-            const text = String(body.text || '');
-            await page.fill(pSelector, text, { timeout: timeoutMs });
+            // If no token, skip quota check and allow creation
+            if (token) {
+              const deviceId = getOrCreateDeviceId();
+              const BASE_URL = getAuthApiBase();
+              const timeoutMs = getAuthTimeoutMs();
+
+              const ac = new AbortController();
+              const idt = setTimeout(() => ac.abort(), timeoutMs);
+              try {
+                const useResp = await (globalThis as any).fetch(
+                  (BASE_URL.replace(/\/$/, '')) + '/auth/use',
+                  {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId, count: 1 }),
+                    signal: ac.signal
+                  }
+                );
+                clearTimeout(idt);
+                if (!useResp.ok) {
+                  const errorCode = useResp.status === 409 ? 'QUOTA_EXCEEDED' : 'AUTH_FAILED';
+                  const errorMsg = useResp.status === 409 ? 'Quota exceeded' : 'Failed to consume quota';
+                  return jsonResponse(res, useResp.status === 409 ? 409 : 401, { ok: false, error: errorMsg, errorCode });
+                }
+              } catch (err: any) {
+                clearTimeout(idt);
+                if (err.name === 'AbortError') {
+                  return jsonResponse(res, 504, { ok: false, error: 'auth timeout' });
+                }
+                throw err;
+              }
+            }
+          } catch (err: any) {
+            const msg = String(err?.message || err);
+            return jsonResponse(res, 500, { ok: false, error: msg });
+          }
+
+          // Realistic GPU rendering strings to spoof SwiftShader
+          const gpus = [
+            { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+            { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+            { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' }
+          ];
+          const gpu = gpus[Math.floor(Math.random() * gpus.length)];
+
+          // Create container with fingerprint
+          const fp: Fingerprint = {
+            acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
+            locale: 'ja-JP',
+            timezone: 'Asia/Tokyo',
+            platform: 'Win32',
+            hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
+            deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
+            canvasNoise: true,
+            screenWidth: 2560,
+            screenHeight: 1440,
+            viewportWidth: 1280,
+            viewportHeight: 800,
+            colorDepth: 24,
+            maxTouchPoints: 0,
+            deviceScaleFactor: 1.0,
+            cookieEnabled: true,
+            connectionType: '4g',
+            batteryLevel: 1,
+            batteryCharging: true,
+            fakeIp: undefined,
+            webglVendor: gpu.vendor,
+            webglRenderer: gpu.renderer,
+          };
+          const blockImages = !!body.blockImages;
+          const c: Container = {
+            id,
+            name,
+            userDataDir: path.join(app.getPath('userData'), 'profiles', id),
+            partition: `persist:container-${id}`,
+            userAgent: undefined,
+            locale: 'ja-JP',
+            timezone: 'Asia/Tokyo',
+            fingerprint: fp,
+            proxy: proxy,
+            blockImages: blockImages,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            lastSessionId: null,
+            kameleoEnv: body.environment || {} // { deviceType, os, browser }
+          };
+          DB.upsertContainer(c);
+
+          // Open the container window
+          try {
+            await openContainerWindow(c, undefined, { restore: true, singleTab: true });
+          } catch (openErr: any) {
+            console.error('[exportServer] failed to open container window', openErr);
+            // Continue even if opening fails - container is created
+          }
+
+          return jsonResponse(res, 200, { ok: true, container: c });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Kameleo Status
+      if (req.method === 'GET' && u.pathname === '/internal/kameleo/status') {
+        try {
+          const status = await KameleoApi.getStatus();
+          return jsonResponse(res, 200, { ok: true, status });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // List Kameleo Profiles
+      if (req.method === 'GET' && u.pathname === '/internal/kameleo/profiles') {
+        try {
+          const profiles = await KameleoApi.listProfiles();
+          return jsonResponse(res, 200, { ok: true, profiles });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Attach Kameleo Profile
+      if (req.method === 'POST' && u.pathname.match(/\/internal\/containers\/([^/]+)\/attach/)) {
+        const match = u.pathname.match(/\/internal\/containers\/([^/]+)\/attach/);
+        const id = match![1];
+        try {
+          const body = await parseBody(req);
+          const profileId = body.profileId;
+          if (!profileId) return jsonResponse(res, 400, { ok: false, error: 'missing profileId' });
+
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          // Validation: Check if profile exists in Kameleo
+          try {
+            const profiles = await KameleoApi.listProfiles();
+            const p = profiles.find(x => x.id === profileId);
+            if (!p) {
+              return jsonResponse(res, 404, { ok: false, error: `Kameleo profile ${profileId} not found.` });
+            }
+
+            c.kameleoProfileId = profileId;
+            c.profileMode = 'attached';
+            c.updatedAt = Date.now();
+            c.kameleoProfileMetadata = {
+              name: p.name,
+              isCloud: p.isCloud,
+              tags: p.tags,
+              status: p.status
+            };
+
+            DB.upsertContainer(c);
+            return jsonResponse(res, 200, { ok: true, container: c, profileStatus: p.status });
+          } catch (me: any) {
+            return jsonResponse(res, 500, { ok: false, error: `Failed to validate Kameleo profile: ${me.message}` });
           }
         } catch (e: any) {
-          const msg = String(e?.message || e);
-          if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
-          return jsonResponse(res, 500, { ok: false, error: msg });
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
-      } else if (command === 'type' || command === 'eval') {
-        const selector = body.selector;
-        if (command === 'type' && !selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-        if (options.waitForSelector) {
-          const ok = await waitForSelector(options.waitForSelector, timeoutMs);
-          if (!ok) return jsonResponse(res, 504, { ok: false, error: 'timeout waiting for selector' });
-        }
+      }
+
+      // Detach Kameleo Profile
+      if (req.method === 'POST' && u.pathname.match(/\/internal\/containers\/([^/]+)\/detach/)) {
+        const match = u.pathname.match(/\/internal\/containers\/([^/]+)\/detach/);
+        const id = match![1];
         try {
-          if (command === 'type') {
-            const text = String(body.text || '');
-            const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
-            await page.fill(pSelector, text, { timeout: timeoutMs });
-          } else if (command === 'eval') {
-            const rawEval = body.eval;
-            if (rawEval === undefined || rawEval === null) return jsonResponse(res, 400, { ok: false, error: 'missing eval' });
-            let exprStr: string = rawEval as any;
-            if (typeof rawEval === 'string') {
-              try { const parsed = JSON.parse(rawEval); if (typeof parsed === 'string') exprStr = parsed; } catch { }
-            } else {
-              exprStr = String(rawEval);
-            }
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          c.kameleoProfileId = undefined;
+          c.profileMode = 'managed'; // Reset to managed
+          c.kameleoProfileMetadata = undefined;
+          c.updatedAt = Date.now();
+
+          DB.upsertContainer(c);
+          return jsonResponse(res, 200, { ok: true, container: c });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Delete container endpoint
+      if (req.method === 'POST' && u.pathname === '/internal/containers/delete') {
+        try {
+          const body = await parseBody(req);
+          const id = String(body && body.id || '').trim();
+          if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
+
+          const container = DB.getContainer(id);
+          if (!container) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          if (isContainerOpen(id)) {
             try {
-              evalResult = await page.evaluate(exprStr);
+              // Try to gently close it first
+              const { closeContainer } = await import('./containerManager');
+              closeContainer(id);
             } catch (e: any) {
-              const message = String(e?.message || e);
-              return jsonResponse(res, 500, { ok: false, error: message });
+              console.error('[exportServer] close error during delete', e);
             }
+          }
+
+          DB.asyncDeleteContainer(id);
+          const p = path.join(app.getPath('userData'), 'profiles', id);
+          try { rmSync(p, { recursive: true, force: true }); } catch { }
+
+          return jsonResponse(res, 200, { ok: true, deletedId: id });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Set proxy for container endpoint (繝励Ο繧ｭ繧ｷ螟画峩蟆ら畑API)
+      if (req.method === 'POST' && u.pathname === '/internal/containers/set-proxy') {
+        try {
+          const body = await parseBody(req);
+          const name = String(body && body.name || '').trim();
+          const id = String(body && body.id || '').trim();
+
+          if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
+
+          // Find container by name or id
+          const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
+          if (!container) {
+            return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+          }
+
+          // Parse proxy config
+          const proxy: ProxyConfig | null | undefined = body.proxy ? {
+            server: String(body.proxy.server || ''),
+            username: body.proxy.username ? String(body.proxy.username) : undefined,
+            password: body.proxy.password ? String(body.proxy.password) : undefined
+          } : (body.proxy === null ? null : undefined);
+
+          if (proxy && !proxy.server) {
+            return jsonResponse(res, 400, { ok: false, error: 'proxy.server is required when proxy is provided' });
+          }
+
+          // Update container with proxy only
+          const updated: Container = {
+            ...container,
+            proxy: proxy !== undefined ? proxy : container.proxy,
+            updatedAt: Date.now(),
+          };
+
+          DB.upsertContainer(updated);
+          console.log('[exportServer] set proxy for container', { containerId: container.id, containerName: container.name, hasProxy: !!proxy });
+
+          return jsonResponse(res, 200, { ok: true, container: updated });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Update container endpoint
+      if (req.method === 'POST' && u.pathname === '/internal/containers/update') {
+        try {
+          const body = await parseBody(req);
+          const name = String(body && body.name || '').trim();
+          const id = String(body && body.id || '').trim();
+
+          if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
+
+          // Find container by name or id
+          const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
+          if (!container) {
+            return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+          }
+
+          // Parse proxy config if provided (for backward compatibility, but prefer set-proxy endpoint)
+          const proxy: ProxyConfig | null | undefined = body.proxy ? {
+            server: String(body.proxy.server || ''),
+            username: body.proxy.username ? String(body.proxy.username) : undefined,
+            password: body.proxy.password ? String(body.proxy.password) : undefined
+          } : (body.proxy === null ? null : undefined);
+
+          // Update container
+          const updated: Container = {
+            ...container,
+            ...(body.name ? { name: String(body.name).trim() } : {}),
+            ...(proxy !== undefined ? { proxy } : {}),
+            updatedAt: Date.now(),
+          };
+
+          DB.upsertContainer(updated);
+
+          return jsonResponse(res, 200, { ok: true, container: updated });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Close container endpoint: idempotent
+      if (req.method === 'POST' && u.pathname === '/internal/export-restored/close') {
+        try {
+          const body = await parseBody(req);
+          const id = String(body && body.id || '');
+          if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+
+          // clear any active locks for this context to avoid deadlocks from long-running ops
+          try { locks.delete(id); } catch { }
+
+          // If not open, return idempotent response
+          if (!isContainerOpen(id)) return jsonResponse(res, 200, { ok: true, closed: false, message: 'not-open' });
+
+          const runId = (crypto && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+          const closedBy = req.headers['x-requested-by'] || null;
+          console.log('[exportServer] close requested', { id, runId, closedBy, time: new Date().toISOString() });
+
+          // attempt close
+          try {
+            const ok = await closeContainer(id);
+            if (!ok) {
+              console.error('[exportServer] closeContainer returned false for', id);
+              return jsonResponse(res, 500, { ok: false, error: 'failed-to-close' });
+            }
+            console.log('[exportServer] close completed', { id, runId, time: new Date().toISOString() });
+            return jsonResponse(res, 200, { ok: true, closed: true, message: 'closed' });
+          } catch (e: any) {
+            console.error('[exportServer] close error', e);
+            return jsonResponse(res, 500, { ok: false, error: 'internal' });
           }
         } catch (e: any) {
-          const msg = String(e?.message || e);
-          if (msg.includes('selector not found')) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
-          return jsonResponse(res, 500, { ok: false, error: msg });
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }
-      } else if (command === 'setCookie') {
-        const { name, value, domain, path, secure, httpOnly, sameSite, expires } = body;
-        if (!name || !value) return jsonResponse(res, 400, { ok: false, error: 'missing name or value' });
-        const cookie = {
-          name,
-          value,
-          domain: domain || '.x.com',
-          path: path || '/',
-          secure: !!secure,
-          httpOnly: !!httpOnly,
-          sameSite: (sameSite === 'Strict' ? 'Strict' : sameSite === 'None' ? 'None' : 'Lax') as any,
-          expires: expires ? Number(expires) : undefined
-        };
-        await page.context().addCookies([cookie]);
-        return jsonResponse(res, 200, { ok: true });
-      } else if (command === 'getCookies' || command === 'get_cookies') {
-        const urls = body.urls || ['https://x.com'];
-        const cookies = await page.context().cookies(urls);
-        return jsonResponse(res, 200, { ok: true, result: cookies });
-      } else if (command === 'solve_captcha') {
-        const solveResult = await solveCaptcha(page, options);
-        if (solveResult.ok) {
-          return jsonResponse(res, 200, solveResult);
-        } else {
-          return jsonResponse(res, 500, solveResult);
-        }
-      } else if (command === 'setFileInput') {
-        const selector = body.selector;
-        const fileUrl = body.fileUrl;
-        const fileName = body.fileName || 'file.jpg';
-        if (!selector || !fileUrl) return jsonResponse(res, 400, { ok: false, error: 'missing selector or fileUrl' });
-        try {
-          const resp = await fetch(fileUrl);
-          const buffer = Buffer.from(await resp.arrayBuffer());
-          const filePath = path.join(os.tmpdir(), fileName);
-          await fsp.writeFile(filePath, buffer);
-          const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
-          await page.setInputFiles(pSelector, filePath);
-          return jsonResponse(res, 200, { ok: true });
-        } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
-      } else if (command === 'getElementRect') {
-        const selector = body.selector;
-        if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-        try {
-          const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
-          const rect = await page.evaluate((sel: string) => {
-            const el = document.querySelector(sel);
-            if (!el) return null;
-            const r = el.getBoundingClientRect();
-            return { x: r.left, y: r.top, width: r.width, height: r.height };
-          }, pSelector);
-          if (!rect) return jsonResponse(res, 404, { ok: false, error: 'selector not found' });
-          return jsonResponse(res, 200, { ok: true, rect });
-        } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
-      } else if (command === 'mouseMove') {
-        const x = Number(body.x), y = Number(body.y);
-        if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
-        await page.mouse.move(x, y, { steps: Number(options.steps || 1) });
-        return jsonResponse(res, 200, { ok: true });
-      } else if (command === 'mouseClick') {
-        const x = Number(body.x), y = Number(body.y);
-        if (isNaN(x) || isNaN(y)) return jsonResponse(res, 400, { ok: false, error: 'invalid x or y' });
-        await page.mouse.click(x, y, { delay: Number(options.delayMs || 100) });
-        return jsonResponse(res, 200, { ok: true });
-      } else if (command === 'humanClick') {
-        const selector = body.selector;
-        if (!selector) return jsonResponse(res, 400, { ok: false, error: 'missing selector' });
-        const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
-        await page.click(pSelector, { timeout: timeoutMs });
-        return jsonResponse(res, 200, { ok: true });
-      } else if (command === 'status' || command === 'refresh' || command === 'current_url') {
-        // No-op
-      } else {
-        return jsonResponse(res, 400, { ok: false, error: 'unsupported command' });
       }
 
-      // post-collection
-      const urlNow = page.url();
-      let title = '';
-      try { title = await page.title(); } catch { }
-      let html: string | null = null;
-      if (options.returnHtml && options.returnHtml !== 'none') {
-        try {
-          html = await page.content();
-          if (options.returnHtml === 'trim' && html) html = html.slice(0, 64 * 1024);
-        } catch { }
-      }
-      // cookies
-      let cookies: any[] | null = null;
-      if (options.returnCookies) {
-        try { cookies = await page.context().cookies(); } catch { }
-      }
-      // screenshot
-      let shotPath: string | null = null;
-      if (options.screenshot) {
-        try {
-          const shotsDir = path.join(process.cwd(), 'shots');
-          if (!existsSync(shotsDir)) mkdirSync(shotsDir, { recursive: true });
-          const fp = path.join(shotsDir, `exec-${contextId}-${Date.now()}.png`);
-          await page.screenshot({ path: fp });
-          shotPath = fp;
-        } catch { }
-      }
-
-      const elapsed = Date.now() - tstart;
-      const out: any = { ok: true, command, navigationOccurred, url: urlNow, title, html, screenshotPath: shotPath, cookies, elapsedMs: elapsed };
-      if (typeof evalResult !== 'undefined') out.result = evalResult;
-      return jsonResponse(res, 200, out);
+      jsonResponse(res, 404, { ok: false, error: 'not found' });
     } catch (e: any) {
-      const msg = String(e?.message || e);
-      if (msg.toLowerCase().includes('container not found')) return jsonResponse(res, 404, { ok: false, error: 'Context not found' });
-      if (msg && msg.toLowerCase().includes('timeout')) return jsonResponse(res, 504, { ok: false, error: 'timeout' });
-      console.error(`[exportServer] [/internal/exec] [ERROR] command=${command} id=${contextId}`, e);
-      return jsonResponse(res, 500, { ok: false, error: msg });
-    } finally { locks.delete(contextId); }
-  } catch (e: any) {
-    console.error(`[exportServer] [/internal/exec] [FATAL]`, e);
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// List active containers endpoint
-if (req.method === 'GET' && u.pathname === '/internal/containers/active') {
-  try {
-    const activeIds = Array.from(openedById.keys());
-    return jsonResponse(res, 200, { ok: true, activeIds });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// List containers endpoint
-if (req.method === 'GET' && (u.pathname === '/internal/containers/list' || u.pathname === '/internal/containers')) {
-  try {
-    const list = DB.listContainers();
-    return jsonResponse(res, 200, { ok: true, containers: list });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-
-if ((req.method === 'DELETE' || req.method === 'POST') && u.pathname === '/internal/export-restored/delete') {
-  // accept JSON body with path or query ?path=
-  let body = {} as any;
-  try { body = await parseBody(req); } catch { }
-  const p = body.path || u.searchParams.get('path');
-  if (!p) return jsonResponse(res, 400, { ok: false, error: 'missing path' });
-  try { rmSync(String(p), { recursive: true, force: true }); return jsonResponse(res, 200, { ok: true }); } catch (e: any) { return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) }); }
-}
-
-// Create container endpoint
-if (req.method === 'POST' && u.pathname === '/internal/containers/create') {
-  try {
-    const body = await parseBody(req);
-    const name = String(body && body.name || '').trim();
-    const proxy: ProxyConfig | null = body.proxy ? {
-      server: String(body.proxy.server || ''),
-      username: body.proxy.username ? String(body.proxy.username) : undefined,
-      password: body.proxy.password ? String(body.proxy.password) : undefined
-    } : null;
-
-    if (!name) return jsonResponse(res, 400, { ok: false, error: 'missing name' });
-    if (proxy && !proxy.server) return jsonResponse(res, 400, { ok: false, error: 'proxy.server is required when proxy is provided' });
-
-    const id = randomUUID();
-
-    // Consume quota from token before creating container (only if token exists)
-    try {
-      const token = await getToken();
-
-      // If no token, skip quota check and allow creation
-      if (token) {
-        const deviceId = getOrCreateDeviceId();
-        const BASE_URL = getAuthApiBase();
-        const timeoutMs = getAuthTimeoutMs();
-
-        const ac = new AbortController();
-        const idt = setTimeout(() => ac.abort(), timeoutMs);
-        try {
-          const useResp = await (globalThis as any).fetch(
-            (BASE_URL.replace(/\/$/, '')) + '/auth/use',
-            {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ device_id: deviceId, count: 1 }),
-              signal: ac.signal
-            }
-          );
-          clearTimeout(idt);
-          if (!useResp.ok) {
-            const errorCode = useResp.status === 409 ? 'QUOTA_EXCEEDED' : 'AUTH_FAILED';
-            const errorMsg = useResp.status === 409 ? 'Quota exceeded' : 'Failed to consume quota';
-            return jsonResponse(res, useResp.status === 409 ? 409 : 401, { ok: false, error: errorMsg, errorCode });
-          }
-        } catch (err: any) {
-          clearTimeout(idt);
-          if (err.name === 'AbortError') {
-            return jsonResponse(res, 504, { ok: false, error: 'auth timeout' });
-          }
-          throw err;
-        }
-      }
-    } catch (err: any) {
-      const msg = String(err?.message || err);
-      return jsonResponse(res, 500, { ok: false, error: msg });
+      jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
     }
-
-    // Realistic GPU rendering strings to spoof SwiftShader
-    const gpus = [
-      { vendor: 'Google Inc. (Intel)', renderer: 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' },
-      { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
-      { vendor: 'Google Inc. (AMD)', renderer: 'ANGLE (AMD, AMD Radeon Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' }
-    ];
-    const gpu = gpus[Math.floor(Math.random() * gpus.length)];
-
-    // Create container with fingerprint
-    const fp: Fingerprint = {
-      acceptLanguage: 'ja,en-US;q=0.8,en;q=0.7',
-      locale: 'ja-JP',
-      timezone: 'Asia/Tokyo',
-      platform: 'Win32',
-      hardwareConcurrency: [4, 6, 8, 12][Math.floor(Math.random() * 4)],
-      deviceMemory: [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)],
-      canvasNoise: true,
-      screenWidth: 2560,
-      screenHeight: 1440,
-      viewportWidth: 1280,
-      viewportHeight: 800,
-      colorDepth: 24,
-      maxTouchPoints: 0,
-      deviceScaleFactor: 1.0,
-      cookieEnabled: true,
-      connectionType: '4g',
-      batteryLevel: 1,
-      batteryCharging: true,
-      fakeIp: undefined,
-      webglVendor: gpu.vendor,
-      webglRenderer: gpu.renderer,
-    };
-    const blockImages = !!body.blockImages;
-    const c: Container = {
-      id,
-      name,
-      userDataDir: path.join(app.getPath('userData'), 'profiles', id),
-      partition: `persist:container-${id}`,
-      userAgent: undefined,
-      locale: 'ja-JP',
-      timezone: 'Asia/Tokyo',
-      fingerprint: fp,
-      proxy: proxy,
-      blockImages: blockImages,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      lastSessionId: null,
-      kameleoEnv: body.environment || {} // { deviceType, os, browser }
-    };
-    DB.upsertContainer(c);
-
-    // Open the container window
-    try {
-      await openContainerWindow(c, undefined, { restore: true, singleTab: true });
-    } catch (openErr: any) {
-      console.error('[exportServer] failed to open container window', openErr);
-      // Continue even if opening fails - container is created
-    }
-
-    return jsonResponse(res, 200, { ok: true, container: c });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Kameleo Status
-if (req.method === 'GET' && u.pathname === '/internal/kameleo/status') {
-  try {
-    const status = await KameleoApi.getStatus();
-    return jsonResponse(res, 200, { ok: true, status });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// List Kameleo Profiles
-if (req.method === 'GET' && u.pathname === '/internal/kameleo/profiles') {
-  try {
-    const profiles = await KameleoApi.listProfiles();
-    return jsonResponse(res, 200, { ok: true, profiles });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Attach Kameleo Profile
-if (req.method === 'POST' && u.pathname.match(/\/internal\/containers\/([^/]+)\/attach/)) {
-  const match = u.pathname.match(/\/internal\/containers\/([^/]+)\/attach/);
-  const id = match![1];
-  try {
-    const body = await parseBody(req);
-    const profileId = body.profileId;
-    if (!profileId) return jsonResponse(res, 400, { ok: false, error: 'missing profileId' });
-
-    const c = DB.getContainer(id);
-    if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-
-    // Validation: Check if profile exists in Kameleo
-    try {
-      const profiles = await KameleoApi.listProfiles();
-      const p = profiles.find(x => x.id === profileId);
-      if (!p) {
-        return jsonResponse(res, 404, { ok: false, error: `Kameleo profile ${profileId} not found.` });
-      }
-
-      c.kameleoProfileId = profileId;
-      c.profileMode = 'attached';
-      c.updatedAt = Date.now();
-      c.kameleoProfileMetadata = {
-        name: p.name,
-        isCloud: p.isCloud,
-        tags: p.tags,
-        status: p.status
-      };
-
-      DB.upsertContainer(c);
-      return jsonResponse(res, 200, { ok: true, container: c, profileStatus: p.status });
-    } catch (me: any) {
-      return jsonResponse(res, 500, { ok: false, error: `Failed to validate Kameleo profile: ${me.message}` });
-    }
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Detach Kameleo Profile
-if (req.method === 'POST' && u.pathname.match(/\/internal\/containers\/([^/]+)\/detach/)) {
-  const match = u.pathname.match(/\/internal\/containers\/([^/]+)\/detach/);
-  const id = match![1];
-  try {
-    const c = DB.getContainer(id);
-    if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-
-    c.kameleoProfileId = undefined;
-    c.profileMode = 'managed'; // Reset to managed
-    c.kameleoProfileMetadata = undefined;
-    c.updatedAt = Date.now();
-
-    DB.upsertContainer(c);
-    return jsonResponse(res, 200, { ok: true, container: c });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Delete container endpoint
-if (req.method === 'POST' && u.pathname === '/internal/containers/delete') {
-  try {
-    const body = await parseBody(req);
-    const id = String(body && body.id || '').trim();
-    if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
-
-    const container = DB.getContainer(id);
-    if (!container) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-
-    if (isContainerOpen(id)) {
-      try {
-        // Try to gently close it first
-        const { closeContainer } = await import('./containerManager');
-        closeContainer(id);
-      } catch (e: any) {
-        console.error('[exportServer] close error during delete', e);
-      }
-    }
-
-    DB.asyncDeleteContainer(id);
-    const p = path.join(app.getPath('userData'), 'profiles', id);
-    try { rmSync(p, { recursive: true, force: true }); } catch { }
-
-    return jsonResponse(res, 200, { ok: true, deletedId: id });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Set proxy for container endpoint (プロキシ変更専用API)
-if (req.method === 'POST' && u.pathname === '/internal/containers/set-proxy') {
-  try {
-    const body = await parseBody(req);
-    const name = String(body && body.name || '').trim();
-    const id = String(body && body.id || '').trim();
-
-    if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
-
-    // Find container by name or id
-    const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
-    if (!container) {
-      return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-    }
-
-    // Parse proxy config
-    const proxy: ProxyConfig | null | undefined = body.proxy ? {
-      server: String(body.proxy.server || ''),
-      username: body.proxy.username ? String(body.proxy.username) : undefined,
-      password: body.proxy.password ? String(body.proxy.password) : undefined
-    } : (body.proxy === null ? null : undefined);
-
-    if (proxy && !proxy.server) {
-      return jsonResponse(res, 400, { ok: false, error: 'proxy.server is required when proxy is provided' });
-    }
-
-    // Update container with proxy only
-    const updated: Container = {
-      ...container,
-      proxy: proxy !== undefined ? proxy : container.proxy,
-      updatedAt: Date.now(),
-    };
-
-    DB.upsertContainer(updated);
-    console.log('[exportServer] set proxy for container', { containerId: container.id, containerName: container.name, hasProxy: !!proxy });
-
-    return jsonResponse(res, 200, { ok: true, container: updated });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Update container endpoint
-if (req.method === 'POST' && u.pathname === '/internal/containers/update') {
-  try {
-    const body = await parseBody(req);
-    const name = String(body && body.name || '').trim();
-    const id = String(body && body.id || '').trim();
-
-    if (!name && !id) return jsonResponse(res, 400, { ok: false, error: 'missing name or id' });
-
-    // Find container by name or id
-    const container = id ? DB.getContainer(id) : DB.getContainerByName(name);
-    if (!container) {
-      return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-    }
-
-    // Parse proxy config if provided (for backward compatibility, but prefer set-proxy endpoint)
-    const proxy: ProxyConfig | null | undefined = body.proxy ? {
-      server: String(body.proxy.server || ''),
-      username: body.proxy.username ? String(body.proxy.username) : undefined,
-      password: body.proxy.password ? String(body.proxy.password) : undefined
-    } : (body.proxy === null ? null : undefined);
-
-    // Update container
-    const updated: Container = {
-      ...container,
-      ...(body.name ? { name: String(body.name).trim() } : {}),
-      ...(proxy !== undefined ? { proxy } : {}),
-      updatedAt: Date.now(),
-    };
-
-    DB.upsertContainer(updated);
-
-    return jsonResponse(res, 200, { ok: true, container: updated });
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-// Close container endpoint: idempotent
-if (req.method === 'POST' && u.pathname === '/internal/export-restored/close') {
-  try {
-    const body = await parseBody(req);
-    const id = String(body && body.id || '');
-    if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
-    const c = DB.getContainer(id);
-    if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
-
-    // clear any active locks for this context to avoid deadlocks from long-running ops
-    try { locks.delete(id); } catch { }
-
-    // If not open, return idempotent response
-    if (!isContainerOpen(id)) return jsonResponse(res, 200, { ok: true, closed: false, message: 'not-open' });
-
-    const runId = (crypto && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : `${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
-    const closedBy = req.headers['x-requested-by'] || null;
-    console.log('[exportServer] close requested', { id, runId, closedBy, time: new Date().toISOString() });
-
-    // attempt close
-    try {
-      const ok = closeContainer(id);
-      if (!ok) {
-        console.error('[exportServer] closeContainer returned false for', id);
-        return jsonResponse(res, 500, { ok: false, error: 'internal' });
-      }
-      // wait for container to be fully removed
-      try {
-        const timeoutMs = Number(body && body.timeoutMs) || 30000;
-        await waitForContainerClosed(id, timeoutMs);
-      } catch (e: any) {
-        console.error('[exportServer] waitForContainerClosed error', e);
-        return jsonResponse(res, 500, { ok: false, error: 'internal' });
-      }
-      console.log('[exportServer] close completed', { id, runId, time: new Date().toISOString() });
-      return jsonResponse(res, 200, { ok: true, closed: true, message: 'closed' });
-    } catch (e: any) {
-      console.error('[exportServer] close error', e);
-      return jsonResponse(res, 500, { ok: false, error: 'internal' });
-    }
-  } catch (e: any) {
-    return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-  }
-}
-
-jsonResponse(res, 404, { ok: false, error: 'not found' });
-} catch (e: any) {
-  jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
-}
   });
-srv.listen(port, '127.0.0.1');
-console.log('[exportServer] listening on 127.0.0.1:' + port);
-return srv;
+  srv.listen(port, '127.0.0.1');
+  console.log('[exportServer] listening on 127.0.0.1:' + port);
+  return srv;
 }
 
 
