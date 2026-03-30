@@ -32,6 +32,10 @@ poc/logs/
 
 # OS
 .DS_Store
+# Windows NTFS Alternate Data Streams (Zone.Identifier metadata)
+# Git on Windows encodes the colon as U+F03A (PUA, EF 80 BA in UTF-8)
+*:Zone.Identifier
+*Zone.Identifier
 
 # Local tools (do not commit)
 tools/bfg*.jar
