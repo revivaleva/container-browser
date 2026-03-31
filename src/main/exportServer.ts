@@ -321,40 +321,63 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
               }
               
               // Handle X (Twitter) specific arkoseCallback
-              if (typeof window.arkoseCallback === 'function') {
-                window.arkoseCallback(token);
-                console.log('[exportServer] Called window.arkoseCallback');
-                return JSON.stringify({ path: 'window.arkoseCallback', tokenTargetCount, clickedVerify });
-              }
-              
-              const tryObjectCallbacks = (obj, path, depth = 0, seen = new WeakSet()) => {
-                if (!obj || (typeof obj !== 'object' && typeof obj !== 'function') || seen.has(obj) || depth > 4) return null;
-                seen.add(obj);
-                for (const [key, value] of Object.entries(obj)) {
-                  const nextPath = path ? path + '.' + key : key;
-                  if (typeof value === 'function' && /(arkose|captcha|token|verify|complete|success|callback)/i.test(key)) {
-                    try {
-                      value(token);
-                      return nextPath;
-                    } catch {}
-                  }
-                  const nested = tryObjectCallbacks(value, nextPath, depth + 1, seen);
-                  if (nested) return nested;
+              // 直接既知のコールバック名を試す（優先度順）
+              const knownCallbacks = [
+                'arkoseCallback',
+                'ArkoseCallback',
+                '__arkoseCallback',
+                'onArkoseComplete',
+                'captchaCallback',
+                'onCaptchaComplete',
+              ];
+              let callbackPath = null;
+              for (const name of knownCallbacks) {
+                if (typeof window[name] === 'function') {
+                  try {
+                    window[name](token);
+                    callbackPath = 'window.' + name;
+                    break;
+                  } catch {}
                 }
-                return null;
-              };
-
-              const callbackPath = tryObjectCallbacks(window, 'window');
-              if (callbackPath) {
-                return JSON.stringify({ path: callbackPath, tokenTargetCount, clickedVerify });
               }
 
+              // window オブジェクトを走査してArkose専用コールバックを探す
+              // ※ cancelIdleCallback / requestIdleCallback 等のブラウザ組み込みAPIを誤検知しないよう
+              //   キー名の条件を厳格化（単独で "callback" を含むものは除外）
+              if (!callbackPath) {
+                const BROWSER_BUILTINS = new Set([
+                  'cancelIdleCallback', 'requestIdleCallback', 'cancelAnimationFrame',
+                  'requestAnimationFrame', 'setImmediate', 'clearImmediate'
+                ]);
+                const tryObjectCallbacks = (obj, path, depth, seen) => {
+                  if (depth === undefined) depth = 0;
+                  if (seen === undefined) seen = new WeakSet();
+                  if (!obj || (typeof obj !== 'object' && typeof obj !== 'function') || seen.has(obj) || depth > 4) return null;
+                  seen.add(obj);
+                  for (const [key, value] of Object.entries(obj)) {
+                    if (BROWSER_BUILTINS.has(key)) continue;
+                    const nextPath = path ? path + '.' + key : key;
+                    if (typeof value === 'function' && /(arkose|captchaToken|onCaptcha|captchaCallback|tokenCallback|verifyCallback|onComplete|onSuccess|onVerify)/i.test(key)) {
+                      try {
+                        value(token);
+                        return nextPath;
+                      } catch {}
+                    }
+                    const nested = tryObjectCallbacks(value, nextPath, depth + 1, seen);
+                    if (nested) return nested;
+                  }
+                  return null;
+                };
+                callbackPath = tryObjectCallbacks(window, 'window', 0, new WeakSet());
+              }
+
+              // フォーム submit は callbackPath の有無によらず必ず試みる
               const activeForm = tokenTargets.map(el => el.form).find(Boolean);
               if (activeForm) {
                 try { activeForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
               }
 
-              return JSON.stringify({ path: 'funcaptcha-injected', tokenTargetCount, clickedVerify });
+              return JSON.stringify({ path: callbackPath || 'funcaptcha-injected', tokenTargetCount, clickedVerify });
             })(${JSON.stringify(token)});
           `;
         }
