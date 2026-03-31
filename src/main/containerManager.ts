@@ -1920,7 +1920,7 @@ export async function openContainerWindow(container: Container, startUrl?: strin
     console.log(`[main] [closed] Cleanup starting for ${container.id} (Session: ${sessionId})`);
     try {
       // 1. Kameleo Profile Stop (Highest Priority - stop before disconnect to ensure browser closure)
-      const shouldStop = container.profileMode === 'managed' || startedByThisProcess;
+      const shouldStop = true;
       if (shouldStop) {
         try {
           console.log(`[main] [closed] [1/3] Kameleo stop starting for ${kameleoProfileId}...`);

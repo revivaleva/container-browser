@@ -8,7 +8,7 @@ import { Buffer } from 'node:buffer';
 import process from 'node:process';
 const { app } = createRequire(import.meta.url)('electron');
 import { DB } from './db';
-import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed } from './containerManager';
+import { openContainerWindow, isContainerOpen, closeContainer, waitForContainerClosed, clearContainerCache } from './containerManager';
 import { getToken, getOrCreateDeviceId } from './tokenStore';
 import { openedById } from './containerState';
 import { getAuthApiBase, getAuthTimeoutMs, getTwoCaptchaApiKey } from './settings';
@@ -16,6 +16,7 @@ import setCookieParser from 'set-cookie-parser';
 import crypto, { randomUUID } from 'node:crypto';
 import type { Container, Fingerprint, ProxyConfig } from '../shared/types';
 import { KameleoApi } from './kameleoApi';
+import { PlaywrightService } from './playwrightService';
 import logger from '../shared/logger';
 
 type MediaSelectorRule = { selector: string; type: 'image' | 'video' };
@@ -78,51 +79,68 @@ async function waitForNavigationComplete(page: any, timeoutMs: number): Promise<
   }
 }
 
-function getPlaywrightPage(containerId: string) {
+async function getPlaywrightPage(containerId: string) {
   const entry = openedById.get(containerId);
-  return entry ? entry.playwrightPage : null;
+  if (!entry) return null;
+  try {
+    // 毎回コンテキストから最新のアクティブページを取得する（固定参照だと別タブになる場合があるため）
+    return await PlaywrightService.getPage(entry.kameleoProfileId);
+  } catch {
+    return entry.playwrightPage;
+  }
 }
 
-async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; token?: string; type?: string; action?: string; error?: string; errorDetail?: any }> {
+async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; token?: string; type?: string; action?: string; diagnostics?: any; error?: string; errorDetail?: any }> {
   const apiKey = getTwoCaptchaApiKey();
   if (!apiKey) return { ok: false, error: '2Captcha API key is not configured' };
 
   const timeoutMs = Number(options.timeoutMs || 90000);
   const pollingMs = Number(options.pollingMs || 5000);
+  const includePostState = options.includePostState !== false;
 
   // 1. Detection & Parameter Extraction
-  const extractionScript = `
-    (function() {
-      const result = { type: null, sitekey: null, action: null, pkey: null, surl: null, blob: null, enterprise: false };
-      
+  let info: any;
+  try {
+    info = await page.evaluate(() => {
+      const result: any = { type: null, sitekey: null, action: null, pkey: null, surl: null, blob: null, enterprise: false };
+
       // Try reCAPTCHA
       const recaptchaEl = document.querySelector('.g-recaptcha, [data-sitekey], [src*="google.com/recaptcha"], [src*="recaptcha.net/recaptcha"]');
       if (recaptchaEl) {
         result.type = 'recaptcha';
-        result.sitekey = recaptchaEl.getAttribute('data-sitekey') || 
-                         new URL(recaptchaEl.src || location.href).searchParams.get('k');
-        if (recaptchaEl.src && (recaptchaEl.src.includes('enterprise.js') || recaptchaEl.src.includes('/enterprise'))) {
+        result.sitekey = recaptchaEl.getAttribute('data-sitekey') ||
+                         new URL((recaptchaEl as HTMLScriptElement).src || location.href).searchParams.get('k');
+        if ((recaptchaEl as HTMLScriptElement).src && ((recaptchaEl as HTMLScriptElement).src.includes('enterprise.js') || (recaptchaEl as HTMLScriptElement).src.includes('/enterprise'))) {
           result.enterprise = true;
           result.type = 'recaptcha_enterprise';
         }
       }
-      
+
       // Try FunCaptcha
       const funEl = document.querySelector('[data-pkey], [src*="arkoselabs.com"], #fc-token');
       if (funEl) {
+        const rawSrc = funEl && typeof funEl.getAttribute === 'function'
+          ? (funEl.getAttribute('src') || '')
+          : '';
+        let pathPkey = null;
+        let originSurl = null;
+        try {
+          const u = new URL(rawSrc || location.href, location.href);
+          const pathMatch = u.pathname.match(/\/([0-9A-F-]{20,})\//i);
+          pathPkey = u.searchParams.get('pk') || (pathMatch ? pathMatch[1] : null);
+          originSurl = u.origin || null;
+        } catch {}
         result.type = 'funcaptcha';
-        result.pkey = funEl.getAttribute('data-pkey') || 
-                      document.querySelector('#fc-token')?.value?.match(/pk=([^&]+)/)?.[1];
-        result.surl = document.querySelector('#fc-token')?.value?.match(/surl=([^&]+)/)?.[1] || 'https://client-api.arkoselabs.com';
+        result.pkey = funEl.getAttribute('data-pkey') ||
+                      (document.querySelector('#fc-token') as HTMLInputElement)?.value?.match(/pk=([^&]+)/)?.[1] ||
+                      pathPkey;
+        result.surl = (document.querySelector('#fc-token') as HTMLInputElement)?.value?.match(/surl=([^&]+)/)?.[1] ||
+                      originSurl ||
+                      'https://client-api.arkoselabs.com';
       }
-      
-      return result;
-    })()
-  `;
 
-  let info: any;
-  try {
-    info = await page.evaluate(extractionScript);
+      return result;
+    });
   } catch (e: any) {
     return { ok: false, error: 'Failed to extract captcha info', errorDetail: e.message };
   }
@@ -133,6 +151,16 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
   const action = options.action || info.action;
   const surl = options.surl || info.surl;
   const blob = options.blob || info.blob;
+
+  console.log('[exportServer] solveCaptcha input', {
+    type,
+    pageUrl,
+    hasSitekey: !!sitekey,
+    hasAction: !!action,
+    hasSurl: !!surl,
+    hasBlob: !!blob,
+    blobLength: blob ? String(blob).length : 0
+  });
 
   if (!sitekey) return { ok: false, error: 'Captcha sitekey/publickey not found' };
 
@@ -159,11 +187,14 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
   if (action) params.action = action;
 
   try {
+    const requestParamsForLog = { ...params, key: apiKey ? `***${apiKey.slice(-4)}` : '' };
+    console.log('[exportServer] 2Captcha in.php request', requestParamsForLog);
     const inResp = await fetch('https://2captcha.com/in.php', {
       method: 'POST',
       body: new URLSearchParams(params)
     });
     const inResult: any = await inResp.json();
+    console.log('[exportServer] 2Captcha in.php response', inResult);
     if (inResult.status !== 1) {
       return { ok: false, error: '2Captcha request failed', errorDetail: inResult };
     }
@@ -176,6 +207,7 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
       await new Promise(r => setTimeout(r, pollingMs));
       const resResp = await fetch(`https://2captcha.com/res.php?key=${apiKey}&action=get&id=${requestId}&json=1`);
       const resResult: any = await resResp.json();
+      console.log('[exportServer] 2Captcha res.php response', resResult);
 
       if (resResult.status === 1) {
         const token = resResult.request;
@@ -219,12 +251,32 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
         } else if (type === 'funcaptcha') {
           injectionScript = `
             (async function(token) {
-              const el = document.getElementById('fc-token') || document.querySelector('#fc-token');
-              if (el) {
-                el.value = token;
+              const setNativeValue = (el, value) => {
+                if (!el) return false;
+                const proto = el.tagName === 'TEXTAREA'
+                  ? window.HTMLTextAreaElement.prototype
+                  : window.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (setter) setter.call(el, value);
+                else el.value = value;
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
-                console.log('[exportServer] Arkose token set to fc-token');
+                return true;
+              };
+
+              const tokenTargets = [
+                document.getElementById('fc-token'),
+                document.querySelector('#fc-token'),
+                document.querySelector('input[name="fc-token"]'),
+                document.querySelector('input[name="verification_string"]'),
+                document.querySelector('input[name="captcha_response"]'),
+                document.querySelector('input[name="arkoseToken"]'),
+                document.querySelector('textarea[name="fc-token"]')
+              ].filter(Boolean);
+
+              let tokenTargetCount = 0;
+              for (const el of tokenTargets) {
+                if (setNativeValue(el, token)) tokenTargetCount += 1;
               }
               
               // Define shadow-piercing helper
@@ -239,40 +291,146 @@ async function solveCaptcha(page: any, options: any): Promise<{ ok: boolean; tok
                 return null;
               };
 
-              // Try to click Verify button if it exists (X often requires this even after token injection)
-              const verifyBtn = findInShadows('button#home_children_button'); // Common Arkose button ID
-              if (verifyBtn) {
-                console.log('[exportServer] Clicking Arkose Verify button');
-                verifyBtn.click();
+              const clickCandidate = (el) => {
+                if (!el) return false;
+                try {
+                  el.click();
+                  return true;
+                } catch {}
+                return false;
+              };
+
+              // Try to click Verify / Continue / submit controls after injection
+              const verifyCandidates = [
+                findInShadows('button#home_children_button'),
+                findInShadows('button[data-theme]'),
+                document.querySelector('button#home_children_button'),
+                document.querySelector('input[type="submit"]'),
+                Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"]')).find(el => {
+                  const text = ((el.innerText || el.value || el.getAttribute('aria-label') || '') + '').trim();
+                  return /Verify|確認|Continue|続行|Start|始める|Unlock|ロック解除/i.test(text);
+                })
+              ].filter(Boolean);
+
+              let clickedVerify = false;
+              for (const candidate of verifyCandidates) {
+                if (clickCandidate(candidate)) {
+                  clickedVerify = true;
+                  break;
+                }
               }
               
               // Handle X (Twitter) specific arkoseCallback
               if (typeof window.arkoseCallback === 'function') {
                 window.arkoseCallback(token);
                 console.log('[exportServer] Called window.arkoseCallback');
-                return 'window.arkoseCallback';
+                return JSON.stringify({ path: 'window.arkoseCallback', tokenTargetCount, clickedVerify });
               }
               
-              // Fallback: search for any Arkose integration object that might have a callback
-              if (window.arkose && typeof window.arkose.run === 'function') {
-                // Potential integration point
+              const tryObjectCallbacks = (obj, path, depth = 0, seen = new WeakSet()) => {
+                if (!obj || (typeof obj !== 'object' && typeof obj !== 'function') || seen.has(obj) || depth > 4) return null;
+                seen.add(obj);
+                for (const [key, value] of Object.entries(obj)) {
+                  const nextPath = path ? path + '.' + key : key;
+                  if (typeof value === 'function' && /(arkose|captcha|token|verify|complete|success|callback)/i.test(key)) {
+                    try {
+                      value(token);
+                      return nextPath;
+                    } catch {}
+                  }
+                  const nested = tryObjectCallbacks(value, nextPath, depth + 1, seen);
+                  if (nested) return nested;
+                }
+                return null;
+              };
+
+              const callbackPath = tryObjectCallbacks(window, 'window');
+              if (callbackPath) {
+                return JSON.stringify({ path: callbackPath, tokenTargetCount, clickedVerify });
               }
 
-              return 'funcaptcha-injected';
+              const activeForm = tokenTargets.map(el => el.form).find(Boolean);
+              if (activeForm) {
+                try { activeForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); } catch {}
+              }
+
+              return JSON.stringify({ path: 'funcaptcha-injected', tokenTargetCount, clickedVerify });
             })(${JSON.stringify(token)});
           `;
         }
 
         const actionTaken = await page.evaluate(injectionScript);
+        console.log('[exportServer] captcha injection action', { type, actionTaken });
 
         // Wait for screen transition (optional but helpful for "confirm human")
         if (type === 'funcaptcha') {
-          const waitMsg = getLocale() === 'ja' ? '[exportServer] Arkose縺ｮ驕ｷ遘ｻ繧・遘帝俣蠕・ｩ溘＠縺ｦ縺・∪縺・..' : '[exportServer] Waiting 3s for Arkose transition...';
-          console.log(waitMsg);
-          await new Promise(r => setTimeout(r, 3000));
+          console.log('[exportServer] Waiting 5s for Arkose transition...');
+          await new Promise(r => setTimeout(r, 5000));
         }
 
-        return { ok: true, token, type, action: actionTaken };
+        let diagnostics: any = undefined;
+        if (includePostState) {
+          try {
+            diagnostics = await page.evaluate(() => {
+              const text = document.body ? document.body.innerText.slice(0, 400) : '';
+              const inputs = Array.from(document.querySelectorAll('input, textarea')).map((el: any) => {
+                const value = typeof el.value === 'string' ? el.value : '';
+                return {
+                  tag: el.tagName,
+                  id: el.id || null,
+                  name: el.getAttribute('name') || null,
+                  type: el.getAttribute('type') || null,
+                  hidden: !!(el.type === 'hidden' || el.getAttribute('type') === 'hidden'),
+                  valueLength: value.length,
+                  valuePreview: value ? value.slice(0, 80) : ''
+                };
+              });
+              const buttons = Array.from(document.querySelectorAll('button,[role="button"],input[type="submit"]')).map((el: any) => ({
+                tag: el.tagName,
+                id: el.id || null,
+                type: el.getAttribute('type') || null,
+                text: String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 120),
+                disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true')
+              }));
+              const iframes = Array.from(document.querySelectorAll('iframe')).map((el: any) => ({
+                id: el.id || null,
+                title: el.getAttribute('title') || null,
+                src: String(el.getAttribute('src') || '').slice(0, 200)
+              }));
+              const forms = Array.from(document.querySelectorAll('form')).map((form: any, index: number) => ({
+                index,
+                action: form.getAttribute('action') || null,
+                method: form.getAttribute('method') || null,
+                inputNames: Array.from(form.querySelectorAll('input,textarea')).map((el: any) => el.getAttribute('name') || el.id || el.tagName).slice(0, 20)
+              }));
+              return {
+                url: location.href,
+                text,
+                inputs,
+                buttons,
+                iframes,
+                forms,
+                globals: {
+                  hasArkoseCallback: typeof (window as any).arkoseCallback === 'function',
+                  hasArkose: !!(window as any).arkose,
+                  windowKeysSample: Object.keys(window).filter(k => /(arkose|captcha|verify|challenge)/i.test(k)).slice(0, 30)
+                }
+              };
+            });
+            console.log('[exportServer] captcha post-state', {
+              url: diagnostics?.url,
+              text: diagnostics?.text,
+              inputCount: diagnostics?.inputs?.length || 0,
+              buttonCount: diagnostics?.buttons?.length || 0,
+              iframeCount: diagnostics?.iframes?.length || 0
+            });
+          } catch (diagErr: any) {
+            diagnostics = { error: String(diagErr?.message || diagErr) };
+            console.log('[exportServer] captcha post-state error', diagnostics);
+          }
+        }
+
+        return { ok: true, token, type, action: actionTaken, diagnostics };
       }
 
       if (resResult.request !== 'CAPCHA_NOT_READY' && resResult.status === 0) {
@@ -581,7 +739,7 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
 
             const parsed = rawCookies.length ? setCookieParser.parse(rawCookies) : [];
             if (parsed.length > 0) {
-              const page = getPlaywrightPage(id);
+              const page = await getPlaywrightPage(id);
               if (page) {
                 const cookiesToSet = parsed.map((pc: any) => ({
                   name: pc.name,
@@ -689,8 +847,8 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
                 await openContainerWindow(c, undefined, { singleTab: true });
               }
             }
-            // get playwright page
-            const page = getPlaywrightPage(contextId);
+            // get playwright page (毎回コンテキストから最新ページを取得)
+            const page = await getPlaywrightPage(contextId);
             if (!page) return jsonResponse(res, 404, { ok: false, error: 'no active playwright page' });
 
             // helper: wait for selector (Playwright style)
@@ -873,6 +1031,107 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
               const pSelector = selector.startsWith('xpath:') ? `xpath=${selector.slice(6)}` : selector;
               await page.click(pSelector, { timeout: timeoutMs });
               return jsonResponse(res, 200, { ok: true });
+            } else if (command === 'cloudflareClick') {
+              // Cloudflare Turnstile チェックボックス向け人間的クリック
+              // - クリック目標X: iframe 左端から 1/10〜1/3 の間でランダム
+              // - クリック目標Y: iframe 縦幅の中央 1/3（上1/3〜下2/3）の間でランダム
+              // - ベジェ曲線 + ease-in-out 速度変化 + 微小ジッターで移動
+              // - mousedown → ランダム遅延 → mouseup で自然なクリック
+              const cfSteps = Math.max(20, Number(options.steps || 35));
+              const cfJitter = Number(options.jitter ?? 2);
+
+              // iframe 自動検出: 明示セレクタ優先、なければ複数パターンで最大5秒リトライ
+              const cfCandidates: string[] = [
+                ...(body.selector ? [body.selector] : []),
+                'iframe[id^="cf-chl-widget"]',
+                '#AOzYg6 iframe',
+                'iframe[src*="challenges.cloudflare.com"]',
+                'iframe[src*="turnstile"]',
+                'iframe[title*="Cloudflare"]',
+                'iframe[title*="cloudflare"]',
+              ];
+              let cfElement: any = null;
+              let cfBox: any = null;
+              for (let retry = 0; retry < 10; retry++) {
+                for (const sel of cfCandidates) {
+                  const psel = sel.startsWith('xpath:') ? `xpath=${sel.slice(6)}` : sel;
+                  const el = await page.$(psel).catch(() => null);
+                  if (el) {
+                    const box = await el.boundingBox().catch(() => null);
+                    if (box && box.width > 0 && box.height > 0) {
+                      cfElement = el; cfBox = box; break;
+                    }
+                  }
+                }
+                if (cfElement) break;
+                await new Promise(r => setTimeout(r, 500));
+              }
+              // iframeが見つからない場合は #AOzYg6 div（Turnstileコンテナ）を直接使う
+              if (!cfElement || !cfBox) {
+                for (let retry = 0; retry < 10; retry++) {
+                  const el = await page.$('#AOzYg6').catch(() => null);
+                  if (el) {
+                    const box = await el.boundingBox().catch(() => null);
+                    if (box && box.width > 0 && box.height > 0) {
+                      cfElement = el; cfBox = box; break;
+                    }
+                  }
+                  await new Promise(r => setTimeout(r, 500));
+                }
+              }
+              if (!cfElement || !cfBox) return jsonResponse(res, 404, { ok: false, error: 'cloudflareClick: element not found' });
+
+              // クリック目標座標
+              // iframeの場合: X は左端から 1/10〜1/3（チェックボックスエリア）
+              // #AOzYg6 divの場合: X は左端から 2〜6%（チェックボックスは左端付近）
+              const isWide = cfBox.width > 200; // divは幅広、iframeは小さい
+              const cfTargetX = isWide
+                ? cfBox.x + cfBox.width  * (0.02 + Math.random() * 0.04)  // 2〜6%: チェックボックス位置
+                : cfBox.x + cfBox.width  * (0.1  + Math.random() * (1/3 - 0.1));
+              const cfTargetY = cfBox.y + cfBox.height * (1/3 + Math.random() * (1/3));
+
+              // 開始座標: ビューポートサイズを取得して画面内のランダムな点から開始
+              const cfViewport = page.viewportSize() || { width: 1280, height: 800 };
+              const cfStartX = cfViewport.width  * (0.1 + Math.random() * 0.5);
+              const cfStartY = cfViewport.height * (0.5 + Math.random() * 0.4);
+
+              // ベジェ曲線パスを生成（既存関数を使用）
+              const cfPath = generateBezierPath(
+                { x: cfStartX, y: cfStartY },
+                { x: cfTargetX, y: cfTargetY },
+                cfSteps
+              );
+
+              // 開始位置へワープ（最初の1点だけ即時移動）
+              await page.mouse.move(cfPath[0].x, cfPath[0].y);
+
+              // ease-in-out でパスを辿る（各ステップ間の待機時間を変化させる）
+              for (let i = 1; i < cfPath.length; i++) {
+                const t = i / (cfPath.length - 1);
+                // ease-in-out: 0→1 の中間が最速、両端が遅い
+                const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+                const stepDelay = Math.round(3 + (1 - ease) * 14); // 3ms〜17ms
+
+                // 微小ジッター（人間の手ブレ）
+                const jx = cfPath[i].x + (Math.random() * 2 - 1) * cfJitter;
+                const jy = cfPath[i].y + (Math.random() * 2 - 1) * cfJitter;
+                await page.mouse.move(jx, jy);
+                await new Promise(r => setTimeout(r, stepDelay));
+              }
+
+              // 目標座標へ正確に移動（最終点のジッターを補正）
+              await page.mouse.move(cfTargetX, cfTargetY);
+              await new Promise(r => setTimeout(r, 40 + Math.random() * 60)); // クリック前の微停止
+
+              // mousedown → ランダム押下時間 → mouseup
+              await page.mouse.down();
+              await new Promise(r => setTimeout(r, 80 + Math.random() * 80)); // 80〜160ms
+              await page.mouse.up();
+
+              // クリック後の待機（DOM 更新・遷移確認）
+              await new Promise(r => setTimeout(r, 400 + Math.random() * 400)); // 400〜800ms
+
+              return jsonResponse(res, 200, { ok: true, clickX: Math.round(cfTargetX), clickY: Math.round(cfTargetY) });
             } else if (command === 'status' || command === 'refresh' || command === 'current_url') {
               // No-op
             } else {
@@ -1261,6 +1520,38 @@ export function startExportServer(port = Number(process.env.CONTAINER_EXPORT_POR
           DB.upsertContainer(updated);
 
           return jsonResponse(res, 200, { ok: true, container: updated });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Clear container cache (HTTP cache + ServiceWorker cache / CacheStorage)
+      if (req.method === 'POST' && u.pathname === '/internal/containers/cache/clear') {
+        try {
+          const body = await parseBody(req);
+          const id = String(body && body.id || '');
+          if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
+          const c = DB.getContainer(id);
+          if (!c) return jsonResponse(res, 404, { ok: false, error: 'container not found' });
+          const ok = clearContainerCache(id);
+          if (!ok) return jsonResponse(res, 500, { ok: false, error: 'cache clear failed' });
+          return jsonResponse(res, 200, { ok: true, message: 'cache cleared' });
+        } catch (e: any) {
+          return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
+        }
+      }
+
+      // Activate (focus/restore/bring-to-front) container window
+      if (req.method === 'POST' && u.pathname === '/internal/containers/activate') {
+        try {
+          const body = await parseBody(req);
+          const id = String(body && body.id || '');
+          if (!id) return jsonResponse(res, 400, { ok: false, error: 'missing id' });
+          const entry = openedById.get(id);
+          if (!entry) return jsonResponse(res, 200, { ok: false, activated: false, error: 'not-open' });
+          // Kameleoモードではコンテナシェルは非表示のまま維持する
+          // show()/restore() は呼ばない（コンテナシェルウィンドウが出てしまうため）
+          return jsonResponse(res, 200, { ok: true, activated: true, message: 'focused' });
         } catch (e: any) {
           return jsonResponse(res, 500, { ok: false, error: String(e?.message || e) });
         }

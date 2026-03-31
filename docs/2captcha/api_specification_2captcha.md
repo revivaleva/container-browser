@@ -31,6 +31,7 @@
 | `blob` | string | `null` | FunCaptcha 用の `data[blob]` パラメータ |
 | `callbackName` | string | `null` | 注入後に実行するグローバル関数名（自動抽出に失敗する場合の予備） |
 | `timeoutMs` | number | `90000` | 2Captcha への依頼から完了までのタイムアウト時間（推奨: 90s以上） |
+| `includePostState` | boolean | `true` | 成功時に注入後の URL / input / button / iframe 診断情報を返す |
 
 ## レスポンス形式
 

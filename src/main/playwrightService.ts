@@ -38,7 +38,12 @@ export class PlaywrightService {
         if (pages.length === 0) {
             return await context.newPage();
         }
-        return pages[0];
+        // chrome:// / about: の内部ページを除いた最後のページを返す
+        const realPages = pages.filter(p => {
+            const url = p.url();
+            return !url.startsWith('chrome://') && !url.startsWith('about:') && url !== '';
+        });
+        return realPages[realPages.length - 1] ?? pages[pages.length - 1];
     }
 
     static async disconnect(profileId: string) {

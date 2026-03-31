@@ -33,6 +33,7 @@ import { registerGeneralIpcHandlers } from './ipc';
 import { loadConfig, getExportSettings, setExportSettings, getAuthApiBase, getAuthTimeoutMs, getAuthSettings, setAuthSettings, getGraphicsSettings, setGraphicsSettings } from './settings';
 import { registerCustomProtocol } from './protocol';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import type { Container, Fingerprint } from '../shared/types';
 import logger from '../shared/logger';
 import { saveToken, getToken, clearToken, getOrCreateDeviceId } from './tokenStore';
@@ -640,6 +641,51 @@ async function handleArgv(argv: string[]) {
   } catch { }
 }
 
+const KAMELEO_EXE = 'C:\\Users\\revival\\AppData\\Local\\Programs\\Kameleo\\Kameleo.exe';
+
+async function ensureKameleoRunning(): Promise<void> {
+  // Kameleo API が応答するか確認
+  const isAlive = await new Promise<boolean>((resolve) => {
+    const req = net.request({ method: 'GET', url: 'http://localhost:5050/profiles' });
+    req.on('response', () => resolve(true));
+    req.on('error', () => resolve(false));
+    const t = setTimeout(() => { resolve(false); req.abort(); }, 3000);
+    req.on('response', () => clearTimeout(t));
+    req.on('error', () => clearTimeout(t));
+    req.end();
+  });
+
+  if (isAlive) {
+    console.log('[main] [kameleo] already running');
+    return;
+  }
+
+  console.log('[main] [kameleo] not running, launching:', KAMELEO_EXE);
+  const child = spawn(KAMELEO_EXE, [], { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  // 起動を待つ（最大30秒、1秒ごとにポーリング）
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    const ok = await new Promise<boolean>((resolve) => {
+      const req = net.request({ method: 'GET', url: 'http://localhost:5050/profiles' });
+      req.on('response', () => resolve(true));
+      req.on('error', () => resolve(false));
+      const t = setTimeout(() => { resolve(false); req.abort(); }, 2000);
+      req.on('response', () => clearTimeout(t));
+      req.on('error', () => clearTimeout(t));
+      req.end();
+    });
+    if (ok) {
+      console.log(`[main] [kameleo] started successfully (attempt ${i + 1})`);
+      return;
+    }
+    console.log(`[main] [kameleo] waiting for startup... (${i + 1}/30)`);
+  }
+
+  console.warn('[main] [kameleo] timed out waiting for startup after 30s');
+}
+
 if (app && !(global as any)._appReadyRegistered) {
   (global as any)._appReadyRegistered = true;
   app.whenReady().then(async () => {
@@ -657,6 +703,9 @@ if (app && !(global as any)._appReadyRegistered) {
 
     // 起動時に不要なフォルダ（削除済みコンテナの残りカスや古いバックアップ）をクリーンアップ
     cleanupOrphans().catch(err => console.error('[main] cleanupOrphans failed', err));
+
+    // Kameleo が起動していなければ自動起動
+    await ensureKameleoRunning();
 
     // 起動時にKameleoプロファイルを強制同期
     syncKameleoProfiles().then(res => {
